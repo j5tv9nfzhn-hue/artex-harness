@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>artex-harness · console</title>
+<link rel="stylesheet" href="/console/app.css" />
+</head>
+<body>
+<!-- Login gate: the console is a same-origin client, so it relies on the
+     artex_token cookie the backend already sets (no token juggling in JS). -->
+<div id="gate" class="gate" hidden>
+  <form id="gate-form" class="gate-card">
+    <h1>artex-harness</h1>
+    <p class="dim" id="gate-hint">输入管理密码进入控制台</p>
+    <input id="gate-pass" type="password" autocomplete="current-password" placeholder="密码" />
+    <button type="submit">进入</button>
+    <p class="err" id="gate-err" hidden></p>
+  </form>
+</div>
+
+<div id="app" class="app" hidden>
+  <aside class="rail">
+    <div class="rail-head">
+      <span class="brand">artex<span class="brand-x">·</span>harness</span>
+      <button id="btn-refresh" class="icon" title="刷新任务列表">⟳</button>
+    </div>
+    <div class="rail-title">任务</div>
+    <ul id="task-list" class="task-list"></ul>
+    <div class="rail-foot">
+      <button id="btn-pause-all" class="danger sm">全局急停</button>
+      <span class="dim xs" id="rail-stat"></span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-id">
+        <span class="dim xs">task</span>
+        <strong id="task-goal">未选择任务</strong>
+      </div>
+      <div class="topbar-meta">
+        <span class="pill" id="pill-status">—</span>
+        <span class="pill mono" id="pill-rev">rev —</span>
+        <span class="pill mono" id="pill-live">● 未连接</span>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-replan" class="primary sm">立即重规划</button>
+        <button id="btn-pause" class="sm">暂停</button>
+        <button id="btn-resume" class="sm">恢复</button>
+      </div>
+      <nav class="tabs">
+        <button data-tab="run" class="tab active">Run</button>
+        <button data-tab="plan" class="tab">Plan</button>
+      </nav>
+    </header>
+
+    <!-- ── Run: live envelope stream grouped by Turn ─────────────────────── -->
+    <section id="tab-run" class="pane">
+      <div class="run-grid">
+        <div id="stream" class="stream">
+          <div class="empty" id="stream-empty">选择一个任务后，这里显示实时事件流（按轮次分组）。</div>
+        </div>
+
+        <!-- Intervention dock: context-sensitive to the selected intent. -->
+        <aside class="dock">
+          <div class="dock-head">
+            <span class="dock-title">干预</span>
+            <button id="btn-dock-close" class="icon sm" title="清除选择">×</button>
+          </div>
+          <div id="dock-body" class="dock-body">
+            <p class="dim xs">在事件流或 Plan 里点一条意图，即可在这里纠偏 / 停止 / 编辑。</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ── Plan: the frontier, editable and reorderable ───────────────────── -->
+    <section id="tab-plan" class="pane" hidden>
+      <div class="plan-head">
+        <span class="dim xs">frontier（worker 按此顺序领取；priority DESC, id ASC）</span>
+        <div class="plan-actions">
+          <button id="btn-order-save" class="primary sm" disabled>保存顺序</button>
+          <button id="btn-plan-refresh" class="sm">刷新</button>
+        </div>
+      </div>
+      <table class="plan-table">
+        <thead>
+          <tr><th style="width:52px">序</th><th style="width:56px">rev</th><th>意图</th>
+              <th style="width:84px">优先级</th><th style="width:88px">状态</th>
+              <th style="width:150px">操作</th></tr>
+        </thead>
+        <tbody id="plan-body"></tbody>
+      </table>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/console/app.js"></script>
+</body>
+</html>

@@ -785,6 +785,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/thread", s.harnessThread)
 	mux.HandleFunc("GET /api/harness/revisions", s.harnessRevisions)
 	mux.HandleFunc("GET /api/harness/stream", s.harnessStream)
+
+	// 干预原语（S2）：把上游只存在于"模型工具"里的能力暴露成确定性 API。
+	// 只增加人的杠杆，不改变 agent 默认行为，也不新增任何门禁（见 ADR-0003）。
+	mux.HandleFunc("GET /api/harness/interventions", s.interventionsIndex)
+	mux.HandleFunc("POST /api/tasks/pause-all", s.intervenePauseAll)
+	mux.HandleFunc("PATCH /api/tasks/{id}/intents/{iid}", s.interveneEditIntent)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/steer", s.interveneSteer)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/kill", s.interveneKill)
+	mux.HandleFunc("POST /api/tasks/{id}/frontier/order", s.interveneOrder)
+	mux.HandleFunc("POST /api/tasks/{id}/replan", s.interveneReplan)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
@@ -951,6 +961,13 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
+	// harness 控制台（S2）：零构建静态应用，无条件内嵌 → 裸机单二进制自带 UI。
+	// 挂在 root 而不是 mux 上：mux 只被挂到 /api/，挂在上面会 404。
+	// 与上游前端一样公开（壳里没有数据，所有数据都走 /api 的 JWT 校验）。
+	root.Handle("GET /console/", s.consoleHandler())
+	root.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console/", http.StatusFound)
+	})
 	root.Handle("/", s.webuiHandler())
 	return root
 }
