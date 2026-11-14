@@ -18,7 +18,7 @@ type DirectSourceStore struct {
 // a source task is deleted, and inherited context must not retain stale rows.
 // Sources of a source are never expanded.
 func (s *ExplorationStore) DirectSourceStores() ([]DirectSourceStore, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT source.id, source.exploration_id, source.description, source.goal, source.status
 FROM tasks owner
 JOIN task_relations relation ON relation.task_id=owner.id
@@ -44,7 +44,7 @@ ORDER BY relation.created_at, source.id`, s.expID)
 // directly in tests or maintenance code have no task and return zero.
 func (s *ExplorationStore) TaskID() (int64, error) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL`, s.expID).Scan(&id)
+	err := s.q().QueryRow(`SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL`, s.expID).Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, nil

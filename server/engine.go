@@ -13,6 +13,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/harness/protocol"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -151,6 +152,14 @@ type Engine struct {
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness func() bool
+
+	// harness protocol state (S1). turn holds the CURRENT Turn per task, so every
+	// activity emitted inside a round can be stamped with that round's revision
+	// without threading the revision through every call site. itemSeq numbers the
+	// items inside the current turn so a client can order items sharing a revision.
+	turnMu  sync.Mutex
+	turn    map[string]protocol.Turn
+	itemSeq map[string]int
 }
 
 type taskRuntime struct {
@@ -390,6 +399,7 @@ func NewEngine(m *Manager) *Engine {
 	return &Engine{m: m, debounce: 800 * time.Millisecond, bc: NewBroadcaster(),
 		execCancel: map[string]context.CancelCauseFunc{}, execCtx: map[string]context.Context{},
 		work: map[int64]*workExecution{}, steerBox: map[int64][]string{},
+		turn: map[string]protocol.Turn{}, itemSeq: map[string]int{},
 		runtimes: map[string]*taskRuntime{}}
 }
 
@@ -669,6 +679,7 @@ func (e *Engine) emitActivity(t *Task, r db.Activity) db.Activity {
 		r.CreatedAt = time.Now()
 	}
 	e.bc.Publish(t.ID, r)
+	e.publishEnvelope(t, r) // S1: same event on the harness protocol stream
 	e.touch(t.ID)
 	return r
 }
@@ -870,8 +881,13 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
 		// round marker: each Plan() is one planner round; emit a boundary so the
 		// UI can separate rounds in the transcript (kind='round').
-		e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-			Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
+		// S1: the same moment opens a harness Turn, so the round marker, the live
+		// envelope stream and the replay all agree on where a round begins and
+		// which revision its items belong to.
+		roundNo := e.nextPlannerRound(t.ID)
+		roundSummary := fmt.Sprintf("第 %d 轮规划", roundNo)
+		e.OpenTurn(t, db.TurnPlanner, fmt.Sprintf("planner#%d", roundNo), roundSummary)
+		e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round", Summary: roundSummary})
 		// what fired this round (worker done / finding; may be several — debounce
 		// coalesces a burst; empty for time/heartbeat wakes).
 		triggers := t.drainTriggers()
@@ -1003,6 +1019,9 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		emit(a)
 	}
 	label := fmt.Sprintf("%s · #%d", name, iid)
+	// S1: one work run == one harness Turn. Opened before the run so every item
+	// it emits (tool_use/tool_result/text) carries this revision.
+	e.OpenTurn(t, db.TurnWork, fmt.Sprintf("work#%d", iid), label)
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	// nudges 有意建在 model_error 重跑循环之外:空转续跑的上限是「这条意图」的总量，
 	// 重跑一轮不该把额度清零重来。

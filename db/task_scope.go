@@ -233,7 +233,7 @@ func (s *AssetStore) DeleteTaskScope(taskID, scopeID int64) (bool, error) {
 
 // ListTaskScope returns all scope rows for a task.
 func (s *AssetStore) ListTaskScope(taskID int64) ([]TaskScope, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT ts.id, ts.kind, COALESCE(ts.company_id,0), COALESCE(c.name,''), COALESCE(ts.domain,''),
        COALESCE(ts.net::text,''), COALESCE(ts.value,''), ts.source, COALESCE(ts.reason,'')
 FROM task_scope ts
@@ -293,7 +293,7 @@ func (s *AssetStore) CoverageEnabled(taskID int64) bool {
 		return true
 	}
 	var enabled bool
-	if err := s.db.QueryRow(`SELECT COALESCE(coverage_enabled,true) FROM tasks WHERE id=$1`, taskID).Scan(&enabled); err != nil {
+	if err := s.q().QueryRow(`SELECT COALESCE(coverage_enabled,true) FROM tasks WHERE id=$1`, taskID).Scan(&enabled); err != nil {
 		return true
 	}
 	return enabled
@@ -327,8 +327,8 @@ tested AS (
 // task_scope + assets; expID indexes the fact anchors. Reference figure only.
 func (s *AssetStore) TaskCoverage(taskID, expID int64) (*Coverage, error) {
 	cov := &Coverage{ByType: []CoverageByType{}}
-	_ = s.db.QueryRow(`SELECT count(*) FROM task_scope WHERE task_id=$1`, taskID).Scan(&cov.ScopeRows)
-	rows, err := s.db.Query(`WITH `+covTargetCTE+`
+	_ = s.q().QueryRow(`SELECT count(*) FROM task_scope WHERE task_id=$1`, taskID).Scan(&cov.ScopeRows)
+	rows, err := s.q().Query(`WITH `+covTargetCTE+`
 SELECT t.type, count(*) AS total,
        count(*) FILTER (WHERE t.id IN (SELECT asset_id FROM tested)) AS tested
 FROM target t GROUP BY t.type ORDER BY t.type`, taskID, expID)
@@ -425,7 +425,7 @@ func (s *AssetStore) BuildCoverageGraph(taskID, _ int64) (*CoverageGraphData, er
 	if taskID <= 0 {
 		return g, nil
 	}
-	rows, err := s.db.Query(`WITH `+contextCoverageCTE+`
+	rows, err := s.q().Query(`WITH `+contextCoverageCTE+`
 SELECT a.id, a.type, COALESCE(a.company_id,0),
        COALESCE(a.domain,''), COALESCE(a.root_domain,''), COALESCE(a.ip,''),
        COALESCE(a.url,''), COALESCE(a.port,0), COALESCE(a.service_type,''),
@@ -510,7 +510,7 @@ ORDER BY a.id`, taskID)
 	}
 	for root := range missingRoots {
 		var id, companyID int64
-		err := s.db.QueryRow(`SELECT id, COALESCE(company_id,0) FROM assets
+		err := s.q().QueryRow(`SELECT id, COALESCE(company_id,0) FROM assets
 WHERE type='root_domain' AND domain=$1 LIMIT 1`, root).Scan(&id, &companyID)
 		var node CoverageGraphNode
 		if err == nil && id > 0 {
@@ -533,7 +533,7 @@ WHERE type='root_domain' AND domain=$1 LIMIT 1`, root).Scan(&id, &companyID)
 			continue
 		}
 		var name string
-		if err := s.db.QueryRow(`SELECT name FROM companies WHERE id=$1`, id).Scan(&name); err != nil {
+		if err := s.q().QueryRow(`SELECT name FROM companies WHERE id=$1`, id).Scan(&name); err != nil {
 			continue
 		}
 		add(CoverageGraphNode{Key: key, Kind: "company", CompanyID: id,
@@ -619,12 +619,12 @@ func (s *AssetStore) ListUntestedAssets(taskID, expID int64, typ string, limit, 
 		args = append(args, typ)
 	}
 	var total int
-	_ = s.db.QueryRow(`WITH `+covTargetCTE+`
+	_ = s.q().QueryRow(`WITH `+covTargetCTE+`
 SELECT count(*) FROM target t WHERE t.id NOT IN (SELECT asset_id FROM tested)`+typeFilter, args...).Scan(&total)
 	pageArgs := append(append([]any{}, args...), limit, offset)
 	limPos := strconv.Itoa(len(args) + 1)
 	offPos := strconv.Itoa(len(args) + 2)
-	rows, err := s.db.Query(`WITH `+covTargetCTE+`
+	rows, err := s.q().Query(`WITH `+covTargetCTE+`
 SELECT t.id, t.type, t.label FROM target t
 WHERE t.id NOT IN (SELECT asset_id FROM tested)`+typeFilter+`
 ORDER BY t.id LIMIT $`+limPos+` OFFSET $`+offPos, pageArgs...)

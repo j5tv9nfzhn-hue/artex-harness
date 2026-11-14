@@ -498,7 +498,7 @@ func (s *AssetStore) CountDSL(dsl, typ string, taskID int64) (int, error) {
 		where += fmt.Sprintf(" AND $%d = ANY(task_ids)", len(args))
 	}
 	var n int
-	err = s.db.QueryRow("SELECT count(*) FROM assets WHERE "+where, args...).Scan(&n)
+	err = s.q().QueryRow("SELECT count(*) FROM assets WHERE "+where, args...).Scan(&n)
 	return n, err
 }
 
@@ -532,7 +532,7 @@ func (s *AssetStore) QueryDSL(dsl, typ string, taskID int64, limit, offset int) 
 	args = append(args, limit, offset)
 	q := assetSelectCols + " WHERE " + where +
 		fmt.Sprintf(" ORDER BY last_seen DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.q().Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +585,7 @@ func (s *AssetStore) QueryDSLInScope(dsl, typ string, taskID int64, limit, offse
 	args = append(args, limit, offset)
 	q := `WITH ` + scopeTargetCTE + ` ` + assetSelectCols + " WHERE " + where +
 		fmt.Sprintf(" ORDER BY last_seen DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.q().Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +621,7 @@ func (s *AssetStore) GetByIDsInScope(taskID int64, ids []int64) ([]*Asset, error
 	q := `WITH ` + scopeTargetCTE + ` ` + assetSelectCols +
 		" WHERE id IN (" + strings.Join(placeholders, ",") + ")" +
 		" AND id IN (SELECT id FROM target) ORDER BY last_seen DESC, id DESC"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.q().Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

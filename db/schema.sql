@@ -1384,3 +1384,46 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- harness (本项目新增；见 docs/03-ARCHITECTURE.md §3.3 / docs/04-ROADMAP.md S1)
+--
+-- S1「协议与 revision 地基」：把一次运行变成可寻址、可增量拉取、可回放的数据。
+-- Thread = 任务，Turn = 一轮（规划轮 / work 轮），Item = 一次工具调用或文本。
+-- revision 是 Turn 的序号，同时是事件信封的排序键：前端按它做 seq-merge，
+-- Replay 按它做区间取数，Eval 按它做轨迹指纹。
+-- 只新增表/列，不改动任何既有语义。
+-- ════════════════════════════════════════════════════════════════════════════
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS harness_revisions (
+    id             BIGSERIAL PRIMARY KEY,
+    task_id        BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    exploration_id BIGINT NOT NULL,
+    revision       BIGINT NOT NULL,
+    -- turn_kind: planner | work | system（system = 人工干预/生命周期动作，也用 revision 定序）
+    turn_kind      TEXT   NOT NULL,
+    -- turn_ref: 该轮的定位串（规划轮次号 planner#7 / 意图 id work#12 / 动作名）
+    turn_ref       TEXT   NOT NULL DEFAULT '',
+    summary        TEXT   NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (task_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_harness_rev_task ON harness_revisions(task_id, revision DESC);
+CREATE INDEX IF NOT EXISTS idx_harness_rev_kind ON harness_revisions(task_id, turn_kind, revision DESC);
+
+-- harness_turn_items: which activity rows belong to which Turn (S1).
+--
+-- Kept as a side table rather than a column on `activity` on purpose: the activity
+-- table is on the hot path and is read by ~20 upstream queries with explicit
+-- column lists. A side mapping costs one insert per event and leaves every
+-- upstream query byte-identical — which is exactly the "minimal diff" property
+-- the execution base needs (see PROVENANCE.md).
+CREATE TABLE IF NOT EXISTS harness_turn_items (
+    task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    revision    BIGINT NOT NULL,
+    activity_id BIGINT NOT NULL,
+    PRIMARY KEY (task_id, revision, activity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_harness_turn_items_rev ON harness_turn_items(task_id, revision);
+CREATE INDEX IF NOT EXISTS idx_harness_turn_items_act ON harness_turn_items(activity_id);

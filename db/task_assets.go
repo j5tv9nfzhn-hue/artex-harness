@@ -318,7 +318,7 @@ func (s *AssetStore) DetachAssetFromTask(taskID, assetID int64) (bool, error) {
 		return false, fmt.Errorf("%w: task and asset ids must be positive", ErrTaskAssetInvalid)
 	}
 	var detachedID int64
-	err := s.db.QueryRow(`
+	err := s.q().QueryRow(`
 UPDATE assets SET task_ids=array_remove(task_ids,$1)
 WHERE id=$2 AND $1=ANY(task_ids)
 RETURNING id`, taskID, assetID).Scan(&detachedID)
@@ -341,7 +341,7 @@ func (s *AssetStore) hydrateTaskAssetSources(taskID int64, assets []*Asset) erro
 		ids = append(ids, asset.ID)
 		byID[asset.ID] = asset
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT asset_id, source, source_summary, source_node_id
 FROM task_asset_links
 WHERE task_id=$1 AND asset_id=ANY($2::bigint[])`, taskID, ids)
@@ -372,7 +372,7 @@ WHERE task_id=$1 AND asset_id=ANY($2::bigint[])`, taskID, ids)
 // task's direct sources. Inherited non-terminal intents remain hidden, matching
 // the existing source-aware session contract.
 func (s *AssetStore) IntentAssets(taskID int64) ([]IntentAsset, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 WITH context AS (
     SELECT task.id AS task_id, task.exploration_id, false AS inherited
     FROM tasks task

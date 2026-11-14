@@ -91,7 +91,7 @@ target AS (
 // ListTaskScopeWithSources returns the current task's scope followed by the
 // scopes of its direct source tasks. TaskScope.TaskID preserves provenance.
 func (s *AssetStore) ListTaskScopeWithSources(taskID int64) ([]TaskScope, error) {
-	rows, err := s.db.Query(`WITH `+directTaskContextCTE+`
+	rows, err := s.q().Query(`WITH `+directTaskContextCTE+`
 SELECT ts.id, ts.task_id, ts.kind, COALESCE(ts.company_id,0), COALESCE(c.name,''), COALESCE(ts.domain,''),
        COALESCE(ts.net::text,''), COALESCE(ts.value,''), ts.source, COALESCE(ts.reason,'')
 FROM task_scope ts
@@ -122,9 +122,9 @@ ORDER BY CASE WHEN ts.task_id=$1 THEN 0 ELSE 1 END, ts.id`, taskID)
 // the denominator, while fact anchors count as tested. No row is copied.
 func (s *AssetStore) TaskCoverageWithSources(taskID int64) (*Coverage, error) {
 	cov := &Coverage{ByType: []CoverageByType{}}
-	_ = s.db.QueryRow(`WITH `+directTaskContextCTE+`
+	_ = s.q().QueryRow(`WITH `+directTaskContextCTE+`
 SELECT count(*) FROM task_scope ts JOIN context_tasks ctx ON ctx.task_id=ts.task_id`, taskID).Scan(&cov.ScopeRows)
-	rows, err := s.db.Query(`WITH `+contextCoverageCTE+`
+	rows, err := s.q().Query(`WITH `+contextCoverageCTE+`
 SELECT target.type, count(*) AS total,
        count(*) FILTER (WHERE target.id IN (SELECT asset_id FROM tested)) AS tested
 FROM target GROUP BY target.type ORDER BY target.type`, taskID)
@@ -167,14 +167,14 @@ func (s *AssetStore) ListUntestedAssetsWithSources(taskID int64, typ string, lim
 		args = append(args, typ)
 	}
 	var total int
-	if err := s.db.QueryRow(`WITH `+contextCoverageCTE+`
+	if err := s.q().QueryRow(`WITH `+contextCoverageCTE+`
 SELECT count(*) FROM target WHERE target.id NOT IN (SELECT asset_id FROM tested)`+typeFilter, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	pageArgs := append(append([]any{}, args...), limit, offset)
 	limitPosition := strconv.Itoa(len(args) + 1)
 	offsetPosition := strconv.Itoa(len(args) + 2)
-	rows, err := s.db.Query(`WITH `+contextCoverageCTE+`
+	rows, err := s.q().Query(`WITH `+contextCoverageCTE+`
 SELECT target.id, target.type, target.label FROM target
 WHERE target.id NOT IN (SELECT asset_id FROM tested)`+typeFilter+`
 ORDER BY target.id LIMIT $`+limitPosition+` OFFSET $`+offsetPosition, pageArgs...)
@@ -199,7 +199,7 @@ ORDER BY target.id LIMIT $`+limitPosition+` OFFSET $`+offsetPosition, pageArgs..
 // used for destructive task cleanup; HostsByTask intentionally retains that
 // narrower, task-owned behavior.
 func (s *AssetStore) HostsByTaskWithSources(taskID int64) ([]string, error) {
-	rows, err := s.db.Query(`WITH `+directTaskContextCTE+`,
+	rows, err := s.q().Query(`WITH `+directTaskContextCTE+`,
 context_assets AS (
   SELECT DISTINCT a.id
   FROM assets a

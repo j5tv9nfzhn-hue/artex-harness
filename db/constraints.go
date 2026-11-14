@@ -19,7 +19,7 @@ type Constraint struct {
 // ListConstraints returns this exploration's constraints, allow before deny, oldest
 // first within each group (stable render order for the prompt block + UI).
 func (s *ExplorationStore) ListConstraints() ([]Constraint, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT id, kind, text, COALESCE(origin,''), created_at
 FROM task_constraints WHERE exploration_id=$1
 ORDER BY (kind='deny'), id`, s.expID)
@@ -47,7 +47,7 @@ func (s *ExplorationStore) AddConstraint(kind, text, origin string) (int64, erro
 		origin = "system"
 	}
 	var id int64
-	err := s.db.QueryRow(`
+	err := s.q().QueryRow(`
 INSERT INTO task_constraints(exploration_id, kind, text, origin)
 VALUES ($1, $2, $3, $4) RETURNING id`, s.expID, kind, text, origin).Scan(&id)
 	return id, err

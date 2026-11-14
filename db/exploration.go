@@ -172,6 +172,9 @@ func (d *DB) TokenDailyAll(days int) ([]DailyTokenBucket, error) {
 type ExplorationStore struct {
 	db    *DB
 	expID int64
+	// tx, when non-nil, is a READ ONLY snapshot this store's reads are pinned to
+	// (see WithReadSnapshot in readsnapshot.go). Nil = read straight from the pool.
+	tx *sql.Tx
 }
 
 // CreateExploration creates a new exploration root and returns its id.
@@ -189,7 +192,7 @@ func (s *ExplorationStore) ID() int64 { return s.expID }
 // Root returns the exploration's description and goal.
 func (s *ExplorationStore) Root() (description, goal string, err error) {
 	var d sql.NullString
-	err = s.db.QueryRow(`SELECT description, goal FROM explorations WHERE id=$1`, s.expID).Scan(&d, &goal)
+	err = s.q().QueryRow(`SELECT description, goal FROM explorations WHERE id=$1`, s.expID).Scan(&d, &goal)
 	return d.String, goal, err
 }
 
@@ -235,7 +238,7 @@ func (s *ExplorationStore) AddGoal(payload map[string]any, origin string) (int64
 // under the old 'begin' root, or none yet).
 func (s *ExplorationStore) OriginFactID() (int64, error) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='fact' AND state='origin' ORDER BY id LIMIT 1`, s.expID).Scan(&id)
+	err := s.q().QueryRow(`SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='fact' AND state='origin' ORDER BY id LIMIT 1`, s.expID).Scan(&id)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -727,7 +730,7 @@ func (s *ExplorationStore) ListByKind(kind string, limit int) ([]*Node, error) {
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE exploration_id=$1 AND kind=$2 ORDER BY id DESC LIMIT $3`, s.expID, kind, limit)
 	if err != nil {
 		return nil, err
@@ -744,7 +747,7 @@ func (s *ExplorationStore) ListByKindPage(kind string, before int64, limit int) 
 	if limit <= 0 {
 		limit = 300
 	}
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE exploration_id=$1 AND kind=$2 AND ($3 <= 0 OR id < $3)
 ORDER BY id DESC LIMIT $4`, s.expID, kind, before, limit+1)
 	if err != nil {
@@ -773,7 +776,7 @@ func (s *ExplorationStore) listByKindPageFiltered(kind string, before int64, lim
 		where += fmt.Sprintf(` AND payload->>'summary' ILIKE $%d`, len(args))
 	}
 	args = append(args, limit+1)
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE `+where+` ORDER BY id DESC LIMIT $`+fmt.Sprintf("%d", len(args)), args...)
 	if err != nil {
 		return nil, err
@@ -792,7 +795,7 @@ func (s *ExplorationStore) countByKindFiltered(kind, q string) (int, error) {
 		where += fmt.Sprintf(` AND payload->>'summary' ILIKE $%d`, len(args))
 	}
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM exploration_nodes WHERE `+where, args...).Scan(&n)
+	err := s.q().QueryRow(`SELECT COUNT(*) FROM exploration_nodes WHERE `+where, args...).Scan(&n)
 	return n, err
 }
 
@@ -803,7 +806,7 @@ func (s *ExplorationStore) countByKindFiltered(kind, q string) (int, error) {
 // matching exactly what recent_done_intents surfaces.
 func (s *ExplorationStore) CountFinishedIntents() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM exploration_nodes
+	err := s.q().QueryRow(`SELECT COUNT(*) FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state IN ('done','blocked','exhausted')`, s.expID).Scan(&n)
 	return n, err
 }
@@ -813,14 +816,14 @@ WHERE exploration_id=$1 AND kind='intent' AND state IN ('done','blocked','exhaus
 // priority) is a truncated view and there may be more claimable work.
 func (s *ExplorationStore) CountOpenIntents() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM exploration_nodes
+	err := s.q().QueryRow(`SELECT COUNT(*) FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state='open'`, s.expID).Scan(&n)
 	return n, err
 }
 
 // GetNode returns one node of this exploration by id (nil, nil if not found).
 func (s *ExplorationStore) GetNode(id int64) (*Node, error) {
-	n, err := scanNode(s.db.QueryRow(`SELECT `+nodeCols+` FROM exploration_nodes WHERE id=$1 AND exploration_id=$2`, id, s.expID))
+	n, err := scanNode(s.q().QueryRow(`SELECT `+nodeCols+` FROM exploration_nodes WHERE id=$1 AND exploration_id=$2`, id, s.expID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -832,7 +835,7 @@ func (s *ExplorationStore) Nodes(limit int) ([]*Node, error) {
 	if limit <= 0 {
 		limit = 2000
 	}
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes WHERE exploration_id=$1 ORDER BY id LIMIT $2`, s.expID, limit)
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes WHERE exploration_id=$1 ORDER BY id LIMIT $2`, s.expID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -896,7 +899,7 @@ func (s *ExplorationStore) NodesPage(f NodeFilter, page, size int) ([]*Node, int
 	where := " WHERE " + strings.Join(conds, " AND ")
 
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM exploration_nodes`+where, args...).Scan(&total); err != nil {
+	if err := s.q().QueryRow(`SELECT COUNT(*) FROM exploration_nodes`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	order := "DESC"
@@ -904,7 +907,7 @@ func (s *ExplorationStore) NodesPage(f NodeFilter, page, size int) ([]*Node, int
 		order = "ASC"
 	}
 	args = append(args, size, offset)
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes`+where+
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes`+where+
 		` ORDER BY id `+order+
 		` LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
@@ -931,7 +934,7 @@ func (s *ExplorationStore) NodesByIDs(ids []int64) ([]*Node, error) {
 		args = append(args, id)
 		marks = append(marks, "$"+fmt.Sprint(len(args)))
 	}
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE exploration_id=$1 AND id IN (`+strings.Join(marks, ",")+`) ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
@@ -954,7 +957,7 @@ func (s *ExplorationStore) EdgesTouching(ids []int64) ([]Edge, error) {
 		marks = append(marks, "$"+fmt.Sprint(len(args)))
 	}
 	list := strings.Join(marks, ",")
-	rows, err := s.db.Query(`SELECT src_id, rel, dst_id FROM exploration_edges
+	rows, err := s.q().Query(`SELECT src_id, rel, dst_id FROM exploration_edges
 WHERE exploration_id=$1 AND (src_id IN (`+list+`) OR dst_id IN (`+list+`))`, args...)
 	if err != nil {
 		return nil, err
@@ -983,7 +986,7 @@ func (s *ExplorationStore) Edges(limit int) ([]Edge, error) {
 	if limit <= 0 {
 		limit = 5000
 	}
-	rows, err := s.db.Query(`SELECT src_id, rel, dst_id FROM exploration_edges WHERE exploration_id=$1 LIMIT $2`, s.expID, limit)
+	rows, err := s.q().Query(`SELECT src_id, rel, dst_id FROM exploration_edges WHERE exploration_id=$1 LIMIT $2`, s.expID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1004,7 +1007,7 @@ func (s *ExplorationStore) Edges(limit int) ([]Edge, error) {
 // alongside the finished worker's output. Best-effort: returns nil for an intent with
 // no facts (or a missing one).
 func (s *ExplorationStore) FactsYielded(intentID int64) ([]int64, error) {
-	rows, err := s.db.Query(`SELECT n.id
+	rows, err := s.q().Query(`SELECT n.id
 		FROM exploration_edges e
 		JOIN exploration_nodes n ON n.id=e.dst_id AND n.exploration_id=e.exploration_id
 		WHERE e.exploration_id=$1 AND e.src_id=$2 AND e.rel=$3 AND n.kind=$4
@@ -1031,7 +1034,7 @@ func (s *ExplorationStore) FactsYielded(intentID int64) ([]int64, error) {
 // empty (not error) for a nonexistent node.
 func (s *ExplorationStore) FindingLineage(nodeID int64) ([]*Node, []Edge, error) {
 	// anc = the node + everything that can reach it via edges (walk src<-dst).
-	nodeRows, err := s.db.Query(`
+	nodeRows, err := s.q().Query(`
 WITH RECURSIVE anc(id) AS (
     SELECT $2::bigint
   UNION
@@ -1055,7 +1058,7 @@ ORDER BY id`, s.expID, nodeID)
 		return nil, nil, nil
 	}
 	// edges among the ancestor set only (the lineage's internal relations).
-	edgeRows, err := s.db.Query(`
+	edgeRows, err := s.q().Query(`
 WITH RECURSIVE anc(id) AS (
     SELECT $2::bigint
   UNION
@@ -1088,7 +1091,7 @@ WHERE exploration_id = $1
 // intent --yields--> finding edge; report_finding links it). Findings with no
 // producing intent are absent. Precise (JOIN, no edge-scan limit).
 func (s *ExplorationStore) FindingIntents() (map[int64]int64, error) {
-	rows, err := s.db.Query(`SELECT e.dst_id, e.src_id
+	rows, err := s.q().Query(`SELECT e.dst_id, e.src_id
 FROM exploration_edges e
 JOIN exploration_nodes n ON n.id = e.dst_id AND n.exploration_id = e.exploration_id
 WHERE e.exploration_id=$1 AND e.rel=$2 AND n.kind='finding'`, s.expID, RelYields)
@@ -1111,7 +1114,7 @@ WHERE e.exploration_id=$1 AND e.rel=$2 AND n.kind='finding'`, s.expID, RelYields
 // lineage only when the producing intent has reached an immutable terminal
 // state. This keeps a source task's live worker topology private.
 func (s *ExplorationStore) FindingIntentsTerminal() (map[int64]int64, error) {
-	rows, err := s.db.Query(`SELECT e.dst_id, e.src_id
+	rows, err := s.q().Query(`SELECT e.dst_id, e.src_id
 	FROM exploration_edges e
 	JOIN exploration_nodes finding ON finding.id=e.dst_id AND finding.exploration_id=e.exploration_id
 	JOIN exploration_nodes intent ON intent.id=e.src_id AND intent.exploration_id=e.exploration_id
@@ -1137,7 +1140,7 @@ func (s *ExplorationStore) Frontier(limit int) ([]*Node, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state='open'
 ORDER BY priority DESC, id ASC LIMIT $2`, s.expID, limit)
 	if err != nil {
@@ -1154,7 +1157,7 @@ ORDER BY priority DESC, id ASC LIMIT $2`, s.expID, limit)
 // wrongly kicks a redundant first round. Counting open+running is race-proof.
 func (s *ExplorationStore) HasActiveIntent() (bool, error) {
 	var exists bool
-	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM exploration_nodes
+	err := s.q().QueryRow(`SELECT EXISTS(SELECT 1 FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running'))`, s.expID).Scan(&exists)
 	return exists, err
 }
@@ -1164,7 +1167,7 @@ WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running'))`, s.e
 // planner 停跑，任务是否结束改由 frontier 是否抽干决定。met 与 abandoned 都算"已了结"。
 func (s *ExplorationStore) HasOpenGoal() (bool, error) {
 	var exists bool
-	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM exploration_nodes
+	err := s.q().QueryRow(`SELECT EXISTS(SELECT 1 FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='goal' AND state='open')`, s.expID).Scan(&exists)
 	return exists, err
 }
@@ -1182,7 +1185,7 @@ WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id
 
 // Stats returns node counts grouped by kind (for dashboard).
 func (s *ExplorationStore) Stats() (map[string]int, error) {
-	rows, err := s.db.Query(`SELECT kind, count(*) FROM exploration_nodes WHERE exploration_id=$1 GROUP BY kind`, s.expID)
+	rows, err := s.q().Query(`SELECT kind, count(*) FROM exploration_nodes WHERE exploration_id=$1 GROUP BY kind`, s.expID)
 	if err != nil {
 		return nil, err
 	}
@@ -1208,7 +1211,7 @@ func (s *ExplorationStore) AppendActivity(a Activity) (int64, error) {
 		metadata = json.RawMessage(`{}`)
 	}
 	var id int64
-	err := s.db.QueryRow(`
+	err := s.q().QueryRow(`
 INSERT INTO activity(exploration_id, node_id, worker, kind, tool, tool_use_id, is_error, summary, detail, metadata, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, main_seg)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15)
 RETURNING id`, s.expID, a.NodeID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError, utf8Clean(a.Summary), utf8Clean(a.Detail),
@@ -1237,7 +1240,7 @@ func (d *DB) ExplorationDiag(expID int64) (expExists bool, taskRefs int, maxExpI
 // total). Same source as TokenStatsByWorker (kind='result' rows), just ungrouped.
 func (s *ExplorationStore) TokenTotal() (TokenUsage, error) {
 	var u TokenUsage
-	err := s.db.QueryRow(`SELECT
+	err := s.q().QueryRow(`SELECT
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0)
 	FROM activity WHERE exploration_id=$1 AND kind='result'`, s.expID).
@@ -1419,7 +1422,7 @@ func (d *DB) GoalCountsAll() (map[int64]GoalCounts, error) {
 // TokenStatsByWorker sums token usage per worker for this exploration (from the
 // kind='result' records that carry usage). Used by the per-agent token display.
 func (s *ExplorationStore) TokenStatsByWorker() ([]TokenUsage, error) {
-	rows, err := s.db.Query(`SELECT COALESCE(worker,''),
+	rows, err := s.q().Query(`SELECT COALESCE(worker,''),
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0)
 	FROM activity WHERE exploration_id=$1 AND kind='result'
@@ -1443,7 +1446,7 @@ func (s *ExplorationStore) TokenStatsByWorker() ([]TokenUsage, error) {
 // activity-history pagination. Main/planner use fixed keys; Worker executions use
 // their intent node id, even when a different work#N process handled a retry.
 func (s *ExplorationStore) TokenStatsBySession() ([]SessionTokenUsage, error) {
-	rows, err := s.db.Query(`SELECT
+	rows, err := s.q().Query(`SELECT
 		CASE
 			WHEN COALESCE(a.worker,'')='mainagent' THEN 'main:' || COALESCE(a.main_seg,0)::text
 			WHEN COALESCE(a.worker,'')='planner' THEN 'plan'
@@ -1484,10 +1487,10 @@ func (s *ExplorationStore) ActivityList(nodeID *int64, sinceID int64, limit int)
 	var err error
 	const cols = `id, node_id, COALESCE(worker,''), COALESCE(kind,''), COALESCE(tool,''), COALESCE(tool_use_id,''), is_error, COALESCE(summary,''), metadata, created_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, main_seg`
 	if nodeID != nil {
-		rows, err = s.db.Query(`SELECT `+cols+`
+		rows, err = s.q().Query(`SELECT `+cols+`
 FROM activity WHERE exploration_id=$1 AND node_id=$2 AND id>$3 ORDER BY id LIMIT $4`, s.expID, *nodeID, sinceID, limit)
 	} else {
-		rows, err = s.db.Query(`SELECT `+cols+`
+		rows, err = s.q().Query(`SELECT `+cols+`
 FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, sinceID, limit)
 	}
 	if err != nil {
@@ -1518,7 +1521,7 @@ func (s *ExplorationStore) ActivityListForTerminalIntent(nodeID, sinceID int64, 
 	if limit <= 0 {
 		limit = 300
 	}
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''),
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''),
 		COALESCE(a.tool,''), COALESCE(a.tool_use_id,''), a.is_error, COALESCE(a.summary,''),
 		a.created_at, a.input_tokens, a.output_tokens, a.cache_read_tokens, a.cache_write_tokens
 	FROM activity a
@@ -1603,7 +1606,7 @@ func (s *ExplorationStore) ActivityPage(f ActivitySessionFilter, before int64, l
 	q := fmt.Sprintf(`SELECT `+cols+`
 FROM activity WHERE exploration_id=$1%s AND ($%d <= 0 OR id < $%d)
 ORDER BY id DESC LIMIT $%d`, cond, beforeArg, beforeArg, limitArg)
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.q().Query(q, args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1639,7 +1642,7 @@ func (s *ExplorationStore) ActivityPageForTerminalIntent(nodeID, before int64, l
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''),
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''),
 		COALESCE(a.tool,''), COALESCE(a.tool_use_id,''), a.is_error, COALESCE(a.summary,''),
 		a.created_at, a.input_tokens, a.output_tokens, a.cache_read_tokens, a.cache_write_tokens
 	FROM activity a
@@ -1682,7 +1685,7 @@ func (s *ExplorationStore) ActivityPageForTerminalIntent(nodeID, before int64, l
 // session, since one SSE covers the whole task.
 func (s *ExplorationStore) ActivityMaxID() (int64, error) {
 	var max sql.NullInt64
-	err := s.db.QueryRow(`SELECT MAX(id) FROM activity WHERE exploration_id=$1`, s.expID).Scan(&max)
+	err := s.q().QueryRow(`SELECT MAX(id) FROM activity WHERE exploration_id=$1`, s.expID).Scan(&max)
 	if err != nil {
 		return 0, err
 	}
@@ -1701,14 +1704,14 @@ type MainSession struct {
 // CurrentMainSeg returns the highest main-session segment (0 when none created yet).
 func (s *ExplorationStore) CurrentMainSeg() (int, error) {
 	var seg int
-	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM main_sessions WHERE exploration_id=$1`, s.expID).Scan(&seg)
+	err := s.q().QueryRow(`SELECT COALESCE(MAX(seq),0) FROM main_sessions WHERE exploration_id=$1`, s.expID).Scan(&seg)
 	return seg, err
 }
 
 // ListMainSessions returns every main-session segment newest-first, always including
 // the implicit original segment 0. Segment 0 carries no stored timestamp.
 func (s *ExplorationStore) ListMainSessions() ([]MainSession, error) {
-	rows, err := s.db.Query(`SELECT seq, created_at FROM main_sessions WHERE exploration_id=$1 ORDER BY seq DESC`, s.expID)
+	rows, err := s.q().Query(`SELECT seq, created_at FROM main_sessions WHERE exploration_id=$1 ORDER BY seq DESC`, s.expID)
 	if err != nil {
 		return nil, err
 	}
@@ -1733,7 +1736,7 @@ func (s *ExplorationStore) ListMainSessions() ([]MainSession, error) {
 // untouched, so the new session starts with a clean transcript over the same task.
 func (s *ExplorationStore) NewMainSession() (MainSession, error) {
 	var m MainSession
-	err := s.db.QueryRow(`
+	err := s.q().QueryRow(`
 INSERT INTO main_sessions(exploration_id, seq)
 VALUES ($1, COALESCE((SELECT MAX(seq) FROM main_sessions WHERE exploration_id=$1),0)+1)
 RETURNING seq, created_at`, s.expID).Scan(&m.Seq, &m.CreatedAt)
@@ -1743,7 +1746,7 @@ RETURNING seq, created_at`, s.expID).Scan(&m.Seq, &m.CreatedAt)
 // ActivityDetail lazily returns the full detail blob for one step.
 func (s *ExplorationStore) ActivityDetail(id int64) (string, error) {
 	var d sql.NullString
-	err := s.db.QueryRow(`SELECT detail FROM activity WHERE id=$1 AND exploration_id=$2`, id, s.expID).Scan(&d)
+	err := s.q().QueryRow(`SELECT detail FROM activity WHERE id=$1 AND exploration_id=$2`, id, s.expID).Scan(&d)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -1775,7 +1778,7 @@ func (s *ExplorationStore) ActivityTrace(nodeID int64, limit int) ([]Activity, e
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.Query(`SELECT `+traceCols+`
+	rows, err := s.q().Query(`SELECT `+traceCols+`
 FROM activity WHERE exploration_id=$1 AND node_id=$2 AND kind NOT IN ('thinking','usage')
 ORDER BY id LIMIT $3`, s.expID, nodeID, limit)
 	if err != nil {
@@ -1791,7 +1794,7 @@ func (s *ExplorationStore) ActivityTraceForTerminalIntent(nodeID int64, limit in
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
 	FROM activity a
 	JOIN exploration_nodes n ON n.id=a.node_id AND n.exploration_id=a.exploration_id
 	WHERE a.exploration_id=$1 AND a.node_id=$2 AND n.kind='intent'
@@ -1817,11 +1820,11 @@ func (s *ExplorationStore) ActivityTraceSearch(nodeID *int64, q string, limit in
 	var rows *sql.Rows
 	var err error
 	if nodeID != nil {
-		rows, err = s.db.Query(`SELECT `+traceCols+`
+		rows, err = s.q().Query(`SELECT `+traceCols+`
 FROM activity WHERE exploration_id=$1 AND node_id=$2 AND kind NOT IN ('thinking','usage')
 AND (summary ILIKE $3 OR detail ILIKE $3) ORDER BY id LIMIT $4`, s.expID, *nodeID, like, limit)
 	} else {
-		rows, err = s.db.Query(`SELECT `+traceCols+`
+		rows, err = s.q().Query(`SELECT `+traceCols+`
 FROM activity WHERE exploration_id=$1 AND node_id IS NOT NULL AND kind NOT IN ('thinking','usage')
 AND (summary ILIKE $2 OR detail ILIKE $2) ORDER BY id LIMIT $3`, s.expID, like, limit)
 	}
@@ -1839,7 +1842,7 @@ func (s *ExplorationStore) ActivityTraceSearchForTerminalIntent(nodeID int64, q 
 		limit = 100
 	}
 	like := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
 	FROM activity a
 	JOIN exploration_nodes n ON n.id=a.node_id AND n.exploration_id=a.exploration_id
 	WHERE a.exploration_id=$1 AND a.node_id=$2 AND n.kind='intent'
@@ -1861,7 +1864,7 @@ func (s *ExplorationStore) ActivityTraceSearchTerminalIntents(q string, limit in
 		limit = 100
 	}
 	like := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')
 	FROM activity a
 	JOIN exploration_nodes n ON n.id=a.node_id AND n.exploration_id=a.exploration_id
 	WHERE a.exploration_id=$1 AND n.kind='intent'
@@ -1893,7 +1896,7 @@ func (s *ExplorationStore) AssetRefs(assetID int64) ([]AssetRef, error) {
 	if assetID <= 0 {
 		return []AssetRef{}, nil
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT en.id, en.kind, en.state, en.payload
 FROM exploration_anchors ea
 JOIN exploration_nodes en ON en.id = ea.node_id
@@ -1935,7 +1938,7 @@ func (s *ExplorationStore) ActivityTraceSearchExcluding(excludeNodeID int64, q s
 		limit = 100
 	}
 	like := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT `+traceCols+`
+	rows, err := s.q().Query(`SELECT `+traceCols+`
 FROM activity WHERE exploration_id=$1 AND node_id IS NOT NULL AND node_id <> $2
 AND kind NOT IN ('thinking','usage')
 AND (summary ILIKE $3 OR detail ILIKE $3) ORDER BY id LIMIT $4`, s.expID, excludeNodeID, like, limit)
@@ -1960,7 +1963,7 @@ func (s *ExplorationStore) ActivityByIDs(ids []int64) ([]Activity, error) {
 		ph[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = id
 	}
-	rows, err := s.db.Query(`SELECT id, node_id, COALESCE(kind,''), COALESCE(tool,''), is_error, COALESCE(detail,'')
+	rows, err := s.q().Query(`SELECT id, node_id, COALESCE(kind,''), COALESCE(tool,''), is_error, COALESCE(detail,'')
 FROM activity WHERE exploration_id=$1 AND kind<>'thinking' AND id IN (`+strings.Join(ph, ",")+`) ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
@@ -1992,7 +1995,7 @@ func (s *ExplorationStore) ActivityByIDsForTerminalIntents(ids []int64) ([]Activ
 		ph[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = id
 	}
-	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.detail,'')
+	rows, err := s.q().Query(`SELECT a.id, a.node_id, COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.detail,'')
 	FROM activity a
 	JOIN exploration_nodes n ON n.id=a.node_id AND n.exploration_id=a.exploration_id
 		WHERE a.exploration_id=$1 AND a.kind NOT IN ('thinking','usage') AND n.kind='intent'

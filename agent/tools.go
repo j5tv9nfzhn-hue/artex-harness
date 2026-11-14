@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -342,8 +343,8 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 	return t.readExpTool("graph_overview",
 		"(探索链路图)探索态势蒸馏摘要：资产计数、无接口的站点、frontier、发现、hints(人类/主 agent 的战略提示，生成意图时须纳入)。规划时先调它。",
 		obj(map[string]any{}),
-		func(context.Context, json.RawMessage) (actool.Result, error) {
-			return jsonResult(t.graphOverviewData())
+		func(ctx context.Context, _ json.RawMessage) (actool.Result, error) {
+			return jsonResult(t.graphOverviewDataCtx(ctx))
 		})
 }
 
@@ -351,7 +352,52 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 // graph_overview tool and the planner's wake-up prompt (which pre-injects it so
 // the model needn't spend a turn calling the tool — every plan round starts with
 // an empty context and always needs this first).
+// graphOverviewData renders the situational picture used by the planner prompt
+// and the graph_overview tool. Kept as the plain (no-ctx) entry point for prompt
+// rendering, where there is no request context to bind a snapshot to.
 func (t *ToolSet) graphOverviewData() map[string]any {
+	return t.graphOverviewDataCtx(context.Background())
+}
+
+// graphOverviewDataCtx renders the same picture but pins every exploration read to
+// ONE consistent MVCC snapshot (S1).
+//
+// Why this matters: the picture is assembled from ~10 independent queries
+// (goals / hints / edges / covered members / frontier / intents / findings /
+// facts / counts / digests). With 3 workers + 1 planner round writing the same
+// graph concurrently, reading them one-by-one produced mixed states — an edge
+// written but its nodes not yet, a fact counted in "facts" but absent from
+// "recent_facts". A planner reasoning on that dispatches intents against a world
+// that never existed. REPEATABLE READ READ ONLY makes all of them observe the
+// same instant.
+//
+// Asset coverage (t.as) is deliberately outside this snapshot: it aggregates a
+// different table family and the field is documented to the model as a rough
+// estimate ("粗略估计、仅供参考"). Cross-task blackboard reads are likewise a
+// live view of OTHER tasks by design, not part of this task's snapshot.
+func (t *ToolSet) graphOverviewDataCtx(ctx context.Context) map[string]any {
+	if t.ts == nil {
+		return t.graphOverviewDataSnapshot()
+	}
+	var out map[string]any
+	err := t.ts.WithReadSnapshot(ctx, func() error {
+		out = t.graphOverviewDataSnapshot()
+		return nil
+	})
+	if err != nil {
+		// A missing snapshot must not take the exploration down: degrade to the
+		// old direct read, but say so — the picture may be torn.
+		log.Printf("[graph_overview] 读快照不可用，回退直读（结果可能不一致）: %v", err)
+		if out == nil {
+			out = t.graphOverviewDataSnapshot()
+		}
+	}
+	return out
+}
+
+// graphOverviewDataSnapshot is the renderer itself; it must be called with a
+// snapshot already bound (or knowingly without one).
+func (t *ToolSet) graphOverviewDataSnapshot() map[string]any {
 	out := map[string]any{}
 	// goals summary folded in so the planner needn't call list_goals each round.
 	goals, _ := t.ts.ListByKind(db.KindGoal, 100)

@@ -16,14 +16,14 @@ import (
 // new value (§2.3). Called once per planner wake-up.
 func (s *ExplorationStore) BumpRound() (int64, error) {
 	var r int64
-	err := s.db.QueryRow(`UPDATE explorations SET round_no = round_no + 1 WHERE id=$1 RETURNING round_no`, s.expID).Scan(&r)
+	err := s.q().QueryRow(`UPDATE explorations SET round_no = round_no + 1 WHERE id=$1 RETURNING round_no`, s.expID).Scan(&r)
 	return r, err
 }
 
 // RoundNo returns the current planner-round counter.
 func (s *ExplorationStore) RoundNo() (int64, error) {
 	var r int64
-	err := s.db.QueryRow(`SELECT round_no FROM explorations WHERE id=$1`, s.expID).Scan(&r)
+	err := s.q().QueryRow(`SELECT round_no FROM explorations WHERE id=$1`, s.expID).Scan(&r)
 	return r, err
 }
 
@@ -31,7 +31,7 @@ func (s *ExplorationStore) RoundNo() (int64, error) {
 // id → *round (nil when the node is hot / unstamped). Used to compute the ≥R
 // debounce and to know which stamps to set/clear this round.
 func (s *ExplorationStore) ColdStamps() (map[int64]*int64, error) {
-	rows, err := s.db.Query(`SELECT id, cold_since_round FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT id, cold_since_round FROM exploration_nodes
 		WHERE exploration_id=$1 AND kind IN ('intent','fact')`, s.expID)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *ExplorationStore) ApplyStampOps(ops []StampOp) error {
 
 // ContentVersions returns id → content_version for all nodes (§5.3 signature).
 func (s *ExplorationStore) ContentVersions() (map[int64]int, error) {
-	rows, err := s.db.Query(`SELECT id, content_version FROM exploration_nodes WHERE exploration_id=$1`, s.expID)
+	rows, err := s.q().Query(`SELECT id, content_version FROM exploration_nodes WHERE exploration_id=$1`, s.expID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (s *ExplorationStore) ContentVersions() (map[int64]int, error) {
 // ActiveDigests returns the exploration's live digest nodes (state='active'),
 // oldest first.
 func (s *ExplorationStore) ActiveDigests() ([]*Node, error) {
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+	rows, err := s.q().Query(`SELECT `+nodeCols+` FROM exploration_nodes
 		WHERE exploration_id=$1 AND kind=$2 AND state=$3 ORDER BY id`, s.expID, KindDigest, StateDigestActive)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ ON CONFLICT (exploration_id, src_id, rel, dst_id) DO NOTHING`, s.expID, id, RelC
 // carry covers edges from two digests (a torn major write), the lowest digest id
 // wins deterministically — callers dedupe on this.
 func (s *ExplorationStore) CoveredMembers() (map[int64]int64, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.q().Query(`
 SELECT e.dst_id, e.src_id
 FROM exploration_edges e
 JOIN exploration_nodes d ON d.id=e.src_id AND d.exploration_id=e.exploration_id
@@ -176,7 +176,7 @@ ORDER BY e.src_id`, s.expID, RelCovers, KindDigest, StateDigestActive)
 
 // DigestMembers returns the member ids a digest covers (covers edges), sorted.
 func (s *ExplorationStore) DigestMembers(digestID int64) ([]int64, error) {
-	rows, err := s.db.Query(`SELECT dst_id FROM exploration_edges
+	rows, err := s.q().Query(`SELECT dst_id FROM exploration_edges
 		WHERE exploration_id=$1 AND src_id=$2 AND rel=$3`, s.expID, digestID, RelCovers)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (s *ExplorationStore) NodeAssets(ids []int64) (map[int64][]int64, error) {
 		placeholders[i] = fmt.Sprintf("$%d", i+2)
 		args = append(args, id)
 	}
-	rows, err := s.db.Query(`SELECT a.node_id, a.asset_id
+	rows, err := s.q().Query(`SELECT a.node_id, a.asset_id
 		FROM exploration_anchors a
 		JOIN exploration_nodes n ON n.id=a.node_id
 		WHERE n.exploration_id=$1 AND a.node_id IN (`+strings.Join(placeholders, ",")+`)`, args...)

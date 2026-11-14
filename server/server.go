@@ -779,6 +779,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/main-sessions", s.mainSessions)
 	mux.HandleFunc("POST /api/exploration/main-session/new", s.newMainSession)
 	mux.HandleFunc("GET /api/exploration/activity/stream", s.streamActivity)
+
+	// harness 协议面（S1）：Thread/Turn/Item + revision 信封。只读，独立于上面的
+	// 旧 activity 通道，旧前端行为不变。见 docs/03-ARCHITECTURE.md §4.7。
+	mux.HandleFunc("GET /api/harness/thread", s.harnessThread)
+	mux.HandleFunc("GET /api/harness/revisions", s.harnessRevisions)
+	mux.HandleFunc("GET /api/harness/stream", s.harnessStream)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
