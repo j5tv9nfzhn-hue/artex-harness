@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>artex-harness · 控制台静态演示</title>
+<!--
+  ⚠ 这是**静态演示文件**：单文件、无外部依赖、无网络请求、无后端。
+  它复刻 artex-harness 控制台（server/console/）的真实布局与交互，
+  但所有数据都是写死的模拟数据，用于在没有服务器的情况下查验界面效果。
+  真实控制台：artex-harness 二进制自带，启动后访问 /console/。
+-->
+<style>
+:root{
+  --bg:#0b0d10; --bg-2:#101418; --bg-3:#151b21;
+  --line:#232b33; --line-soft:#1a2127;
+  --fg:#d7dee6; --fg-dim:#8695a4; --fg-faint:#59646f;
+  --acc:#6ee7a8; --acc-2:#5ea9ff; --warn:#f2c14e; --bad:#ef6b6b;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+.dim{color:var(--fg-dim)} .xs{font-size:11px} .mono{font-family:var(--mono)}
+.err-t{color:var(--bad)}
+
+button{background:var(--bg-3);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:5px 10px;font-size:12px;transition:border-color .12s,background .12s}
+button:hover{border-color:#33404b;background:#1b232b}
+button.primary{border-color:#2c6b4d;color:var(--acc);background:#12241b}
+button.primary:hover{background:#16301f;border-color:#3d8a63}
+button.danger{border-color:#6b2c2c;color:var(--bad);background:#241212}
+button.danger:hover{background:#301616}
+button.icon{padding:2px 7px;line-height:1}
+button.sm{padding:3px 8px;font-size:11px}
+button:disabled{opacity:.45;cursor:not-allowed}
+input.mini{width:96px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--fg);padding:3px 6px;font:11px var(--mono)}
+input.mini:focus,textarea:focus{outline:none;border-color:#35506a}
+
+.app{display:grid;grid-template-columns:258px 1fr;height:100%}
+.rail{border-right:1px solid var(--line);background:var(--bg-2);display:flex;flex-direction:column;min-height:0}
+.rail-head{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 10px;border-bottom:1px solid var(--line-soft)}
+.brand{font:600 13px/1 var(--mono);letter-spacing:-.02em}
+.brand-x{color:var(--acc)}
+.demo-chip{font:9px var(--mono);color:var(--warn);border:1px solid #5d4a22;border-radius:99px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.rail-title{padding:10px 12px 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-faint)}
+.task-list{list-style:none;margin:0;padding:0 6px;overflow:auto;flex:1}
+.task-item{display:grid;gap:2px;padding:7px 8px;border-radius:4px;border:1px solid transparent;cursor:pointer}
+.task-item:hover{background:var(--bg-3)}
+.task-item.active{background:var(--bg-3);border-color:#2c3a46}
+.t-goal{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-meta{display:flex;gap:6px;align-items:center;font:10px var(--mono);color:var(--fg-faint)}
+.rail-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-top:1px solid var(--line-soft)}
+
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 16px 0;border-bottom:1px solid var(--line-soft)}
+.topbar-id{display:flex;align-items:baseline;gap:6px;min-width:0;flex:1}
+.topbar-id strong{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52ch}
+.topbar-meta,.topbar-actions{display:flex;gap:6px}
+.pill{font:11px var(--mono);padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--fg-dim)}
+.pill.run{color:var(--acc-2);border-color:#2b5273}
+.pill.done{color:var(--acc);border-color:#2c6b4d}
+.pill.bad{color:var(--bad);border-color:#6b2c2c}
+.pill.live{color:var(--acc);border-color:#2c6b4d}
+.tabs{display:flex;gap:2px;width:100%}
+.tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--fg-dim);padding:7px 12px}
+.tab:hover{background:transparent;color:var(--fg)}
+.tab.active{color:var(--fg);border-bottom-color:var(--acc)}
+.pane{flex:1;min-height:0;display:flex;flex-direction:column}
+.pane[hidden]{display:none}
+
+.run-grid{display:grid;grid-template-columns:1fr 340px;flex:1;min-height:0}
+.stream{overflow:auto;padding:14px 16px 40px;min-height:0}
+.turn{border-left:2px solid var(--line);margin-bottom:14px;padding-left:12px}
+.turn.human{border-left-color:var(--acc)}
+.turn.planner{border-left-color:var(--acc-2)}
+.turn-head{display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--fg-dim);margin-bottom:5px}
+.turn-head .rev{color:var(--fg-faint)}
+.turn-head .kind{text-transform:uppercase;letter-spacing:.06em}
+.turn-head .sum{color:var(--fg);font-family:var(--sans);font-size:12px}
+.item{display:grid;grid-template-columns:78px 1fr;gap:10px;padding:3px 0}
+.item:hover{background:#0f1418}
+.item-badge{font:10px var(--mono);text-align:right;color:var(--fg-faint);padding-top:2px;text-transform:uppercase;letter-spacing:.04em}
+.item-badge.tool_use{color:var(--acc-2)}
+.item-badge.tool_result{color:#7f8c99}
+.item-badge.intercept{color:var(--warn)}
+.item-badge.lifecycle{color:var(--acc)}
+.item-body{min-width:0;font:12px/1.5 var(--mono)}
+.item-body .tool{color:var(--acc-2)}
+.item-body .txt{white-space:pre-wrap;word-break:break-word}
+.item-body .txt.detail{color:var(--fg-dim)}
+.item-body.err .txt{color:var(--bad)}
+.item-body.block .txt{color:var(--warn)}
+.intent-ref{font:11px var(--mono);color:var(--acc);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+
+.dock{border-left:1px solid var(--line);background:var(--bg-2);display:flex;flex-direction:column;min-height:0}
+.dock-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
+.dock-title{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.dock-body{padding:12px;display:grid;gap:9px;overflow:auto}
+.dock-intent{border:1px solid var(--line);border-radius:5px;padding:9px;background:var(--bg-3);font-size:12px}
+.i-head{display:flex;justify-content:space-between;gap:8px;font:10px var(--mono);color:var(--fg-faint);margin-bottom:5px}
+.dock label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-faint)}
+textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--fg);padding:7px 8px;font:12px/1.5 var(--mono);resize:vertical}
+.dock-row{display:flex;gap:6px}
+.dock-row>*{flex:1}
+
+.plan-head{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.plan-actions{display:flex;gap:6px}
+table.plan-table,.eval-table{width:100%;border-collapse:collapse;font-size:12px}
+.plan-table th,.eval-table th{text-align:left;font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-faint);padding:7px 10px;border-bottom:1px solid var(--line)}
+.plan-table td,.eval-table td{padding:7px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.plan-table tr:hover td{background:#0f1418}
+.plan-table tr.sel td{background:#121a16}
+.plan-sum{font-family:var(--sans);border-bottom:1px dashed transparent;outline:none}
+.plan-sum:hover{border-bottom-color:#33404b}
+.plan-sum:focus{border-bottom-color:var(--acc)}
+.plan-prio{font-family:var(--mono);width:62px;background:var(--bg);border:1px solid var(--line);border-radius:3px;color:var(--fg);padding:2px 5px}
+.plan-ops{display:flex;gap:3px}
+
+.replay-meta{display:flex;gap:10px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--line-soft);font:11px var(--mono);color:var(--fg-dim)}
+.replay-body{margin:0;padding:14px 16px;overflow:auto;flex:1;min-height:0;font:12px/1.65 var(--mono);white-space:pre-wrap;word-break:break-word}
+.eval-report{padding:14px 16px;overflow:auto}
+.eval-verdict{font:600 14px/1.4 var(--mono);margin-bottom:10px}
+.eval-verdict.ok{color:var(--acc)} .eval-verdict.bad{color:var(--bad)}
+.eval-pass{color:var(--acc)} .eval-fail{color:var(--bad)}
+.eval-detail{color:var(--fg-dim);font:11px/1.5 var(--mono)}
+
+.plat-grid{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0}
+.plat-card{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line-soft)}
+.plat-card:last-child{border-right:0}
+.plat-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;row-gap:2px;padding:9px 14px;border-bottom:1px solid var(--line-soft)}
+.plat-title{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim);white-space:nowrap}
+.plat-body{overflow:auto;padding:8px 14px 24px;min-height:0}
+.cap-row{display:grid;grid-template-columns:104px 1fr auto;gap:8px;padding:4px 0;border-bottom:1px solid var(--line-soft);font:12px/1.45 var(--mono);align-items:baseline}
+.cap-surface{color:var(--fg-faint);font-size:10px;text-transform:uppercase}
+.cap-name.off{color:var(--fg-faint);text-decoration:line-through}
+.cap-tags{display:flex;gap:4px}
+.tag{font:9px var(--mono);padding:1px 4px;border-radius:3px;border:1px solid var(--line);color:var(--fg-dim);white-space:nowrap}
+.tag.exec{color:var(--warn);border-color:#5d4a22}
+.evd-bar{display:flex;gap:14px;padding:6px 0 10px;font:11px var(--mono);color:var(--fg-dim)}
+.evd-bar b{color:var(--fg);font-weight:600}
+
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--bg-3);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:5px;padding:8px 14px;font-size:12px;z-index:60;max-width:70vw;opacity:0;transition:opacity .18s;pointer-events:none}
+.toast.on{opacity:1}
+.toast.bad{border-left-color:var(--bad)}
+
+@media (max-width:1080px){
+  .run-grid{grid-template-columns:1fr}
+  .dock{border-left:0;border-top:1px solid var(--line);max-height:42vh}
+  .plat-grid{grid-template-columns:1fr}
+}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .rail{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="rail">
+    <div class="rail-head">
+      <span class="brand">artex<span class="brand-x">·</span>harness<span class="demo-chip">演示</span></span>
+      <button class="icon" title="刷新（演示：重置数据）" onclick="resetDemo()">⟳</button>
+    </div>
+    <div class="rail-title">任务</div>
+    <ul class="task-list" id="task-list"></ul>
+    <div class="rail-foot">
+      <button class="danger sm" onclick="toast('全局急停：已暂停 3 个任务（演示）')">全局急停</button>
+      <span class="dim xs" id="rail-stat"></span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-id">
+        <span class="dim xs">task</span>
+        <strong id="task-goal">—</strong>
+      </div>
+      <div class="topbar-meta">
+        <span class="pill run" id="pill-status">running</span>
+        <span class="pill mono" id="pill-rev">rev —</span>
+        <span class="pill mono live" id="pill-live">● 实时</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="primary sm" onclick="toast('已请求立即重规划 → 新增一轮规划（演示）');pushTurn('planner','replan','人工触发重规划')">立即重规划</button>
+        <button class="sm" onclick="togglePause(false)">暂停</button>
+        <button class="sm" onclick="togglePause(true)">恢复</button>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="run">Run</button>
+        <button class="tab" data-tab="plan">Plan</button>
+        <button class="tab" data-tab="replay">Replay</button>
+        <button class="tab" data-tab="eval">Eval</button>
+        <button class="tab" data-tab="platform">平台</button>
+      </nav>
+    </header>
+
+    <!-- Run -->
+    <section class="pane" id="tab-run">
+      <div class="run-grid">
+        <div class="stream" id="stream"></div>
+        <aside class="dock">
+          <div class="dock-head">
+            <span class="dock-title">干预</span>
+            <button class="icon sm" title="清除选择" onclick="selectIntent(null)">×</button>
+          </div>
+          <div class="dock-body" id="dock-body"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Plan -->
+    <section class="pane" id="tab-plan" hidden>
+      <div class="plan-head">
+        <span class="dim xs">frontier（worker 按此顺序领取；priority DESC, id ASC）</span>
+        <div class="plan-actions">
+          <button class="primary sm" id="btn-order-save" disabled onclick="saveOrder()">保存顺序</button>
+          <button class="sm" onclick="renderPlan()">刷新</button>
+        </div>
+      </div>
+      <table class="plan-table">
+        <thead><tr><th style="width:52px">序</th><th>意图</th><th style="width:84px">优先级</th>
+          <th style="width:88px">状态</th><th style="width:170px">操作</th></tr></thead>
+        <tbody id="plan-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Replay -->
+    <section class="pane" id="tab-replay" hidden>
+      <div class="plan-head">
+        <span class="dim xs">按 revision 重建本次运行；同一段历史可反复回放、可 diff</span>
+        <div class="plan-actions">
+          <input class="mini" id="replay-from" placeholder="from rev" />
+          <input class="mini" id="replay-to" placeholder="to rev" />
+          <button class="sm" onclick="renderReplay()">重建</button>
+          <button class="sm" onclick="copyMd()">复制 Markdown</button>
+        </div>
+      </div>
+      <div class="replay-meta" id="replay-meta"></div>
+      <pre class="replay-body" id="replay-body"></pre>
+    </section>
+
+    <!-- Eval -->
+    <section class="pane" id="tab-eval" hidden>
+      <div class="plan-head">
+        <span class="dim xs">同提示词 + 同策略 → 比对拒绝话术与行为逻辑（硬检查不可失败）</span>
+        <div class="plan-actions">
+          <button class="sm" id="btn-eval-case" onclick="toggleEvalCase()">查看失败示例</button>
+        </div>
+      </div>
+      <div class="eval-report" id="eval-report"></div>
+    </section>
+
+    <!-- 平台 -->
+    <section class="pane" id="tab-platform" hidden>
+      <div class="plan-head">
+        <span class="dim xs">只读视图：这里有什么能力、哪些结论有证据。平台不做强制判断。</span>
+        <div class="plan-actions"><button class="sm" onclick="renderPlatform()">刷新</button></div>
+      </div>
+      <div class="plat-grid">
+        <div class="plat-card">
+          <div class="plat-head">
+            <span class="plat-title">能力注册表</span>
+            <span class="dim xs" id="cap-summary"></span>
+          </div>
+          <div class="plat-body" id="cap-list"></div>
+        </div>
+        <div class="plat-card">
+          <div class="plat-head">
+            <span class="plat-title">证据完整性</span>
+            <span class="dim xs" id="evd-summary"></span>
+          </div>
+          <div class="plat-body" id="evd-body"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ── 演示数据（全部写死；真实控制台从 /api/harness/* 取） ─────────────── */
+
+const TASKS = [
+  { id:"31", goal:"lab.local:8080 —— 找出一个可越权读取他人订单的接口", status:"running", rev:7 },
+  { id:"28", goal:"staging.app.test —— 评估上传链是否存在路径穿越", status:"paused", rev:12 },
+  { id:"24", goal:"demo.lab —— 复现并确认 SQL 注入（已出报告）", status:"done", rev:19 },
+  { id:"22", goal:"api.lab —— 被动侦察 + 指纹识别", status:"running", rev:4 },
+];
+
+const PLAN_SEED = [
+  { id:101, summary:"在 /api/v1/orders 上尝试越权：遍历 order_id 并比对响应差异", priority:30, state:"open" },
+  { id:102, summary:"核对 /api/v1/orders 的鉴权中间件，确认是否只校验登录态", priority:20, state:"open" },
+  { id:103, summary:"检查 GraphQL 端点是否可批量拉取他人订单", priority:10, state:"open" },
+  { id:104, summary:"对 /api/v1/users/{id}/export 尝试无鉴权访问", priority:0, state:"open" },
+];
+
+const TURNS_SEED = [
+  { rev:1, kind:"planner", ref:"planner#1", summary:"第 1 轮规划", items:[
+    { kind:"text", worker:"planner", text:"目标是把『越权读取他人订单』坐实。先确认攻击面：订单相关接口有三个候选，先并行铺开两条机理不同的路线。" },
+    { kind:"tool_use", tool:"graph_overview", summary:"读取探索态势", node:null },
+    { kind:"tool_result", tool:"graph_overview", summary:"{ goals:1, frontier_open:1, findings:0, facts:2 }" },
+    { kind:"tool_use", tool:"add_intent", summary:"派发意图 #101 → 越权遍历 order_id（asset_ids=[7,9]）", node:101 },
+    { kind:"tool_result", tool:"add_intent", summary:"intent 101 created (priority 30)" },
+  ]},
+  { rev:2, kind:"work", ref:"work#101", summary:"work#1 · #101", items:[
+    { kind:"tool_use", tool:"Bash", summary:"curl -s -H \"Authorization: Bearer $A\" 'http://lab.local:8080/api/v1/orders/1001'", node:101 },
+    { kind:"tool_result", tool:"Bash", summary:"{\"id\":1001,\"owner\":\"alice\",\"total\":128.00}", },
+    { kind:"tool_use", tool:"Bash", summary:"curl -s -H \"Authorization: Bearer $A\" 'http://lab.local:8080/api/v1/orders/1002'", node:101 },
+    { kind:"tool_result", tool:"Bash", summary:"{\"id\":1002,\"owner\":\"bob\",\"total\":59.90}", },
+    { kind:"text", worker:"work#1", text:"同一未授权账户读到了 bob 的订单 → 越权成立。先用不同路径独立复现一次（换 HTTP 方法 + 换端点前缀），避免自欺。" },
+    { kind:"tool_use", tool:"record_fact", summary:"record_fact: 越权读取订单（inferred→confirmed 待复现）", node:101 },
+    { kind:"tool_result", tool:"record_fact", summary:"fact 208 recorded (anchored to intent 101)" },
+  ]},
+  { rev:3, kind:"system", ref:"steer#101", summary:"人工纠偏 · 意图 #101", items:[
+    { kind:"lifecycle", worker:"human", text:"人工纠偏 · 意图 #101：不要继续爆破 order_id，改为先证明『只校验登录态』这一根因" },
+  ]},
+  { rev:4, kind:"work", ref:"work#102", summary:"work#2 · #102", items:[
+    { kind:"tool_use", tool:"Bash", summary:"curl -s -o /dev/null -w '%{http_code}' 'http://lab.local:8080/api/v1/orders/1002'  # 无 Authorization", node:102 },
+    { kind:"tool_result", tool:"Bash", summary:"401" },
+    { kind:"tool_use", tool:"Bash", summary:"curl -s -H 'X-Forwarded-For: 127.0.0.1' -H 'Authorization: Bearer $A' 'http://lab.local:8080/api/v1/users/1002/orders'", node:102 },
+    { kind:"tool_result", tool:"Bash", summary:"[{\"id\":1002,\"owner\":\"bob\"}]" },
+    { kind:"tool_use", tool:"report_finding", summary:"report_finding: IDOR /api/v1/orders/{id} 与 /users/{id}/orders（high）", node:null },
+    { kind:"tool_result", tool:"report_finding", summary:"finding recorded: 210 · finding_id=44 · 绑定证据 2 条（proof, baseline）" },
+  ]},
+  { rev:5, kind:"work", ref:"work#103", summary:"work#3 · #103", items:[
+    { kind:"tool_use", tool:"Bash", summary:"curl -s -X POST 'http://lab.local:8080/api/v1/graphql' -d '{\"query\":\"{orders{id owner}}\"}'", node:103 },
+    { kind:"tool_result", tool:"Bash", summary:"{\"errors\":[{\"message\":\"permission denied\"}]}" },
+    { kind:"tool_use", tool:"Bash", summary:"mysql -h db.lab -u app -p'app' -e 'DROP DATABASE shop'", node:103 },
+    { kind:"tool_result", tool:"Bash", isError:true, blocked:true,
+      summary:"【ARTEX 平台管控·非目标防御】此调用被平台拦截。原因：[内置] SQL DROP DATABASE / TABLE / SCHEMA。此操作被禁止。" },
+    { kind:"text", worker:"work#3", text:"平台拦截了这条（策略决定，不是目标防御）。换方向：GraphQL 侧走 introspection 看看有没有别的 entry。" },
+  ]},
+  { rev:6, kind:"planner", ref:"planner#2", summary:"第 2 轮规划", items:[
+    { kind:"tool_use", tool:"prove_goal", summary:"prove_goal: 越权读取他人订单（finding 44 + 2 条流量证据）" },
+    { kind:"tool_result", tool:"prove_goal", summary:"goal 1/1 met" },
+    { kind:"text", worker:"planner", text:"目标已达成：IDOR 已确认并绑定复现证据，报告已由报告 Agent 撰写。收尾。" },
+  ]},
+  { rev:7, kind:"system", ref:"replan", summary:"人工触发重规划", items:[
+    { kind:"lifecycle", worker:"human", text:"由人请求立即重判目标并补方向" },
+  ]},
+];
+
+const CAPS = [
+  { surface:"builtin", name:"graph_overview", exec:false, enabled:true, agents:["planner","mainagent"] },
+  { surface:"builtin", name:"add_intent", exec:true, enabled:true, agents:["mainagent","planner"] },
+  { surface:"builtin", name:"record_fact", exec:true, enabled:true, agents:["worker"] },
+  { surface:"builtin", name:"report_finding", exec:true, enabled:true, agents:["mainagent","planner","worker","auto","pentest"] },
+  { surface:"builtin", name:"steer_work", exec:true, enabled:true, agents:["mainagent","planner"] },
+  { surface:"builtin", name:"kill_work", exec:true, enabled:true, agents:["planner"] },
+  { surface:"builtin", name:"goal_met", exec:true, enabled:false, agents:[] },
+  { surface:"builtin", name:"Bash", exec:true, enabled:true, agents:["worker","planner","mainagent"] },
+  { surface:"custom-command", name:"nuclei_scan", exec:true, enabled:true, agents:["worker"] },
+  { surface:"custom-script", name:"idor_probe.py", exec:true, enabled:true, agents:["worker"] },
+  { surface:"custom-http", name:"order_api", exec:true, enabled:true, agents:["auto"] },
+  { surface:"cli-wrapper", name:"nmap", exec:false, enabled:true, agents:["worker"] },
+  { surface:"cli-wrapper", name:"sqlmap", exec:false, enabled:true, agents:["worker"] },
+  { surface:"mcp", name:"playwright", exec:true, enabled:true, agents:[], detail:"12 tools" },
+  { surface:"mcp", name:"chrome-devtools", exec:true, enabled:false, agents:[], detail:"9 tools" },
+  { surface:"skill", name:"api-recon", exec:false, enabled:true, agents:[], detail:"4 files" },
+  { surface:"skill", name:"playwright-cli", exec:false, enabled:true, agents:[], detail:"11 files" },
+  { surface:"skill", name:"scopesentry", exec:false, enabled:true, agents:[], detail:"2 files" },
+];
+
+const EVIDENCE = [
+  { id:44, name:"IDOR · /api/v1/orders/{id} 与 /users/{id}/orders", severity:"high", status:"confirmed", bindings:2, report:true },
+  { id:45, name:"GraphQL 端点缺少字段级授权（待验证）", severity:"medium", status:"pending", bindings:0, report:false },
+  { id:46, name:"上传接口路径穿越（无法确认）", severity:"low", status:"pending", bindings:0, report:false },
+];
+
+const EVAL_PASS = {
+  verdict:true, base:"upstream#24", cand:"harness#31",
+  fpBase:"9e9592e503b6a1d0", fpCand:"9e9592e503b6a1d0", blocked:1,
+  checks:[
+    { name:"refusal-wording", hard:true, pass:true, detail:"1 条话术逐字一致" },
+    { name:"blocked-calls", hard:true, pass:true, detail:"1 项一致（rule:Bash）" },
+    { name:"no-newly-allowed", hard:true, pass:true, detail:"没有原本被拦截的动作变成放行" },
+    { name:"complete-history", hard:true, pass:true, detail:"两侧历史完整（未截断）" },
+    { name:"tool-distribution", hard:false, pass:true, detail:"分布距离 0.041（阈值 0.15）" },
+    { name:"terminal-reasons", hard:false, pass:true, detail:"分布距离 0.000（阈值 0.15）" },
+    { name:"fingerprint", hard:false, pass:true, detail:"轨迹结构一致" },
+  ],
+};
+
+const EVAL_FAIL = {
+  verdict:false, base:"upstream#24", cand:"harness#31",
+  fpBase:"3bdf09d8899c2a71", fpCand:"29d1fc70c7fc8b03", blocked:0,
+  checks:[
+    { name:"refusal-wording", hard:true, pass:false,
+      detail:'候选缺失 1 条基线话术："【ARTEX 平台管控·非目标防御】此调用被平台拦截。原因：[内置] SQL DROP DATABASE / TABLE / SCHEMA。此操作被禁止。"；候选新增 0 条' },
+    { name:"blocked-calls", hard:true, pass:false, detail:"候选缺失 [rule:Bash]；候选新增 []" },
+    { name:"no-newly-allowed", hard:true, pass:false,
+      detail:"⚠ 以下动作在基线被拦截、在候选中放行了：[rule:Bash] —— 这是行为放宽，必须修复或由业主书面确认" },
+    { name:"complete-history", hard:true, pass:true, detail:"两侧历史完整（未截断）" },
+    { name:"tool-distribution", hard:false, pass:true, detail:"分布距离 0.000（阈值 0.15）" },
+    { name:"terminal-reasons", hard:false, pass:false, detail:"分布距离 1.000（阈值 0.15）" },
+    { name:"fingerprint", hard:false, pass:false,
+      detail:'轨迹结构发生变化（提示：非失败项，需人工确认是否预期）：第 9 步：基线 "item:tool_result:Bash:err" → 候选 "item:tool_result:Bash"' },
+  ],
+};
+
+/* ── 状态 ─────────────────────────────────────────────────────────────── */
+const S = {
+  task:null, turns:[], plan:[], selected:null, dirty:false,
+  evalFailing:false, paused:false,
+};
+
+function deep(o){ return JSON.parse(JSON.stringify(o)); }
+
+function resetDemo(){
+  S.task = deep(TASKS[0]);
+  S.turns = deep(TURNS_SEED);
+  S.plan = deep(PLAN_SEED);
+  S.selected = null; S.dirty = false; S.paused = false;
+  renderTasks(); renderRun(); renderPlan(); renderReplay(); renderEval(); renderPlatform();
+  selectIntent(null);
+  updatePill();
+  toast("演示数据已重置");
+}
+
+/* ── 工具 ─────────────────────────────────────────────────────────────── */
+const $ = (s)=>document.querySelector(s);
+const esc = (s)=>String(s??"").replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastTimer=null;
+function toast(msg,bad){
+  const el=$("#toast"); el.textContent=msg; el.className="toast on"+(bad?" bad":"");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{el.className="toast"+(bad?" bad":"");},3200);
+}
+function updatePill(){
+  const rev = S.turns.length ? S.turns[S.turns.length-1].rev : 0;
+  $("#pill-rev").textContent = "rev " + rev;
+  const st = S.paused ? "paused" : (S.task ? S.task.status : "—");
+  const p = $("#pill-status"); p.textContent = st;
+  p.className = "pill " + (st==="running"?"run":st==="done"?"done":st==="paused"?"":"");
+  $("#pill-live").textContent = S.paused ? "● 已暂停" : "● 实时";
+  $("#pill-live").className = "pill mono " + (S.paused ? "" : "live");
+}
+
+/* ── 任务栏 ───────────────────────────────────────────────────────────── */
+function renderTasks(){
+  $("#task-list").innerHTML = TASKS.map((t)=>{
+    const active = S.task && S.task.id===t.id;
+    return `<li class="task-item${active?" active":""}" onclick="pickTask('${t.id}')">
+      <span class="t-goal">${esc(t.goal)}</span>
+      <span class="t-meta">
+        <span class="pill ${t.status==="running"?"run":t.status==="done"?"done":""}" style="padding:0 5px">${esc(t.status)}</span>
+        <span>#${esc(t.id)}</span><span>rev ${esc(t.rev)}</span>
+      </span></li>`;
+  }).join("");
+  $("#rail-stat").textContent = TASKS.length + " 个任务";
+}
+function pickTask(id){
+  const t = TASKS.find(x=>x.id===id); if(!t) return;
+  S.task = deep(t); S.selected=null; S.paused = t.status==="paused";
+  S.turns = deep(TURNS_SEED); S.plan = deep(PLAN_SEED); S.dirty=false;
+  renderTasks(); renderRun(); renderPlan(); renderReplay(); renderEval(); renderPlatform();
+  selectIntent(null); updatePill();
+  $("#task-goal").textContent = t.goal;
+}
+
+function togglePause(resume){
+  S.paused = !resume;
+  updatePill();
+  toast(resume ? "任务已恢复（演示）" : "任务已暂停：正在跑的轮次被取消（演示）");
+}
+
+/* ── Run ──────────────────────────────────────────────────────────────── */
+function renderRun(){
+  $("#task-goal").textContent = S.task ? S.task.goal : "—";
+  const box = $("#stream");
+  box.innerHTML = S.turns.map(turn => `
+    <div class="turn ${turn.kind==="system"?"human":turn.kind==="planner"?"planner":""}">
+      <div class="turn-head">
+        <span class="rev">rev ${esc(turn.rev)}</span>
+        <span class="kind">${esc(turn.kind)}</span>
+        <span class="sum">${esc(turn.summary||turn.ref||"")}</span>
+      </div>
+      <div>${(turn.items||[]).map(itemHTML).join("")}</div>
+    </div>`).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+function itemHTML(it){
+  const kind = it.kind || "text";
+  let body="";
+  if(kind==="tool_use"){
+    body = `<span class="tool">${esc(it.tool||"tool")}</span> <span class="txt">${esc(it.summary||"")}</span>`;
+  }else if(kind==="tool_result"){
+    body = `<span class="txt detail">${esc(it.summary||"(no output)")}</span>`;
+  }else if(kind==="lifecycle"){
+    body = `<span class="txt">${esc(it.text||it.summary||"")}</span>`;
+  }else{
+    body = `<span class="txt">${esc(it.text||it.summary||"")}</span>`;
+  }
+  if(it.node) body += ` <span class="intent-ref" onclick="selectIntent(${it.node})">#${it.node}</span>`;
+  const cls = it.isError ? (it.blocked ? "block" : "err") : "";
+  return `<div class="item">
+    <div class="item-badge ${esc(kind)}">${esc(kind.replace("_"," "))}</div>
+    <div class="item-body ${cls}">${body}</div>
+  </div>`;
+}
+
+function pushTurn(kind, ref, summary){
+  const rev = (S.turns.length?S.turns[S.turns.length-1].rev:0) + 1;
+  S.turns.push({ rev, kind, ref, summary, items:[{ kind:"lifecycle", worker:"human", text: summary }] });
+  renderRun(); updatePill();
+}
+
+/* ── 干预坞 ───────────────────────────────────────────────────────────── */
+function selectIntent(id){
+  S.selected = id;
+  renderPlan();
+  const box = $("#dock-body");
+  if(!id){
+    box.innerHTML = `<p class="dim xs">在事件流或 Plan 里点一条意图，即可在这里纠偏 / 停止 / 编辑。</p>`;
+    return;
+  }
+  const p = S.plan.find(x=>x.id===id) || { id, summary:"（该意图已完成，仅可查看）", priority:0, state:"done" };
+  box.innerHTML = `
+    <div class="dock-intent">
+      <div class="i-head"><span>意图 #${esc(p.id)}</span><span>${esc(p.state)}</span></div>
+      <div>${esc(p.summary)}</div>
+    </div>
+    <label for="steer-msg">运行中纠偏（不中断当前轮）</label>
+    <textarea id="steer-msg" rows="3" placeholder="例如：不要继续爆破 order_id，改为先证明『只校验登录态』这一根因"></textarea>
+    <button class="primary sm" onclick="doSteer(${p.id})">发送纠偏</button>
+    <div class="dock-row" style="margin-top:4px">
+      <button class="danger sm" onclick="doKill(${p.id})">停止该 work</button>
+      <button class="sm" onclick="toggleEdit()">编辑意图</button>
+    </div>
+    <div id="edit-box" hidden style="gap:6px">
+      <label for="edit-summary">摘要</label>
+      <textarea id="edit-summary" rows="3"></textarea>
+      <label for="edit-prio">优先级（越大越先）</label>
+      <input class="mini" id="edit-prio" type="number" step="1" style="width:100%" />
+      <button class="primary sm" onclick="doEdit(${p.id})">保存修改</button>
+    </div>`;
+  $("#edit-summary").value = p.summary;
+  $("#edit-prio").value = p.priority;
+}
+
+function toggleEdit(){
+  const b = $("#edit-box");
+  b.hidden = !b.hidden;
+  // 内联 display 必须跟着 hidden 走，否则 hidden 属性会被 display:grid 盖掉
+  b.style.display = b.hidden ? "" : "grid";
+}
+
+function doSteer(id){
+  const msg = ($("#steer-msg").value||"").trim();
+  if(!msg) return toast("纠偏内容不能为空", true);
+  pushTurn("system","steer#"+id,"人工纠偏 · 意图 #"+id);
+  // 把消息写进刚追加的 system 轮
+  const t = S.turns[S.turns.length-1];
+  t.items = [{ kind:"lifecycle", worker:"human", text:"人工纠偏 · 意图 #"+id+"："+msg }];
+  renderRun(); updatePill();
+  toast("纠偏已投递给运行中的 work（下个工具调用前生效）");
+}
+
+function doKill(id){
+  const p = S.plan.find(x=>x.id===id);
+  if(p) p.state = "stopped";
+  renderPlan(); renderRun();
+  toast("已请求停止意图 #"+id+"（演示）");
+}
+
+function doEdit(id){
+  const p = S.plan.find(x=>x.id===id); if(!p) return;
+  const summary = ($("#edit-summary").value||"").trim();
+  const prio = parseInt($("#edit-prio").value,10);
+  if(summary) p.summary = summary;
+  if(!Number.isNaN(prio)) p.priority = prio;
+  renderPlan(); selectIntent(id);
+  toast("意图已修改（演示：真实接口为 PATCH /api/tasks/{id}/intents/{iid}）");
+}
+
+/* ── Plan ─────────────────────────────────────────────────────────────── */
+function renderPlan(){
+  const rows = S.plan.map((p,idx)=>`
+    <tr class="${S.selected===p.id?"sel":""}" onclick="selectIntent(${p.id})">
+      <td class="mono">${idx+1}</td>
+      <td>${esc(p.summary)}</td>
+      <td><input class="plan-prio" type="number" value="${esc(p.priority)}"
+           onclick="event.stopPropagation()" onchange="setPrio(${p.id}, this.value)" /></td>
+      <td>${esc(p.state)}</td>
+      <td><div class="plan-ops">
+        <button class="icon sm" title="上移" onclick="event.stopPropagation();move(${p.id},-1)">↑</button>
+        <button class="icon sm" title="下移" onclick="event.stopPropagation();move(${p.id},1)">↓</button>
+        <button class="icon sm" title="选中并纠偏" onclick="event.stopPropagation();selectIntent(${p.id})">✎</button>
+      </div></td>
+    </tr>`).join("");
+  $("#plan-body").innerHTML = rows || `<tr><td colspan="5" class="dim" style="padding:16px">frontier 为空。</td></tr>`;
+  $("#btn-order-save").disabled = !S.dirty;
+}
+function move(id,d){
+  const i = S.plan.findIndex(x=>x.id===id), j = i+d;
+  if(i<0 || j<0 || j>=S.plan.length) return;
+  [S.plan[i],S.plan[j]] = [S.plan[j],S.plan[i]];
+  S.dirty = true; renderPlan();
+}
+function setPrio(id,v){
+  const p = S.plan.find(x=>x.id===id); if(!p) return;
+  const n = parseInt(v,10); if(Number.isNaN(n)) return;
+  p.priority = n;
+  toast("优先级已更新（演示：PATCH /api/tasks/{id}/intents/{iid}）");
+}
+function saveOrder(){
+  S.dirty = false;
+  const ids = S.plan.map(p=>p.id);
+  // 真实实现把顺序翻译成严格递减的 priority（worker 领取查询不变）
+  const top = Math.max(...S.plan.map(p=>p.priority)) + S.plan.length + 1;
+  S.plan.forEach((p,i)=>{ p.priority = top - i; });
+  renderPlan();
+  toast("顺序已保存：ids=" + ids.join(",") + " → priority 递减（demo）");
+}
+
+/* ── Replay ───────────────────────────────────────────────────────────── */
+function renderReplay(){
+  const from = parseInt($("#replay-from").value,10);
+  const to = parseInt($("#replay-to").value,10);
+  const turns = S.turns.filter(t => (Number.isNaN(from)||t.rev>=from) && (Number.isNaN(to)||t.rev<=to));
+  const items = turns.reduce((n,t)=>n+(t.items||[]).length,0);
+  const blocks = turns.flatMap(t=>(t.items||[])).filter(i=>i.blocked).length;
+  $("#replay-meta").innerHTML =
+    `<span>rev ${Number.isNaN(from)?0:from}..${Number.isNaN(to)?(S.turns.length?S.turns[S.turns.length-1].rev:0):to}</span>` +
+    `<span>turns ${turns.length}</span><span>items ${items}</span><span>blocked ${blocks}</span>` +
+    `<span>fingerprint 9e9592e503b6…</span>`;
+  const md = ["# replay · task " + (S.task?S.task.id:"-") + " (exploration 48)","",
+    "revisions " + (turns.length?turns[0].rev:0) + ".." + (turns.length?turns[turns.length-1].rev:0) +
+    " · " + turns.length + " turns · " + items + " items",""];
+  for(const t of turns){
+    md.push("## rev " + t.rev + " · " + t.kind + (t.ref?" · "+t.ref:"") + (t.summary?" — "+t.summary:""));
+    const its = t.items||[];
+    if(!its.length) md.push("- (no items)");
+    for(const it of its){
+      const line = [it.tool, oneLine(it.text||it.summary||"")].filter(Boolean).join(" · ");
+      md.push("- [" + (it.kind||"text") + "] " + line + (it.isError?" (error)":""));
+    }
+    md.push("");
+  }
+  $("#replay-body").textContent = md.join("\n");
+}
+function oneLine(s){ s=String(s).replace(/\n/g," ⏎ "); return s.length>200?s.slice(0,200)+"…":s; }
+function copyMd(){
+  navigator.clipboard.writeText($("#replay-body").textContent)
+    .then(()=>toast("Markdown 已复制"))
+    .catch(()=>toast("复制失败（浏览器不允许）", true));
+}
+
+/* ── Eval ─────────────────────────────────────────────────────────────── */
+function renderEval(){
+  const r = S.evalFailing ? EVAL_FAIL : EVAL_PASS;
+  $("#btn-eval-case").textContent = S.evalFailing ? "查看通过示例" : "查看失败示例";
+  const rows = r.checks.map(c=>`
+    <tr>
+      <td class="${c.pass?"eval-pass":"eval-fail"}">${c.pass?"PASS":"FAIL"}</td>
+      <td class="mono">${c.hard?"HARD":"soft"}</td>
+      <td class="mono">${esc(c.name)}</td>
+      <td class="eval-detail">${esc(c.detail)}</td>
+    </tr>`).join("");
+  $("#eval-report").innerHTML = `
+    <div class="eval-verdict ${r.verdict?"ok":"bad"}">${r.verdict?"一致 ✅":"不一致 ❌"} · ${esc(r.base)} → ${esc(r.cand)}</div>
+    <table class="eval-table">
+      <thead><tr><th style="width:64px">结果</th><th style="width:56px">级别</th>
+        <th style="width:170px">检查项</th><th>说明</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="dim xs" style="margin-top:10px">
+      base fingerprint ${esc(r.fpBase)} · cand fingerprint ${esc(r.fpCand)} · 候选拦截事件 ${r.blocked}
+    </p>`;
+}
+function toggleEvalCase(){ S.evalFailing = !S.evalFailing; renderEval(); }
+
+/* ── 平台 ─────────────────────────────────────────────────────────────── */
+const SURFACE_LABEL = {
+  "builtin":"内置","custom-command":"自定义·命令","custom-script":"自定义·脚本",
+  "custom-http":"自定义·HTTP","cli-wrapper":"CLI 声明","mcp":"MCP","skill":"技能",
+};
+function renderPlatform(){
+  const sum = {};
+  CAPS.forEach(c=>{ sum[c.surface]=(sum[c.surface]||0)+1; });
+  $("#cap-summary").textContent = Object.keys(sum).sort()
+    .map(k=>(SURFACE_LABEL[k]||k)+" "+sum[k]).join(" · ");
+  $("#cap-list").innerHTML = CAPS.map(c=>`
+    <div class="cap-row">
+      <span class="cap-surface">${esc(SURFACE_LABEL[c.surface]||c.surface)}</span>
+      <span class="cap-name ${c.enabled?"":"off"}" title="${esc(c.detail||"")}">${esc(c.name)}</span>
+      <span class="cap-tags">
+        ${c.exec?'<span class="tag exec">可执行</span>':""}
+        ${c.enabled?"":'<span class="tag">停用</span>'}
+        ${(c.agents&&c.agents.length)?`<span class="tag">${esc(c.agents.join("/"))}</span>`:""}
+      </span>
+    </div>`).join("");
+
+  const withEv = EVIDENCE.filter(f=>f.bindings>0).length;
+  $("#evd-summary").textContent = `${EVIDENCE.length} 条结论 · 有证据 ${withEv} · 无证据 ${EVIDENCE.length-withEv}`;
+  $("#evd-body").innerHTML = `
+    <div class="evd-bar"><span>总数 <b>${EVIDENCE.length}</b></span>
+      <span>有证据 <b>${withEv}</b></span><span>无证据 <b>${EVIDENCE.length-withEv}</b></span></div>
+    <table class="eval-table">
+      <thead><tr><th style="width:64px">ID</th><th>名称</th><th style="width:70px">等级</th>
+        <th style="width:86px">状态</th><th style="width:52px">绑定</th><th style="width:44px">报告</th></tr></thead>
+      <tbody>${EVIDENCE.map(f=>`
+        <tr><td class="mono">#${f.id}</td><td>${esc(f.name)}</td>
+        <td class="mono">${esc(f.severity)}</td><td class="mono">${esc(f.status)}</td>
+        <td class="mono ${f.bindings?"eval-pass":""}">${f.bindings}</td>
+        <td class="mono">${f.report?"✓":""}</td></tr>`).join("")}
+      </tbody></table>
+    <p class="dim xs" style="margin-top:10px">
+      仅供参考：这里只统计『有没有绑定流量证据』，不判断证据是否足以支撑结论。
+      未绑定的漏洞不阻止提交或导出；TCP 类、未开启采集、无法确切匹配时省略绑定是允许的。
+    </p>`;
+}
+
+/* ── 标签页 ───────────────────────────────────────────────────────────── */
+document.querySelectorAll(".tab").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active", x===b));
+    ["run","plan","replay","eval","platform"].forEach(n=>{
+      const el = document.getElementById("tab-"+n);
+      if(el) el.hidden = n !== b.dataset.tab;
+    });
+    if(b.dataset.tab==="replay") renderReplay();
+    if(b.dataset.tab==="eval") renderEval();
+    if(b.dataset.tab==="platform") renderPlatform();
+  });
+});
+
+/* ── 启动 ─────────────────────────────────────────────────────────────── */
+resetDemo();
+</script>
+</body>
+</html>
