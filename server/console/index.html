@@ -1,158 +1,157 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>artex-harness · console</title>
+<title>artex-harness</title>
 <link rel="stylesheet" href="/console/app.css" />
 </head>
 <body>
-<!-- Login gate: the console is a same-origin client, so it relies on the
-     artex_token cookie the backend already sets (no token juggling in JS). -->
-<div id="gate" class="gate" hidden>
+
+<!-- login gate -->
+<div id="gate" class="gate hidden">
   <form id="gate-form" class="gate-card">
-    <h1>artex-harness</h1>
-    <p class="dim" id="gate-hint">输入管理密码进入控制台</p>
-    <input id="gate-pass" type="password" autocomplete="current-password" placeholder="密码" />
-    <button type="submit">进入</button>
-    <p class="err" id="gate-err" hidden></p>
+    <div class="brand" style="font-size:18px"><span class="mark">✳</span> artex<span class="muted">/</span>harness</div>
+    <p class="note" id="gate-hint">输入管理密码进入控制台（用户名固定 ARTEX）</p>
+    <input id="gate-user" type="text" value="ARTEX" autocomplete="username" hidden />
+    <input id="gate-pass" type="password" placeholder="密码" autocomplete="current-password" />
+    <button class="btn primary" type="submit" style="justify-content:center">进入</button>
+    <p class="note" id="gate-err" style="color:var(--danger)" hidden></p>
   </form>
 </div>
 
-<div id="app" class="app" hidden>
+<div class="shell" id="shell" hidden>
+
+  <!-- ── rail: sessions ─────────────────────────────────────────────────── -->
   <aside class="rail">
-    <div class="rail-head">
-      <span class="brand">artex<span class="brand-x">·</span>harness</span>
-      <button id="btn-refresh" class="icon" title="刷新任务列表">⟳</button>
+    <div class="rail-brand">
+      <div class="brand"><span class="mark">✳</span> artex<span class="muted">/</span>harness</div>
+      <button class="btn ghost icon" id="btn-refresh" title="刷新会话列表">⟳</button>
     </div>
-    <div class="rail-title">任务</div>
-    <ul id="task-list" class="task-list"></ul>
+    <button class="rail-new" id="btn-new">
+      <span style="font-size:15px;line-height:1">+</span> 新建任务
+    </button>
+    <div class="rail-label" id="rail-label">任务</div>
+    <ul class="sessions" id="session-list"></ul>
     <div class="rail-foot">
-      <button id="btn-pause-all" class="danger sm">全局急停</button>
-      <span class="dim xs" id="rail-stat"></span>
+      <button class="btn sm danger" id="btn-pause-all">全局急停</button>
+      <button class="btn sm ghost" id="btn-theme" title="切换主题">◑</button>
     </div>
   </aside>
 
-  <main class="main">
-    <header class="topbar">
-      <div class="topbar-id">
-        <span class="dim xs">task</span>
-        <strong id="task-goal">未选择任务</strong>
+  <!-- ── stage ──────────────────────────────────────────────────────────── -->
+  <main class="stage">
+    <header class="stage-head">
+      <div class="stage-title">
+        <h1 id="task-title">未选择任务</h1>
+        <div class="stage-sub" id="task-sub"></div>
       </div>
-      <div class="topbar-meta">
-        <span class="pill" id="pill-status">—</span>
-        <span class="pill mono" id="pill-rev">rev —</span>
-        <span class="pill mono" id="pill-live">● 未连接</span>
+      <div class="stage-actions">
+        <button class="btn sm" data-act="replan" title="立即请求一轮规划">重新规划</button>
+        <button class="btn sm" data-act="pause">暂停</button>
+        <button class="btn sm" data-act="resume">恢复</button>
       </div>
-      <div class="topbar-actions">
-        <button id="btn-replan" class="primary sm">立即重规划</button>
-        <button id="btn-pause" class="sm">暂停</button>
-        <button id="btn-resume" class="sm">恢复</button>
-      </div>
-      <nav class="tabs">
-        <button data-tab="run" class="tab active">Run</button>
-        <button data-tab="plan" class="tab">Plan</button>
-        <button data-tab="replay" class="tab">Replay</button>
-        <button data-tab="eval" class="tab">Eval</button>
-        <button data-tab="platform" class="tab">平台</button>
-      </nav>
     </header>
 
-    <!-- ── Run: live envelope stream grouped by Turn ─────────────────────── -->
-    <section id="tab-run" class="pane">
-      <div class="run-grid">
-        <div id="stream" class="stream">
-          <div class="empty" id="stream-empty">选择一个任务后，这里显示实时事件流（按轮次分组）。</div>
-        </div>
+    <nav class="stage-tabs" id="tabs">
+      <button class="tab active" data-tab="trace">轨迹</button>
+      <button class="tab" data-tab="plan">计划<span class="count" id="tab-plan-count"></span></button>
+      <button class="tab" data-tab="replay">回放</button>
+      <button class="tab" data-tab="eval">评测</button>
+    </nav>
 
-        <!-- Intervention dock: context-sensitive to the selected intent. -->
-        <aside class="dock">
-          <div class="dock-head">
-            <span class="dock-title">干预</span>
-            <button id="btn-dock-close" class="icon sm" title="清除选择">×</button>
+    <!-- trace -->
+    <section class="pane" id="pane-trace">
+      <div class="transcript" id="transcript">
+        <div class="transcript-inner"><div class="empty" id="trace-empty">选择一个任务后，这里按轮次显示实时轨迹。</div></div>
+      </div>
+      <div class="composer">
+        <div class="composer-box">
+          <div class="composer-target" id="composer-target">纠偏目标：未选择</div>
+          <textarea id="composer-input" rows="1"
+            placeholder="写入纠偏指令：worker 在下一次工具调用前读取，不中断当前轮。⌘/Ctrl + Enter 发送"></textarea>
+          <div class="composer-row">
+            <span class="ctl">模式
+              <select id="mode-select" title="审批模式：自动＝按内置规则直接执行（上游默认）；人工＝开启模型兜底审批，可疑动作转人工">
+                <option value="auto">自动</option>
+                <option value="manual">人工审批</option>
+              </select>
+            </span>
+            <span class="ctl">worker <b id="ctl-workers">—</b></span>
+            <span class="ctl">令牌 <b id="ctl-tokens">—</b></span>
+            <span class="spacer"></span>
+            <button class="btn sm danger" id="btn-interrupt" title="立即中断当前轮（取消在跑的 work）">中断</button>
+            <button class="btn sm primary" id="btn-steer">发送纠偏</button>
           </div>
-          <div id="dock-body" class="dock-body">
-            <p class="dim xs">在事件流或 Plan 里点一条意图，即可在这里纠偏 / 停止 / 编辑。</p>
-          </div>
-        </aside>
+        </div>
+        <div class="composer-hint">中断 = 立刻停；纠偏 = 不打断，当前动作结束后生效</div>
       </div>
     </section>
 
-    <!-- ── Plan: the frontier, editable and reorderable ───────────────────── -->
-    <section id="tab-plan" class="pane" hidden>
-      <div class="plan-head">
-        <span class="dim xs">frontier（worker 按此顺序领取；priority DESC, id ASC）</span>
-        <div class="plan-actions">
-          <button id="btn-order-save" class="primary sm" disabled>保存顺序</button>
-          <button id="btn-plan-refresh" class="sm">刷新</button>
+    <!-- plan -->
+    <section class="pane" id="pane-plan" hidden>
+      <div class="pane-head">
+        <div class="hint">frontier 顺序即 worker 领取顺序（priority DESC, id ASC）。↑↓ 调序后保存，服务器把它折算成严格递减的 priority。</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm primary" id="btn-order-save" disabled>保存顺序</button>
+          <button class="btn sm" id="btn-plan-refresh">刷新</button>
         </div>
       </div>
-      <table class="plan-table">
-        <thead>
-          <tr><th style="width:52px">序</th><th style="width:56px">rev</th><th>意图</th>
-              <th style="width:84px">优先级</th><th style="width:88px">状态</th>
-              <th style="width:150px">操作</th></tr>
-        </thead>
-        <tbody id="plan-body"></tbody>
-      </table>
+      <div class="pane-body">
+        <table class="grid">
+          <thead><tr>
+            <th style="width:48px">#</th><th>意图</th><th style="width:76px">优先级</th>
+            <th style="width:92px">状态</th><th style="width:132px">操作</th>
+          </tr></thead>
+          <tbody id="plan-body"></tbody>
+        </table>
+      </div>
     </section>
-    <!-- ── Replay: a run as a value (rebuilt from revisions) ────────────── -->
-    <section id="tab-replay" class="pane" hidden>
-      <div class="plan-head">
-        <span class="dim xs">按 revision 重建本次运行；同一段历史可反复回放、可 diff</span>
-        <div class="plan-actions">
-          <input id="replay-from" class="mini" type="number" placeholder="from rev" />
-          <input id="replay-to" class="mini" type="number" placeholder="to rev" />
-          <button id="btn-replay" class="sm">重建</button>
-          <button id="btn-replay-md" class="sm">复制 Markdown</button>
+
+    <!-- replay -->
+    <section class="pane" id="pane-replay" hidden>
+      <div class="pane-head">
+        <div class="hint">按 revision 重建本次运行：同一段历史可反复回放，可导出 Markdown 做 diff。</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="pri" id="replay-from" placeholder="from" style="width:70px" />
+          <input class="pri" id="replay-to" placeholder="to" style="width:70px" />
+          <button class="btn sm" id="btn-replay">重建</button>
+          <button class="btn sm ghost" id="btn-replay-copy">复制</button>
         </div>
       </div>
       <div class="replay-meta" id="replay-meta"></div>
-      <pre id="replay-body" class="replay-body">选择任务并点「重建」。</pre>
+      <pre class="replay-body" id="replay-body"></pre>
     </section>
 
-    <!-- ── Eval: consistency verdict (decision 2's acceptance) ──────────── -->
-    <section id="tab-eval" class="pane" hidden>
-      <div class="plan-head">
-        <span class="dim xs">同提示词 + 同策略 → 比对拒绝话术与行为逻辑（硬检查不可失败）</span>
-        <div class="plan-actions">
-          <input id="eval-base" class="mini" placeholder="base task id" />
-          <input id="eval-cand" class="mini" placeholder="cand task id" />
-          <button id="btn-eval" class="sm primary">比对</button>
+    <!-- eval -->
+    <section class="pane" id="pane-eval" hidden>
+      <div class="pane-head">
+        <div class="hint">同提示词 + 同策略的双跑对照。硬检查不可失败；“原本拦截→现在放行”是红线。</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="pri" id="eval-base" placeholder="base task" style="width:96px" />
+          <input class="pri" id="eval-cand" placeholder="cand task" style="width:96px" />
+          <button class="btn sm primary" id="btn-eval">比对</button>
         </div>
       </div>
-      <div id="eval-report" class="eval-report"></div>
-    </section>
-
-    <!-- ── 平台：能力注册表 + 证据完整性（只读） ────────────────────────── -->
-    <section id="tab-platform" class="pane" hidden>
-      <div class="plan-head">
-        <span class="dim xs">只读视图：这里有什么能力、哪些结论有证据。平台不做强制判断。</span>
-        <div class="plan-actions">
-          <button id="btn-platform-refresh" class="sm">刷新</button>
-        </div>
-      </div>
-      <div class="plat-grid">
-        <div class="plat-card">
-          <div class="plat-head">
-            <span class="plat-title">能力注册表</span>
-            <span class="dim xs" id="cap-summary"></span>
-          </div>
-          <div id="cap-list" class="plat-body"><p class="dim xs">加载中…</p></div>
-        </div>
-        <div class="plat-card">
-          <div class="plat-head">
-            <span class="plat-title">证据完整性</span>
-            <span class="dim xs" id="evd-summary"></span>
-          </div>
-          <div id="evd-body" class="plat-body"><p class="dim xs">选择任务后显示。</p></div>
-        </div>
+      <div class="pane-body" id="eval-body">
+        <div class="empty">填两个任务 id 后点「比对」；也可以只填 base 与当前任务比对。</div>
       </div>
     </section>
   </main>
+
+  <!-- ── inspector ──────────────────────────────────────────────────────── -->
+  <aside class="inspector">
+    <nav class="insp-tabs" id="insp-tabs">
+      <button class="insp-tab active" data-insp="context">上下文</button>
+      <button class="insp-tab" data-insp="evidence">证据</button>
+      <button class="insp-tab" data-insp="capability">能力</button>
+      <button class="insp-tab" data-insp="policy">策略</button>
+    </nav>
+    <div class="insp-body" id="insp-body"></div>
+  </aside>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div class="toast" id="toast"></div>
 <script src="/console/app.js"></script>
 </body>
 </html>

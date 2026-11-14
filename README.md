@@ -45,11 +45,20 @@
 ## 控制台（默认界面）
 
 `http://localhost:8787/` → 302 → `/console/`。零构建、同源、无条件内嵌进单二进制
-（目标机不需要 Node）。五个视图：**Run**（实时流 + 就地纠偏/停止/编辑意图）、
-**Plan**（frontier 编辑与排序）、**Replay**（按 revision 回放）、**Eval**（一致性判定）、
-**平台**（能力注册表 + 证据完整性）。
+（目标机不需要 Node）。
+
+三栏工作区（设计依据见 [docs/design/DESIGN.md](docs/design/DESIGN.md)）：
+
+- **左：会话列表** — 按状态分组，每项带运行中 worker / 目标进度 / high 漏洞数；
+- **中：一次运行** — 轮次时间线（每轮带 `rev`、步数、错误、令牌；工具调用与输出配对）
+  + 常驻 composer（中断 / 纠偏 / 审批模式 / worker / 令牌）；
+- **右：检查器** — 上下文（目标进度、令牌构成、运行状态、漏洞分档）/ 证据 / 能力 / 策略。
+
+主标签：**轨迹 · 计划 · 回放 · 评测**。所有控件调的都是已存在的确定性 API
+（`/api/harness/*`、`/intents/{iid}/steer`、`/intercept/judge`）。
 
 上游 Next.js 界面保留在 `/legacy/`（需 `-tags embedui` 构建），作为回退通道。
+静态演示（无需后端）：[`docs/demo/harness-console.html`](docs/demo/harness-console.html)。
 
 ## 架构一览
 
