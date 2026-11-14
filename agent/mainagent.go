@@ -109,6 +109,20 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 // non-nil, receives each execution step (thinking / tool_use / tool_result /
 // text / result) so the main-agent session shows its work — exactly like the
 // worker/planner sessions — not just the final answer.
+// modelRunConfig mirrors ChatAgent.modelRunConfig so both conversational runners
+// take their model/runtime defaults from the same place (S4). MainAgent has no
+// per-request web-search gate: it always uses the configured setting.
+func (m *MainAgent) modelRunConfig() ModelRunConfig {
+	return ModelRunConfig{
+		ProxyAddr:     m.proxyAddr,
+		ProxyCACert:   m.proxyCACert,
+		WebSearch:     m.webSearch,
+		ContextWindow: m.compactionWindow(),
+		NonStreaming:  m.nonStreaming(),
+		MaxTokens:     m.maxTokens(),
+	}
+}
+
 func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, emit func(db.Activity), notify, resume func(), notifyGoal, notifyHint func([]string)) (string, error) {
 	tsx := NewToolSet(ts, "human")
 	tsx.SetFindingRecorder(m.findingRecorder)
@@ -131,6 +145,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
 	ctx = intercept.WithReviewWorkingDirectory(ctx, mainDir)
+	runCfg := m.modelRunConfig()
 	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir, mainDir), def)
 	opts := agentcore.Options{
 		Provider:        m.prov,
@@ -139,31 +154,17 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   m.proxyAddr,
-		WebFetchCACert:  m.proxyCACert,
-		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       m.webSearch.Enabled,
-		WebSearchBackend:      m.webSearch.Backend,
-		BraveSearchAPIKey:     m.webSearch.BraveKey,
-		TavilySearchAPIKey:    m.webSearch.TavilyKey,
-		DeepSeekSearchBaseURL: m.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  m.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   m.webSearch.DeepSeekModel,
-		WebSearchProxy:        m.webSearch.Proxy,
-		BashEnv:               proxyEnv(m.proxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            mainDir,                              // 本任务工作目录 <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(mainDir),
-		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
-		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window
-		Todos:                 actool.NewTodoStore(),                  // 会话级临时待办（TodoWrite），纯规划用，退出即丢
+		PermissionMode: permission.ModeBypass,
+		WorkingDir:     mainDir, // 本任务工作目录 <workDir>/tasks/<taskID>
+		ToolOutputDir:  cmdOutDir(mainDir),
+		MaxTurns:       m.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 命中预算(步数)→ SDK 跑收尾:向用户输出一句进展总结。Prompt 与收尾轮数可后台编辑(默认 10 轮)。
-		Settlement:   wrapupSettlement("mainagent", nil),
-		NonStreaming: m.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
-		MaxTokens:    m.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
+		Settlement: wrapupSettlement("mainagent", nil),
 	}
+	// S4: proxy / web-search / compaction / streaming / output-cap come from ONE
+	// place so the task page and the chat page cannot drift apart.
+	runCfg.ApplyModelDefaults(&opts)
+	runCfg.WithTodos(&opts)
 	if m.tx != nil { // persist raw human↔AI conversation; one accumulating file per segment
 		opts.Transcript = m.tx
 		// Segment 0 keeps the legacy "exp%d-main" name so existing transcripts still

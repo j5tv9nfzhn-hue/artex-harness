@@ -67,7 +67,35 @@
 不是升级。改为指向本仓库后，本仓库暂无 Release 时检查更新只会报"无可用版本"，不会下载
 任何东西。**该改动不影响模型行为**（不触碰提示词、工具、策略、循环）。
 
-### 3.2 `README.md` / `CHANGELOG.md` / `docs/` 重排
+### 3.2 `config/config.go` — `Redact` 覆盖 keyword/value DSN（S4）
+
+```diff
+-func Redact(dsn string) string {           // 只处理 URL 形式
++func Redact(dsn string) string {           // URL 形式 + libpq keyword/value 形式
+```
+
+**原因**：上游复核第 4 条（[docs/upstream/SOURCE-REVIEW.md](docs/upstream/SOURCE-REVIEW.md)）。
+`host=… user=… password=…` 形式的 DSN 被 `url.Parse` 当作不透明路径、`u.User` 为空，于是**原样返回**，
+而它被拼进连库失败的 `fmt.Errorf`，最终落到服务端日志与前端日志页——恰好是用户最常贴日志求助的时刻。
+现按 `password/passfile/sslpassword` 掩码，保留键名与其余上下文。**不影响任何模型行为**。
+
+### 3.3 `server/workspace.go` — 上传改为原子写（S4）
+
+```diff
+-out, err := os.Create(dest)   // 立即截断目标
+-io.Copy(out, src)
++return writeFileAtomic(dest, src)   // 临时文件 + fsync + rename
+```
+
+**原因**：上游复核第 5 条。`os.Create` 先截断再拷贝，传输中断会在磁盘上留下**被截断的半截文件**，
+而原文件已不可恢复——对"工作区放脚本/字典/证据"是数据丢失级问题。
+现改为同目录临时文件 + `Sync` + `Rename`，失败时删除临时件。
+**同名覆盖语义保持不变**（API 契约未动），只消除崩溃窗口。**不影响任何模型行为**。
+
+> 上游复核第 2 条（HTTP client 超时 / 429 无界读）与第 3 条（CORS 缺 PATCH/Authorization）
+> 已在复制基线 `df64cf83` 之前的提交 `b482105` 中修复，本仓库无需再改。
+
+### 3.4 `README.md` / `CHANGELOG.md` / `docs/` 重排
 
 上游 `README.md` 是一份完整的项目说明（安装、更新、架构、免责）；本仓库需要自己的 README
 来解释"harness 而非工具集"的定位。故：上游 README 原文保留为 `README-ARTEX.md`，本仓库新增

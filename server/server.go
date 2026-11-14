@@ -800,6 +800,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/replay", s.harnessReplay)
 	mux.HandleFunc("POST /api/harness/consistency", s.harnessConsistency)
 	mux.HandleFunc("GET /api/harness/scenarios", s.evalScenarios)
+
+	// 能力注册表与证据完整性（S4）：只读视图，不做强制（决策 5）。
+	mux.HandleFunc("GET /api/harness/capabilities", s.harnessCapabilities)
+	mux.HandleFunc("GET /api/harness/evidence-integrity", s.harnessEvidenceIntegrity)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)

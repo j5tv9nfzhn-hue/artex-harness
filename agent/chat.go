@@ -102,12 +102,30 @@ type chatVars struct{ DataDir, Now string }
 // but each agent decides on/off). emit receives each execution step (thinking /
 // tool_use / tool_result / text / result), tagged with the agent key as the
 // worker lane.
-func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message string, maxTurns int, maxDuration time.Duration, webSearch bool, emit func(db.Activity)) (string, error) {
-	// gate the global web-search opts by this agent's own flag.
+// modelRunConfig is the runner's contribution to the shared model/runtime
+// defaults. Extracted so the parity test can assert both conversational runners
+// produce the SAME options for the same inputs (the drift that docs/01 §3 ②
+// describes can no longer happen silently).
+func (c *ChatAgent) modelRunConfig(webSearchOn bool) ModelRunConfig {
 	ws := c.webSearch
-	if !webSearch {
+	if !webSearchOn {
 		ws.Enabled = false
 	}
+	return ModelRunConfig{
+		ProxyAddr:     c.proxyAddr,
+		ProxyCACert:   c.proxyCACert,
+		WebSearch:     ws,
+		ContextWindow: c.window,
+		NonStreaming:  c.nonStreaming(),
+		MaxTokens:     c.maxTokens(),
+	}
+}
+
+func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message string, maxTurns int, maxDuration time.Duration, webSearch bool, emit func(db.Activity)) (string, error) {
+	// S4: model/runtime defaults come from ONE place (ModelRunConfig); the
+	// per-request web-search gate is expressed by the config, not by inlining the
+	// whole option block here.
+	runCfg := c.modelRunConfig(webSearch)
 
 	// Per-session working directory: <workDir>/sessions/<sessionID>/
 	// Isolates file writes across conversations, mirroring how workers use i<intentID>/.
@@ -131,35 +149,19 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   c.proxyAddr,
-		WebFetchCACert:  c.proxyCACert,
-		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       ws.Enabled,
-		WebSearchBackend:      ws.Backend,
-		BraveSearchAPIKey:     ws.BraveKey,
-		TavilySearchAPIKey:    ws.TavilyKey,
-		DeepSeekSearchBaseURL: ws.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
-		DeepSeekSearchModel:   ws.DeepSeekModel,
-		WebSearchProxy:        ws.Proxy,
-		BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            sessionWorkDir,
-		MaxTurns:              maxTurns,
-		MaxDuration:           maxDuration,
-		Compaction:            compactionConfig(c.window),
-		Todos:                 actool.NewTodoStore(),
+		PermissionMode: permission.ModeBypass,
+		WorkingDir:     sessionWorkDir,
+		MaxTurns:       maxTurns,
+		MaxDuration:    maxDuration,
 		// large tool output spills to cmd-output/ under the session dir.
 		// 截断上限用 SDK 默认(tool.Capture 的 30000 字符)。
 		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
 		// 命中预算(步数)→ SDK 跑收尾:输出一句总结。Prompt 与收尾轮数按本 agent key 后台可编辑
 		// (自定义 agent 各自一份;留空/0 用通用默认:10 轮)。
-		Settlement:   wrapupSettlement(agentKey, nil),
-		NonStreaming: c.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
-		MaxTokens:    c.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
+		Settlement: wrapupSettlement(agentKey, nil),
 	}
+	runCfg.ApplyModelDefaults(&opts)
+	runCfg.WithTodos(&opts)
 	if c.guard != nil {
 		opts.Hooks = c.guard.Hooks()
 	}

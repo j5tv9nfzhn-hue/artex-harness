@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -178,15 +179,34 @@ func (d Database) buildDSN() string {
 }
 
 // String is a redacted view of the resolved DSN (password masked) for logging.
+// redactedKeyValue matches libpq keyword/value URL options that carry a secret,
+// in either `key=value` or `key = 'value'` form.
+var redactedKeyValue = regexp.MustCompile(`(?i)\b(password|passfile|sslpassword)\s*=\s*(?:'[^']*'|"[^"]*"|[^\s]+)`)
+
+// Redact removes credentials from a PostgreSQL DSN before it reaches a log line,
+// an error message or the UI.
+//
+// Two forms must be handled:
+//   - URL form  postgres://user:pass@host/db     → user info password masked;
+//   - keyword/value form  host=... user=... password=...  (pgx/libpq native)
+//
+// The keyword form is NOT a URL: url.Parse treats it as an opaque path with an
+// empty u.User, so the original implementation returned it verbatim and a failed
+// connection printed the plaintext password into the server log and the UI log
+// page — i.e. exactly when a user is most likely to paste logs for help.
+// (上游复核 docs/upstream/SOURCE-REVIEW.md 第 4 条，本项目已修。)
 func Redact(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return dsn
+	if strings.TrimSpace(dsn) == "" {
+		return ""
 	}
-	if u.User != nil {
-		if _, hasPw := u.User.Password(); hasPw {
-			u.User = url.UserPassword(u.User.Username(), "****")
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		if u.User != nil {
+			if _, hasPw := u.User.Password(); hasPw {
+				u.User = url.UserPassword(u.User.Username(), "****")
+			}
 		}
+		return u.String()
 	}
-	return fmt.Sprintf("%s", u.String())
+	// Keyword/value form: mask every secret-bearing key.
+	return redactedKeyValue.ReplaceAllString(dsn, "$1=****")
 }
