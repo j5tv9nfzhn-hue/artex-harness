@@ -557,10 +557,95 @@ $("#btn-resume").addEventListener("click", () => taskControl("resume"));
 /* ── tabs ─────────────────────────────────────────────────────────────── */
 function switchTab(name) {
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  $("#tab-run").hidden = name !== "run";
-  $("#tab-plan").hidden = name !== "plan";
+  ["run", "plan", "replay", "eval"].forEach((n) => {
+    const el = $("#tab-" + n);
+    if (el) el.hidden = n !== name;
+  });
   if (name === "plan") loadIntents(true);
+  if (name === "replay") $("#replay-meta").dataset.stale = "1";
 }
 $$(".tab").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+
+/* ── Replay ─────────────────────────────────────────────────────────────
+ * A replay is a value: rebuilt from revisions, deterministic to render, so the
+ * same slice can be re-read, copied as Markdown, or fed to harness-gate.
+ */
+let lastReplay = null;
+
+async function loadReplay() {
+  if (!state.task) return toast("先选一个任务", true);
+  const from = $("#replay-from").value.trim();
+  const to = $("#replay-to").value.trim();
+  const qs = new URLSearchParams({ task: state.task.id });
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  try {
+    const r = await api("/api/harness/replay?" + qs.toString());
+    lastReplay = r;
+    const run = r.run || {};
+    const fp = r.fingerprint || {};
+    $("#replay-meta").innerHTML =
+      `<span>rev ${esc(run.from ?? 0)}..${esc(run.to ?? 0)}</span>` +
+      `<span>turns ${esc((run.turns || []).length)}</span>` +
+      `<span>items ${esc(fp.items ?? 0)}</span>` +
+      `<span>blocked ${esc((r.blocks || []).length)}</span>` +
+      `<span>fingerprint ${esc((r.hash || "").slice(0, 16))}</span>` +
+      (run.truncated ? '<span style="color:var(--warn)">⚠ 已截断，不可用于判定</span>' : "");
+    $("#replay-body").textContent = r.markdown || "(空)";
+  } catch (e) { toast("回放失败：" + e.message, true); }
+}
+
+$("#btn-replay").addEventListener("click", loadReplay);
+$("#btn-replay-md").addEventListener("click", async () => {
+  if (!lastReplay) return toast("先重建一次回放", true);
+  try {
+    await navigator.clipboard.writeText(lastReplay.markdown || "");
+    toast("Markdown 已复制");
+  } catch { toast("复制失败（浏览器不允许）", true); }
+});
+
+/* ── Eval ───────────────────────────────────────────────────────────────
+ * Runs the same comparison the CLI (eval/cmd/harness-gate) does, so the verdict
+ * the operator sees here is the verdict CI would give.
+ */
+async function runConsistency() {
+  const base = $("#eval-base").value.trim() || (state.task && state.task.id) || "";
+  const cand = $("#eval-cand").value.trim();
+  if (!base || !cand) return toast("需要 base 与 cand 两个 task id", true);
+  const box = $("#eval-report");
+  box.innerHTML = '<p class="dim xs">比对中…</p>';
+  try {
+    const rep = await api("/api/harness/consistency", {
+      method: "POST",
+      body: JSON.stringify({ base_task: String(base), cand_task: String(cand) }),
+    });
+    const ok = rep.passed;
+    const rows = (rep.checks || []).map((c) => `
+      <tr>
+        <td class="${c.passed ? "eval-pass" : "eval-fail"}">${c.passed ? "PASS" : "FAIL"}</td>
+        <td class="mono">${c.hard ? "HARD" : "soft"}</td>
+        <td class="mono">${esc(c.name)}</td>
+        <td class="eval-detail">${esc(c.detail || "")}</td>
+      </tr>`).join("");
+    box.innerHTML = `
+      <div class="eval-verdict ${ok ? "ok" : "bad"}">
+        ${ok ? "一致 ✅" : "不一致 ❌"} · ${esc(rep.base)} → ${esc(rep.cand)}
+      </div>
+      <table class="eval-table">
+        <thead><tr><th style="width:64px">结果</th><th style="width:56px">级别</th>
+          <th style="width:170px">检查项</th><th>说明</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="dim xs" style="margin-top:10px">
+        base fingerprint ${esc((rep.base_fingerprint || "").slice(0, 16))} ·
+        cand fingerprint ${esc((rep.cand_fingerprint || "").slice(0, 16))} ·
+        候选拦截事件 ${esc(rep.blocked_events ?? 0)}
+      </p>`;
+  } catch (e) {
+    box.innerHTML = `<p class="eval-fail">比对失败：${esc(e.message)}</p>`;
+  }
+}
+
+$("#btn-eval").addEventListener("click", runConsistency);
 
 boot();

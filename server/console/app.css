@@ -229,3 +229,37 @@ button.sm { padding: 3px 8px; font-size: 11px; }
   .run-grid { grid-template-columns: 1fr; }
   .dock { border-left: 0; border-top: 1px solid var(--line); max-height: 42vh; }
 }
+
+/* ── Replay / Eval ───────────────────────────────────────────────────── */
+input.mini {
+  width: 92px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; color: var(--fg); padding: 3px 6px;
+  font: 11px var(--mono);
+}
+.replay-meta {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  padding: 8px 16px; border-bottom: 1px solid var(--line-soft);
+  font: 11px var(--mono); color: var(--fg-dim);
+}
+.replay-body {
+  margin: 0; padding: 14px 16px; overflow: auto; flex: 1; min-height: 0;
+  font: 12px/1.6 var(--mono); color: var(--fg);
+  white-space: pre-wrap; word-break: break-word;
+}
+.eval-report { padding: 14px 16px; overflow: auto; }
+.eval-verdict {
+  font: 600 14px/1.4 var(--mono); margin-bottom: 10px;
+}
+.eval-verdict.ok  { color: var(--acc); }
+.eval-verdict.bad { color: var(--bad); }
+.eval-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.eval-table th {
+  text-align: left; font: 10px var(--mono); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-faint);
+  padding: 6px 8px; border-bottom: 1px solid var(--line);
+}
+.eval-table td { padding: 6px 8px; border-bottom: 1px solid var(--line-soft);
+  vertical-align: top; }
+.eval-pass { color: var(--acc); }
+.eval-fail { color: var(--bad); }
+.eval-detail { color: var(--fg-dim); font: 11px/1.5 var(--mono); }

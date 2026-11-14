@@ -795,6 +795,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/kill", s.interveneKill)
 	mux.HandleFunc("POST /api/tasks/{id}/frontier/order", s.interveneOrder)
 	mux.HandleFunc("POST /api/tasks/{id}/replan", s.interveneReplan)
+
+	// 回放与一致性评测（S3）：只读历史，不触碰探索状态。
+	mux.HandleFunc("GET /api/harness/replay", s.harnessReplay)
+	mux.HandleFunc("POST /api/harness/consistency", s.harnessConsistency)
+	mux.HandleFunc("GET /api/harness/scenarios", s.evalScenarios)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)

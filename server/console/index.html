@@ -52,6 +52,8 @@
       <nav class="tabs">
         <button data-tab="run" class="tab active">Run</button>
         <button data-tab="plan" class="tab">Plan</button>
+        <button data-tab="replay" class="tab">Replay</button>
+        <button data-tab="eval" class="tab">Eval</button>
       </nav>
     </header>
 
@@ -92,6 +94,33 @@
         </thead>
         <tbody id="plan-body"></tbody>
       </table>
+    </section>
+    <!-- ── Replay: a run as a value (rebuilt from revisions) ────────────── -->
+    <section id="tab-replay" class="pane" hidden>
+      <div class="plan-head">
+        <span class="dim xs">按 revision 重建本次运行；同一段历史可反复回放、可 diff</span>
+        <div class="plan-actions">
+          <input id="replay-from" class="mini" type="number" placeholder="from rev" />
+          <input id="replay-to" class="mini" type="number" placeholder="to rev" />
+          <button id="btn-replay" class="sm">重建</button>
+          <button id="btn-replay-md" class="sm">复制 Markdown</button>
+        </div>
+      </div>
+      <div class="replay-meta" id="replay-meta"></div>
+      <pre id="replay-body" class="replay-body">选择任务并点「重建」。</pre>
+    </section>
+
+    <!-- ── Eval: consistency verdict (decision 2's acceptance) ──────────── -->
+    <section id="tab-eval" class="pane" hidden>
+      <div class="plan-head">
+        <span class="dim xs">同提示词 + 同策略 → 比对拒绝话术与行为逻辑（硬检查不可失败）</span>
+        <div class="plan-actions">
+          <input id="eval-base" class="mini" placeholder="base task id" />
+          <input id="eval-cand" class="mini" placeholder="cand task id" />
+          <button id="btn-eval" class="sm primary">比对</button>
+        </div>
+      </div>
+      <div id="eval-report" class="eval-report"></div>
     </section>
   </main>
 </div>

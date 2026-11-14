@@ -202,3 +202,39 @@ WHERE task_id=$1 AND activity_id=$2 LIMIT 1`, taskID, activityID).Scan(&rev); er
 	}
 	return rev
 }
+
+// TurnItem is one (revision, activity) pair — the join needed to rebuild a run.
+type TurnItem struct {
+	Revision   int64 `json:"revision"`
+	ActivityID int64 `json:"activity_id"`
+}
+
+// TurnItemsInRange returns the (revision, activity) pairs whose revision falls in
+// [from, to]. Used by replay to rebuild a run without N queries per item.
+func (d *DB) TurnItemsInRange(taskID, from, to int64, limit int) ([]TurnItem, error) {
+	if d == nil || taskID <= 0 {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 20000 {
+		limit = 5000
+	}
+	if to <= 0 {
+		to = 1<<62 - 1
+	}
+	rows, err := d.Query(`SELECT revision, activity_id FROM harness_turn_items
+WHERE task_id=$1 AND revision >= $2 AND revision <= $3
+ORDER BY activity_id ASC LIMIT $4`, taskID, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]TurnItem, 0, 256)
+	for rows.Next() {
+		var t TurnItem
+		if err := rows.Scan(&t.Revision, &t.ActivityID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

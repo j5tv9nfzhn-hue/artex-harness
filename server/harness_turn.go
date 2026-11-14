@@ -103,7 +103,13 @@ func (e *Engine) publishEnvelope(t *Task, a db.Activity) {
 	e.bc.PublishEnvelope(t.ID, env)
 	// Link the row to its Turn so replay and the stream's catch-up can select by
 	// revision. Best effort: losing a link only costs replay precision.
-	if turn.Revision > 0 && a.ID > 0 && e.m != nil && e.m.pg != nil {
+	//
+	// Revision 0 is recorded too, on purpose: items emitted before any Turn was
+	// opened (goal decomposition at task creation, a resumed run's first events)
+	// are the "legacy prefix" of the run. Without their links a replay would start
+	// mid-sentence; with them, Load(taskID, 0) returns the whole history and the
+	// protocol marks those items rev 0.
+	if a.ID > 0 && e.m != nil && e.m.pg != nil {
 		if taskID, err := strconv.ParseInt(t.ID, 10, 64); err == nil && taskID > 0 {
 			if err := e.m.pg.RecordTurnItem(taskID, turn.Revision, a.ID); err != nil {
 				log.Printf("[harness] task %s 记录轮次↔事件映射失败 (rev=%d act=%d): %v",
