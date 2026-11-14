@@ -263,3 +263,44 @@ input.mini {
 .eval-pass { color: var(--acc); }
 .eval-fail { color: var(--bad); }
 .eval-detail { color: var(--fg-dim); font: 11px/1.5 var(--mono); }
+
+/* ── 平台视图：能力注册表 + 证据完整性 ───────────────────────────────── */
+.plat-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  flex: 1; min-height: 0;
+}
+@media (max-width: 1100px) { .plat-grid { grid-template-columns: 1fr; } }
+.plat-card {
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--line-soft);
+}
+.plat-card:last-child { border-right: 0; }
+.plat-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 9px 14px; border-bottom: 1px solid var(--line-soft);
+}
+.plat-title {
+  font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.plat-body { overflow: auto; padding: 8px 14px 24px; min-height: 0; }
+.cap-row {
+  display: grid; grid-template-columns: 110px 1fr auto; gap: 8px;
+  padding: 4px 0; border-bottom: 1px solid var(--line-soft);
+  font: 12px/1.45 var(--mono); align-items: baseline;
+}
+.cap-surface { color: var(--fg-faint); font-size: 10px; text-transform: uppercase; }
+.cap-name { color: var(--fg); }
+.cap-name.off { color: var(--fg-faint); text-decoration: line-through; }
+.cap-tags { display: flex; gap: 4px; }
+.tag {
+  font: 9px var(--mono); padding: 1px 4px; border-radius: 3px;
+  border: 1px solid var(--line); color: var(--fg-dim);
+}
+.tag.exec { color: var(--warn); border-color: #5d4a22; }
+.tag.off  { color: var(--fg-faint); }
+.evd-bar {
+  display: flex; gap: 14px; padding: 6px 0 10px;
+  font: 11px var(--mono); color: var(--fg-dim);
+}
+.evd-bar b { color: var(--fg); font-weight: 600; }

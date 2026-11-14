@@ -28,13 +28,28 @@
 | **不是** | 工具集合。harness 不实现扫描器/利用器，工具通过供给面（容器 / MCP / skill / CLI / 自定义工具）接入 |
 | **不是** | 托管服务。裸机单二进制 + PostgreSQL 即可跑（决策 4） |
 
-## 当前状态（阶段 0）
+## 当前状态（S1–S5 已完成）
 
-- ✅ 执行底座已导入并可构建：`go build ./...` 通过（Go 1.26.3，534 个 .go 文件）。
-- ✅ 单元测试抽样通过：`guard` / `config` / `llmpool`。
-- ✅ 上游自带源码复核报告随仓库归档：[docs/upstream/SOURCE-REVIEW.md](docs/upstream/SOURCE-REVIEW.md)。
-- ⏳ 控制面（`harness/`）、新前端（`web-console/`）、评测集（`eval/`）为后续阶段，见
-  [docs/04-ROADMAP.md](docs/04-ROADMAP.md)。
+| 阶段 | 交付 | 文档 |
+|---|---|---|
+| S0 | 执行底座 + 文档 + ADR | [PROVENANCE](PROVENANCE.md) |
+| S1 | 协议（Thread/Turn/Item + revision）与 `graph_overview` 单快照读 | [docs/stages/S1](docs/stages/S1.md) |
+| S2 | 6 个**确定性干预原语** + Run/Plan 控制台 | [docs/stages/S2](docs/stages/S2.md) |
+| S3 | 回放 + 一致性评测 + 门禁 CLI + 场景集 | [docs/stages/S3](docs/stages/S3.md) |
+| S4 | 会话栈收敛 + 能力注册表 + 证据完整性 + 上游 2 处修复 | [docs/stages/S4](docs/stages/S4.md) |
+| S5 | 控制台成为唯一一等界面 + 平台视图 + 内嵌复测 | [docs/stages/S5](docs/stages/S5.md) |
+
+构建与测试：`go build ./...` 通过；`go test ./harness/... ./agent/ ./config/ ./guard/ ./llmpool/`
+通过（`agent` 侧仅有一个**上游既有**失败用例，见 S1 文档）。
+
+## 控制台（默认界面）
+
+`http://localhost:8787/` → 302 → `/console/`。零构建、同源、无条件内嵌进单二进制
+（目标机不需要 Node）。五个视图：**Run**（实时流 + 就地纠偏/停止/编辑意图）、
+**Plan**（frontier 编辑与排序）、**Replay**（按 revision 回放）、**Eval**（一致性判定）、
+**平台**（能力注册表 + 证据完整性）。
+
+上游 Next.js 界面保留在 `/legacy/`（需 `-tags embedui` 构建），作为回退通道。
 
 ## 架构一览
 
@@ -70,6 +85,8 @@
 | 5 | 执行能力保留；**只拦最极端破坏行为**；不新增强制硬约束与全审批 | [ADR-0003](docs/adr/0003-capability-boundary.md) |
 | — | **复制 ARTEX 作为执行底座**（而非独立重写） | [ADR-0002](docs/adr/0002-copy-artex-as-execution-base.md) |
 
+**注意**：以上是"做什么/不做什么"的项目口径，不是对任何使用行为的授权——见 [DISCLAIMER](DISCLAIMER.md)。
+
 ## 快速开始（裸机）
 
 ```bash
@@ -84,7 +101,7 @@ cp config.example.json config.json     # 填 database.*
 # 3) 编译并启动（不带前端；首次启动自动建表）
 CGO_ENABLED=0 go build -o artex ./cmd/artex
 ./start.sh            # 守护脚本：程序退出按退出码决定是否重拉（换装协议依赖它）
-# → http://localhost:8787  （首次进入 /setup 设置管理员密码）
+# → http://localhost:8787  （302 到控制台 /console/；首次进入设置管理密码，用户名固定 ARTEX）
 ```
 
 `start.sh` / `start.bat` 是**守护 + 换装**入口，请用它而不是直接跑 `./artex`。参数透传：

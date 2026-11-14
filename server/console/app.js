@@ -557,12 +557,13 @@ $("#btn-resume").addEventListener("click", () => taskControl("resume"));
 /* ── tabs ─────────────────────────────────────────────────────────────── */
 function switchTab(name) {
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["run", "plan", "replay", "eval"].forEach((n) => {
+  ["run", "plan", "replay", "eval", "platform"].forEach((n) => {
     const el = $("#tab-" + n);
     if (el) el.hidden = n !== name;
   });
   if (name === "plan") loadIntents(true);
   if (name === "replay") $("#replay-meta").dataset.stale = "1";
+  if (name === "platform") loadPlatform();
 }
 $$(".tab").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
@@ -647,5 +648,90 @@ async function runConsistency() {
 }
 
 $("#btn-eval").addEventListener("click", runConsistency);
+
+
+/* ── 平台：能力注册表 + 证据完整性 ───────────────────────────────────────
+ * Both are read-only views (decision 5: the platform reports, the operator
+ * decides). Capabilities answer "what can this deployment do?" across the five
+ * supply surfaces; evidence answers "which conclusions have real evidence?".
+ */
+const SURFACE_LABEL = {
+  "builtin": "内置",
+  "custom-command": "自定义·命令",
+  "custom-script": "自定义·脚本",
+  "custom-http": "自定义·HTTP",
+  "cli-wrapper": "CLI 声明",
+  "mcp": "MCP",
+  "skill": "技能",
+};
+
+async function loadPlatform() {
+  loadCapabilities();
+  loadEvidence();
+}
+
+async function loadCapabilities() {
+  const list = $("#cap-list");
+  try {
+    const r = await api("/api/harness/capabilities");
+    const caps = r.capabilities || [];
+    const sum = r.summary || {};
+    $("#cap-summary").textContent = Object.keys(sum)
+      .sort()
+      .map((k) => `${SURFACE_LABEL[k] || k} ${sum[k]}`)
+      .join(" · ");
+    list.innerHTML = caps.map((c) => `
+      <div class="cap-row">
+        <span class="cap-surface">${esc(SURFACE_LABEL[c.surface] || c.surface)}</span>
+        <span class="cap-name ${c.enabled ? "" : "off"}" title="${esc(c.detail || "")}">${esc(c.name)}</span>
+        <span class="cap-tags">
+          ${c.exec ? '<span class="tag exec">可执行</span>' : ""}
+          ${c.enabled ? "" : '<span class="tag off">停用</span>'}
+          ${(c.agents || []).length ? `<span class="tag">${esc(c.agents.join("/"))}</span>` : ""}
+        </span>
+      </div>`).join("") || '<p class="dim xs">没有能力。</p>';
+  } catch (e) {
+    list.innerHTML = `<p class="eval-fail">加载失败：${esc(e.message)}</p>`;
+  }
+}
+
+async function loadEvidence() {
+  const box = $("#evd-body");
+  if (!state.task) {
+    box.innerHTML = '<p class="dim xs">先在左侧选一个任务。</p>';
+    $("#evd-summary").textContent = "";
+    return;
+  }
+  try {
+    const r = await api(`/api/harness/evidence-integrity?task=${encodeURIComponent(state.task.id)}`);
+    $("#evd-summary").textContent =
+      `${r.total} 条结论 · 有证据 ${r.with_evidence} · 无证据 ${r.without_evidence}`;
+    const rows = (r.rows || []).map((f) => `
+      <tr>
+        <td class="mono">#${esc(f.finding_id)}</td>
+        <td>${esc(f.name)}</td>
+        <td class="mono">${esc(f.severity || "-")}</td>
+        <td class="mono">${esc(f.status || "-")}</td>
+        <td class="mono ${f.bindings ? "eval-pass" : ""}">${esc(f.bindings)}</td>
+        <td class="mono">${f.has_report ? "✓" : ""}</td>
+      </tr>`).join("");
+    box.innerHTML = `
+      <div class="evd-bar">
+        <span>总数 <b>${esc(r.total)}</b></span>
+        <span>有证据 <b>${esc(r.with_evidence)}</b></span>
+        <span>无证据 <b>${esc(r.without_evidence)}</b></span>
+      </div>
+      ${rows ? `<table class="eval-table">
+        <thead><tr><th style="width:64px">ID</th><th>名称</th>
+          <th style="width:70px">等级</th><th style="width:86px">状态</th>
+          <th style="width:52px">绑定</th><th style="width:44px">报告</th></tr></thead>
+        <tbody>${rows}</tbody></table>` : '<p class="dim xs">本任务没有漏洞记录。</p>'}
+      <p class="dim xs" style="margin-top:10px">${esc(r.note || "")}</p>`;
+  } catch (e) {
+    box.innerHTML = `<p class="eval-fail">加载失败：${esc(e.message)}</p>`;
+  }
+}
+
+$("#btn-platform-refresh").addEventListener("click", loadPlatform);
 
 boot();

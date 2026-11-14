@@ -977,6 +977,16 @@ func (s *Server) Handler() http.Handler {
 	root.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/", http.StatusFound)
 	})
+	// S5：控制台成为唯一的一等界面。
+	//   /         → 302 /console/   （入口换掉，书签与文档都以控制台为准）
+	//   /legacy/  → 上游 Next.js 静态导出（保留一次发布周期，可直接回退；
+	//               它不含任何上游没有的能力，删除它不会丢数据）
+	// 之所以保留 /legacy 而不是直接删：在没有实机验证过控制台能覆盖全部日常操作前，
+	// 把唯一的回退通道删掉属于不可逆操作。退场条件见 docs/04-ROADMAP.md S5。
+	root.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console/", http.StatusFound)
+	})
+	root.Handle("GET /legacy/", http.StripPrefix("/legacy", s.webuiHandler()))
 	root.Handle("/", s.webuiHandler())
 	return root
 }

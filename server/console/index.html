@@ -54,6 +54,7 @@
         <button data-tab="plan" class="tab">Plan</button>
         <button data-tab="replay" class="tab">Replay</button>
         <button data-tab="eval" class="tab">Eval</button>
+        <button data-tab="platform" class="tab">平台</button>
       </nav>
     </header>
 
@@ -121,6 +122,32 @@
         </div>
       </div>
       <div id="eval-report" class="eval-report"></div>
+    </section>
+
+    <!-- ── 平台：能力注册表 + 证据完整性（只读） ────────────────────────── -->
+    <section id="tab-platform" class="pane" hidden>
+      <div class="plan-head">
+        <span class="dim xs">只读视图：这里有什么能力、哪些结论有证据。平台不做强制判断。</span>
+        <div class="plan-actions">
+          <button id="btn-platform-refresh" class="sm">刷新</button>
+        </div>
+      </div>
+      <div class="plat-grid">
+        <div class="plat-card">
+          <div class="plat-head">
+            <span class="plat-title">能力注册表</span>
+            <span class="dim xs" id="cap-summary"></span>
+          </div>
+          <div id="cap-list" class="plat-body"><p class="dim xs">加载中…</p></div>
+        </div>
+        <div class="plat-card">
+          <div class="plat-head">
+            <span class="plat-title">证据完整性</span>
+            <span class="dim xs" id="evd-summary"></span>
+          </div>
+          <div id="evd-body" class="plat-body"><p class="dim xs">选择任务后显示。</p></div>
+        </div>
+      </div>
     </section>
   </main>
 </div>
