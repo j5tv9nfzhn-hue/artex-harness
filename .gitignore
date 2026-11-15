@@ -13,6 +13,16 @@ __pycache__/
 web/node_modules/
 web/.next/
 web/tsconfig.tsbuildinfo
+
+# 本地运行产物与密钥：绝不能进版本库
+/artex
+/data/
+jwt.key
+*.log
+.env
+.env.local
+config.local.json
+.DS_Store
 web/next-env.d.ts
 *.local
 

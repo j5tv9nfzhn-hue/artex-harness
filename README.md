@@ -18,6 +18,19 @@
 
 ---
 
+## 工程约定
+
+| 我想… | 怎么做 |
+|---|---|
+| 构建（控制台 + 后端） | `make build-all` |
+| 只重编译后端 | `make build` |
+| 跑单元测试（不碰数据库） | `make test` |
+| 跑需要 PostgreSQL 的测试 | `ARTEX_TEST_DB=<库名> make test-db` |
+| 知道代码该放哪、哪些不变量不能破 | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| 开发流程、提交约定、改哪里最容易出事 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+`make` 不带参数会列出全部目标。
+
 ## 这是什么 / 不是什么
 
 | | |
