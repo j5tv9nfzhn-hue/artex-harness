@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>artex-harness · console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c2603f'/%3E%3Ctext x='16' y='22' font-family='Georgia,serif' font-size='18' fill='%23fbfaf7' text-anchor='middle'%3Ea%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/console/app.css" />
 </head>
 <body>
@@ -168,6 +169,19 @@
   </main>
 
   <!-- ══ 右栏：状态 / 文件 / DIFF / 预算 / 浏览器 / 干预 ═══════════════ -->
+  <footer class="statusbar" aria-label="状态栏">
+    <span><span class="sb-dot off" id="sb-conn"></span> <span id="sb-conn-text">未连接</span></span>
+    <span class="sb-sep">·</span>
+    <span id="sb-task">无任务</span>
+    <span class="sb-sep">·</span>
+    <span id="sb-tasks">0 个任务</span>
+    <span class="sb-right">
+      <span><kbd>Ctrl</kbd>+<kbd>K</kbd> 命令</span>
+      <span><kbd>Ctrl</kbd>+<kbd>`</kbd> 终端</span>
+      <span>artex-harness</span>
+    </span>
+  </footer>
+
   <aside class="dock" aria-label="状态面板">
     <div class="dock-tabs" id="dock-tabs">
       <button class="dt active" data-dt="status">状态</button>

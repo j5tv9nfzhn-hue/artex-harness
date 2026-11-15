@@ -587,3 +587,33 @@ button.sm{ padding: 3px 8px; font-size: 12px; }
   .stream{ padding: 12px; }
 }
 @media (min-width: 981px){ .dock-toggle{ display: none; } }
+
+/* ── 底部状态栏：连接态、规模、快捷键提示 ──────────────────────────────── */
+.statusbar{
+  display: flex; align-items: center; gap: 14px;
+  height: 26px; padding: 0 12px;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  background: var(--paper-2); border-top: 1px solid var(--line);
+  grid-column: 1 / -1;
+}
+.statusbar .sb-dot{ width: 6px; height: 6px; border-radius: 99px; background: var(--ink-3); display: inline-block; }
+.statusbar .sb-dot.on{ background: var(--ok); box-shadow: 0 0 0 3px rgba(63,107,74,.14); }
+.statusbar .sb-dot.off{ background: var(--bad); }
+.statusbar .sb-sep{ opacity: .5; }
+.statusbar .sb-right{ margin-left: auto; display: flex; gap: 12px; }
+.statusbar kbd{
+  font-family: var(--mono); font-size: 10px; padding: 0 4px;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+  background: var(--paper-3); color: var(--ink-2);
+}
+@media (max-width: 720px){ .statusbar .sb-right{ display: none; } }
+
+/* 三栏占满第一行，状态栏独占第二行；minmax(0,1fr) 让三栏在内容溢出时能内部滚动 */
+.app{ grid-template-rows: minmax(0, 1fr) auto; }
+
+/* 显式定位：状态栏是 grid 子元素，靠自动放置会把它插在右栏之前，从而把右栏顶到
+   第二行（实测就是这样把三栏挤坏的）。三栏固定在 row 1，状态栏独占 row 2。 */
+.app > .rail{ grid-column: 1; grid-row: 1; }
+.app > .main{ grid-column: 2; grid-row: 1; }
+.app > .dock{ grid-column: 3; grid-row: 1; }
+.app > .statusbar{ grid-column: 1 / -1; grid-row: 2; }

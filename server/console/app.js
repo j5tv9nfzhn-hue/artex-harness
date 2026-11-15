@@ -1026,3 +1026,35 @@ document.addEventListener("keydown", (ev) => {
   mk("btn-dock-toggle", "面板", "切换右栏（窄屏抽屉）", ".dock");
   mk("btn-rail-toggle", "任务", "切换任务栏（窄屏抽屉）", ".rail");
 })();
+
+/* ── 状态栏：把"连没连上、有多少任务、现在是哪个"放到常驻位置 ─────────────
+ * 顶栏的三个 pill 会随视图滚动离开，底部状态栏不会。它是产品"始终知道自己
+ * 处于什么状态"的那一行，也是快捷键的唯一发现入口。 */
+function updateStatusbar() {
+  const conn = document.getElementById("sb-conn");
+  const connText = document.getElementById("sb-conn-text");
+  if (conn && connText) {
+    const live = S.es && S.es.readyState === 1;
+    conn.className = "sb-dot " + (live ? "on" : "off");
+    connText.textContent = live ? "实时联通" : (S.es ? "重连中" : "未连接");
+  }
+  const t = document.getElementById("sb-task");
+  if (t) t.textContent = S.task ? `#${S.task.id} · ${S.task.status || "—"}` : "无任务";
+  const n = document.getElementById("sb-tasks");
+  if (n) n.textContent = `${(S.tasks || []).length} 个任务`;
+}
+setInterval(updateStatusbar, 1500);
+updateStatusbar();
+
+/* 状态栏跟随渲染即时更新：定时器只保证"心跳"，首帧不该显示"未连接/0 个任务"。
+ * 监听任务列表与状态 pill 的 DOM 变化，比把 updateStatusbar() 塞进每个渲染函数
+ * 更可靠——新增渲染路径不会漏掉它。 */
+(function statusbarFollowScene() {
+  ["task-list", "pill-status", "pill-rev"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    new MutationObserver(() => updateStatusbar()).observe(el, {
+      childList: true, subtree: true, characterData: true,
+    });
+  });
+})();
