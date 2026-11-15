@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Avatar, Badge, Box, Card, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
+  Avatar, Badge, Box, Card, ContextMenu, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
 } from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
@@ -144,7 +144,9 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
             const active = String(t.id) === String(taskId);
             const isHover = hover === t.id;
             return (
-              <div key={item.key} style={style}
+              <ContextMenu.Root key={item.key}>
+                <ContextMenu.Trigger>
+              <div style={style}
                    className={"row" + (active ? " active" : "")}
                    onMouseEnter={() => setHover(t.id)}
                    onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
@@ -198,6 +200,30 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                   )}
                 </span>
               </div>
+                </ContextMenu.Trigger>
+                <ContextMenu.Content size="1">
+                  <ContextMenu.Item onSelect={() => onPick(String(t.id))}>打开</ContextMenu.Item>
+                  <ContextMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
+                    <Copy size={12} /> 复制 ID #{t.id}
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                    <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
+                  </ContextMenu.Item>
+                  <ContextMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
+                    <Pencil size={12} /> 重命名
+                  </ContextMenu.Item>
+                  <ContextMenu.Item color="red" onSelect={async () => {
+                    try {
+                      const r = await fetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
+                      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+                      toast?.("已归档 #" + t.id); onReload?.();
+                    } catch (e) { toast?.(e.message, true); }
+                  }}>
+                    <Archive size={12} /> 归档
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+              </ContextMenu.Root>
             );
           })}
         </div>
