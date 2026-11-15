@@ -1,7 +1,7 @@
 # 设计档案：从 Codex / Claude Code / Desktop 参考中学到什么
 
 > 本文记录「抓取参考 → 提炼 → 落成设计系统」的完整推导。凡界面决策都能在此找到依据。
-> 静态演示见 [`../demo/harness-console.html`](../demo/harness-console.html)。
+> 静态 Demo 已随上游界面移除；当前界面见 `web/`（`/app/`）。
 >
 > **关于参考图**：分析时抓取过 Claude Code 产品页的 hero 物料
 > （`assets.claude.com/f6607107…jpg`，2400×1260）用于取色与字阶，**未随仓库分发**——
@@ -99,7 +99,7 @@
 只用一个 mock 层替换 `fetch()` 与 `EventSource`。于是：
 
 - 演示走的是**生产渲染路径**——演示里的 bug 就是产品的 bug，不会出现"演示好看、真机拉胯"；
-- 改完 UI 跑一次 `python3 docs/demo/build.py` 即同步，**不存在手抄漂移**；
+- 界面实现在 `web/`，改完 `make web && make build` 打包进二进制，不存在手抄漂移；
 - 产物仍是单文件、零外部请求，可 `file://` 直接打开（裸机无 Node 也能看）。
 
 ## 七、可访问性与细节

@@ -28,7 +28,7 @@
 - 前端源码：`web/`（含 `src` `public` `media` 与 npm 锁文件）
 - 构建/部署：`build.sh` `install.sh` `update.sh` `dev.sh` `start.sh` `start.bat`
   `reset-password.sh` `Dockerfile` `docker-compose*.yml` `config.example.json`
-  `.env.example` `.dockerignore` `.gitattributes` `.github/` `skills/` `screenshots/`
+  `.env.example` `.dockerignore` `.gitattributes` `.github/` `skills/`（`screenshots/` 与上游界面一并移除）
 - 上游文档原文，**移动**到 `docs/upstream/` 归档：
   - `README.md` → `README-ARTEX.md`（仓库根，保留原名语义：上游说明）
   - `CHANGELOG.md` → `docs/upstream/CHANGELOG-ARTEX.md`

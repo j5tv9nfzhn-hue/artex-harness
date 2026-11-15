@@ -11,38 +11,10 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 ---
 
-## 截图预览
+## 界面说明
 
-> 完整交互见[在线 Demo](https://artex-demo.vercel.app/)。
-
-| 仪表盘（总览 / Token 消耗 / 活动流） | 任务列表 |
-| :---: | :---: |
-| ![仪表盘](screenshots/dashboard.png) | ![任务](screenshots/tasks.png) |
-
-| 任务 · 执行过程（会话 / 工具调用） | 探索链路 |
-| :---: | :---: |
-| ![执行过程](screenshots/sessions.png) | ![探索链路](screenshots/graph.png) |
-
-| 发现 | 资产 |
-| :---: | :---: |
-| ![发现](screenshots/findings.png) | ![资产](screenshots/assets.png) |
-
-| 资产覆盖图（力导向布局 · 已测高亮 · 节点折叠展开） |
-| :---: |
-| ![资产覆盖图](screenshots/assets_test.png) |
-
-| 流量录制 | 人在环路对话 |
-| :---: | :---: |
-| ![流量](screenshots/traffic.png) | ![对话](screenshots/chat.png) |
-
-| Agent 管理 | LLM 配置 |
-| :---: | :---: |
-| ![Agent](screenshots/agents.png) | ![LLM](screenshots/llm.png) |
-
-| 拦截审批 | 后端日志 |
-| :---: | :---: |
-| ![拦截](screenshots/intercept.png) | ![日志](screenshots/logs.png) |
-
+> 上游 ARTEX 的界面截图与静态 Demo 已随其前端一并移除（HARNESS 只保留 ARTEX 的后端
+> Go 代码，界面是仓库自己的 `web/`）。原始截图可在上游仓库查看。
 
 ---
 
@@ -468,13 +440,8 @@ flowchart TB
 
 ## 交流群
 
-扫码关注微信公众号 **SecSentry**，在公众号后台私信即可入群交流。
-
-<div align="center">
-
-<img src="screenshots/wx.png" alt="微信公众号 SecSentry" width="480" />
-
-</div>
+> 本段为上游项目的中文社区入口；相关二维码图片已随上游界面截图一并移除，
+> 需要时请到上游仓库查看。
 
 ---
 ## 参考
