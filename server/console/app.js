@@ -473,13 +473,18 @@ async function renderBrowserPanel() {
     try { obs = await api(`/api/harness/budget/${encodeURIComponent(S.task.id)}`); } catch {}
     const series = (obs && obs.series) || [];
     const spark = series.length > 1 ? sparkline(series, 260, 34) : "";
+    const obsComp = obs && obs.compactions_observed ? obs.compactions_observed : null;
+    const compTotal = obsComp ? obsComp.total : ((obs && obs.compactions) || 0);
+    const compWhy = obsComp
+      ? `已记录 ${compTotal} 次（micro ${obsComp.micro} · auto ${obsComp.auto}）`
+      : `按回落推断 ${compTotal} 次`;
     const obsHTML = obs ? `
       <div class="dcard">
         <div class="dcard-head"><span class="tag">上下文观测</span>
-          <span class="${(obs.compactions || 0) > 0 ? "eval-pass" : "dim"}">压缩 ${obs.compactions || 0} 次</span></div>
+          <span class="${compTotal > 0 ? "eval-pass" : "dim"}">压缩 ${compTotal} 次</span></div>
         ${spark}
         <div class="dcard-res">每轮输入 token ${series.join(" → ") || "—"}
-预算 ${Math.round((obs.run_budget_seconds || 0) / 60)} 分钟 · 当前占用 ${Math.round(obs.pct || 0)}%</div>
+预算 ${Math.round((obs.run_budget_seconds || 0) / 60)} 分钟 · 当前占用 ${Math.round(obs.pct || 0)}% · ${escapeHtmlLite(compWhy)}</div>
       </div>` : "";
     box.innerHTML = sessHTML + obsHTML + `
       <div class="dstat">
@@ -862,3 +867,6 @@ function sparkline(values, w, h) {
     ${drops}<polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${pts.join(" ")}" />
   </svg>`;
 }
+
+// escapeHtmlLite is esc() for text that is already composed locally (no markup).
+function escapeHtmlLite(t) { return esc(t); }

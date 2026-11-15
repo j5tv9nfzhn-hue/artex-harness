@@ -380,7 +380,7 @@ func (t *ToolSet) graphOverviewDataCtx(ctx context.Context) map[string]any {
 		return t.graphOverviewDataSnapshot()
 	}
 	var out map[string]any
-	err := t.ts.WithReadSnapshot(ctx, func() error {
+	err := safeReadSnapshot(t.ts, ctx, func() error {
 		out = t.graphOverviewDataSnapshot()
 		return nil
 	})
@@ -393,6 +393,24 @@ func (t *ToolSet) graphOverviewDataCtx(ctx context.Context) map[string]any {
 		}
 	}
 	return out
+}
+
+// safeReadSnapshot runs a read snapshot and converts a panic into an ordinary
+// error.
+//
+// The pgx stdlib driver can panic ("index out of range [0] with length 0") when a
+// transaction's connection is torn down mid-iteration; the caller's degraded path
+// (log + direct read) is a far better outcome than a dead process, and the panic
+// still reaches the log with its reason. This is a boundary guard, not a fix for
+// the driver: the underlying query is retried once without a snapshot by the
+// caller, so the graph_overview picture stays available.
+func safeReadSnapshot(ts *db.ExplorationStore, ctx context.Context, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("读快照 panic 已隔离: %v", r)
+		}
+	}()
+	return ts.WithReadSnapshot(ctx, fn)
 }
 
 // graphOverviewDataSnapshot is the renderer itself; it must be called with a

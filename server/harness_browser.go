@@ -144,8 +144,14 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	// mcp_tools_cache keys on server_id (bigint), not on the server's name: the old
+	// query used a column that does not exist and its error was discarded, so this
+	// reported 0 cached tools on every install — the panel then looked like the MCP
+	// server had never been discovered.
 	var cached int
-	_ = s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache WHERE server=$1`, browserMCPServer).Scan(&cached)
+	if err := s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache c JOIN mcp_servers s ON s.id = c.server_id WHERE s.name = $1`, browserMCPServer).Scan(&cached); err != nil {
+		log.Printf("[harness/browser] 统计 browser 工具缓存失败: %v", err)
+	}
 
 	dev := s.mcpStatus(devtoolsMCPServer)
 	out["devtools"] = dev
@@ -251,6 +257,11 @@ type consoleError struct {
 
 var consoleLevelRe = regexp.MustCompile(`(?i)\[(error|warn|warning|fatal|critical)\]`)
 
+// consoleMsgIDRe strips the "msgid=N " prefix chrome-devtools prints per message.
+// It has to go BEFORE dedupe: the same error re-logged after a reload gets a new
+// msgid, and keying on the raw line would then show the page's error twice.
+var consoleMsgIDRe = regexp.MustCompile(`^\s*msgid=\d+\s*`)
+
 // consoleErrors extracts the warn/error lines from the agent's DevTools console
 // reads (docs/10 §3.2 — the F12 panel shows this list and nothing else).
 //
@@ -285,7 +296,7 @@ func consoleErrors(acts []db.Activity, detail func(int64) (string, error), limit
 			if m == nil {
 				continue
 			}
-			text := strings.TrimSpace(line)
+			text := strings.TrimSpace(consoleMsgIDRe.ReplaceAllString(line, ""))
 			if seen[text] {
 				continue
 			}

@@ -105,7 +105,7 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 		runCtx := intercept.WithTaskContext(ctx, t.ID, "harness", emit)
 		e.BeginLLMCall(t.ID)
 		text, reason, err := h.Run(runCtx, agent.HarnessRunRequest{
-			TaskID:      mustTaskID(t.ID),
+			TaskID:      taskIDInt(t.ID),
 			Goal:        t.Goal,
 			Description: t.Description,
 			Input:       input,
@@ -157,7 +157,10 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 	}
 }
 
-func mustTaskID(id string) int64 {
+// taskIDInt parses a task id that the manager keeps as a string. Named apart from
+// the test helper mustTaskID(t, raw) in this package: two functions with one name
+// made the whole package's test build fail.
+func taskIDInt(id string) int64 {
 	n, _ := strconv.ParseInt(id, 10, 64)
 	return n
 }

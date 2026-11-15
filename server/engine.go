@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -250,6 +251,17 @@ func (e *Engine) registerTaskRoutines(parent context.Context, taskID string, cou
 func runTaskRoutine(rt *taskRuntime, fn func(context.Context)) {
 	go func() {
 		defer rt.wg.Done()
+		// A panic anywhere below this line used to take the whole process down: a
+		// resumed legacy task hit the known pgx "index out of range [0] with length 0"
+		// inside a read snapshot and the server exited with no HTTP surface left to
+		// report why. One task's crash must cost that task only, so it is recovered,
+		// logged with the stack, and the task is left in whatever state its own error
+		// path can express.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[engine] 任务协程 panic 已隔离（任务未停，其余任务不受影响）: %v\n%s", r, debug.Stack())
+			}
+		}()
 		fn(rt.ctx)
 	}()
 }

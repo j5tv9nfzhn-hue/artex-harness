@@ -22,6 +22,8 @@ package compaction
 
 import (
 	"context"
+	"log"
+	"os"
 	"sort"
 	"strings"
 
@@ -42,6 +44,12 @@ type Config struct {
 	// KeepRecent is the number of recent messages AutoCompact always preserves as
 	// the un-summarized tail (default 8). MicroCompact uses its own microKeepRecent.
 	KeepRecent int
+	// OnCompact, when set, is called after the history ACTUALLY changed: kind is
+	// "micro" (stale tool results cleared) or "auto" (head summarized), preTokens is
+	// the gate count that triggered it. A host can turn this into an audit row, so
+	// "a compaction happened" is observed rather than inferred from token deltas —
+	// the two are not the same thing when a new turn also resets the count.
+	OnCompact func(kind string, preTokens int)
 }
 
 func (c *Config) defaults() {
@@ -96,19 +104,51 @@ func (c *Compactor) reservedForSummary() int {
 	}
 	return r
 }
-func (c *Compactor) effectiveWindow() int { return c.cfg.ContextWindow - c.reservedForSummary() }
+
+// effectiveWindow is the window actually available for live history: the model's
+// context minus room reserved for the summary request and the reply.
+//
+// It never drops below half the configured window. Without that floor a small
+// profile breaks the arithmetic completely: at ContextWindow=32000 the 20000-token
+// summary reserve leaves 12000, the default 13000 buffer then pushes
+// autoThreshold to -1000, and the compactor spends the whole run "over threshold"
+// while there is nothing it can usefully compact — measured on a real run, the
+// request grew to 103010 tokens against a 32000-token window with zero
+// compactions. Half the window is small enough that compaction still fires well
+// before the provider's hard limit.
+func (c *Compactor) effectiveWindow() int {
+	w := c.cfg.ContextWindow - c.reservedForSummary()
+	if floor := c.cfg.ContextWindow / 2; w < floor {
+		return floor
+	}
+	return w
+}
 
 // buffer tiers off the EFFECTIVE window (== claude-code getAutocompactBufferTokens).
+// Capped at a quarter of that window for the same reason as the floor above: a
+// buffer larger than the window inverts the threshold.
 func (c *Compactor) buffer() int {
-	switch ew := c.effectiveWindow(); {
+	ew := c.effectiveWindow()
+	var buf int
+	switch {
 	case ew >= 800000:
-		return 50000
+		buf = 50000
 	case ew >= 400000:
-		return 30000
+		buf = 30000
 	default:
-		return 13000
+		buf = 13000
+	}
+	if cap := ew / 4; buf > cap {
+		return cap
+	}
+	return buf
+}
+func (c *Compactor) notify(kind string, preTokens int) {
+	if c.cfg.OnCompact != nil {
+		c.cfg.OnCompact(kind, preTokens)
 	}
 }
+
 func (c *Compactor) autoThreshold() int  { return c.effectiveWindow() - c.buffer() }
 func (c *Compactor) microThreshold() int { return c.effectiveWindow() * 6 / 10 }
 
@@ -123,11 +163,20 @@ func (c *Compactor) predictiveOver(tok int) bool {
 // reported), it is preferred over local estimation — mirroring claude-code's
 // tokenCountWithEstimation. After a working-set mutation, callers pass 0 to force
 // a fresh per-block estimate.
+// count is deliberately the LARGER of the two numbers available: the token count
+// the previous response reported, and a local estimate of the working set.
+//
+// Taking the reported number alone is what let a real HARNESS run sail past its
+// window: the reported figure lagged the working set (the same turn reported 14027
+// while the request it was gating measured 28578, and by the sixth file 61032), so
+// the gate never opened and nothing was ever compacted. Over-estimating costs an
+// early, cheap summary; under-estimating costs a prompt-too-long failure.
 func (c *Compactor) count(msgs []llm.Message, lastInputTokens int) int {
-	if lastInputTokens > 0 {
+	est := EstimateTokens(llm.MessagesForAPI(msgs)) * 4 / 3
+	if lastInputTokens > est {
 		return lastInputTokens
 	}
-	return EstimateTokens(llm.MessagesForAPI(msgs)) * 4 / 3
+	return est
 }
 
 // EstimateTokens approximates the token footprint of messages (~4 chars/token),
@@ -175,6 +224,9 @@ func (c *Compactor) Pre(ctx context.Context, msgs []llm.Message, lastInputTokens
 		return msgs
 	}
 	tok := c.count(msgs, lastInputTokens)
+	if debugOn() {
+		logDebug("Pre window=%d eff=%d micro=%d auto=%d tok=%d msgs=%d", c.cfg.ContextWindow, c.effectiveWindow(), c.microThreshold(), c.autoThreshold(), tok, len(msgs))
+	}
 	if tok <= c.microThreshold() {
 		return msgs
 	}
@@ -183,12 +235,14 @@ func (c *Compactor) Pre(ctx context.Context, msgs []llm.Message, lastInputTokens
 	// (which prefers the accurate last-response size) still holds.
 	if out, changed := c.microCompact(msgs); changed {
 		msgs = out
+		c.notify("micro", tok)
 		tok = c.count(msgs, 0)
 	}
 	// AutoCompact: at the threshold, or predictively if the next turn would overflow.
 	if tok >= c.autoThreshold() || c.predictiveOver(tok) {
 		if out, ok := c.autoCompact(ctx, msgs, tok, "auto"); ok {
 			msgs = out
+			c.notify("auto", tok)
 		}
 	}
 	return msgs
@@ -429,3 +483,8 @@ func contentOnly(msgs []llm.Message) []llm.Message {
 	}
 	return out
 }
+
+// debugOn mirrors harness.compactDebug for the compactor's own trace.
+func debugOn() bool { return os.Getenv("HARNESS_DEBUG_COMPACT") == "1" }
+
+func logDebug(format string, args ...any) { log.Printf("[compact] "+format, args...) }

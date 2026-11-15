@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,6 +48,7 @@ type HarnessAgent struct {
 	proxyCACert     string
 	webSearch       WebSearchOpts
 	findingRecorder FindingRecorder
+	compactHook     func(kind string, preTokens int)
 	// browserTools, when set, returns the session-managed browser tools for a task
 	// (docs/09 §2). They replace the per-run MCP clients for those servers.
 	browserTools func(ctx context.Context, taskID int64) ([]actool.CoreTool, error)
@@ -74,6 +76,10 @@ func (h *HarnessAgent) SetNoaEnabled(fn func() bool)              { h.noaEnabled
 func (h *HarnessAgent) SetMaxTokens(fn func() int)                { h.maxTokensFn = fn }
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
 func (h *HarnessAgent) SetFindingRecorder(f FindingRecorder)      { h.findingRecorder = f }
+
+// SetCompactHook observes compactions as they happen (kind "micro" or "auto"), so
+// the operator sees the event itself instead of a token delta he has to trust.
+func (h *HarnessAgent) SetCompactHook(fn func(kind string, preTokens int)) { h.compactHook = fn }
 
 // SetHooks wires the platform gate (guard/intercept hooks). Optional in the type but
 // mandatory in practice: an unwired harness agent executes every tool unchecked.
@@ -166,19 +172,23 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 	// Browser tools come from the session Manager (one session per task, shared by
 	// Playwright and DevTools). When it is wired we add them here and drop the copies
 	// the per-run augmentation would add, so there is exactly one browser stack.
-	managed := false
+	var managedTools []actool.CoreTool
 	if h.browserTools != nil {
 		if bt, err := h.browserTools(ctx, req.TaskID); err == nil && len(bt) > 0 {
 			base = append(base, bt...)
-			managed = true
+			managedTools = bt
 		} else if err != nil {
-			fmt.Printf("") // keep silent for the model; the status panel reports it
+			// Was `fmt.Printf("")`: nothing at all was emitted, so a browser stack
+			// that failed to start was indistinguishable from one never wired — the
+			// panel said "live" while the agent had no browser tools and no clue.
+			// The model still gets no tools; the operator gets the reason.
+			log.Printf("[harness] task %d 浏览器工具不可用（本轮不注入浏览器工具）: %v", req.TaskID, err)
 		}
 	}
 	tools, def, cleanup := AugmentTools(ctx, "harness", base)
 	defer cleanup()
-	if managed {
-		tools = dropManagedBrowserTools(tools)
+	if len(managedTools) > 0 {
+		tools = preferManagedBrowserTools(tools, managedTools)
 	}
 
 	sysBody := harnessDefaultPrompt
@@ -214,6 +224,11 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 	}
 	runCfg.ApplyModelDefaults(&opts)
 	runCfg.WithTodos(&opts)
+	if h.compactHook != nil && opts.Compaction != nil {
+		cfg := *opts.Compaction
+		cfg.OnCompact = h.compactHook
+		opts.Compaction = &cfg
+	}
 	if h.hooks != nil {
 		opts.Hooks = h.hooks
 	}
@@ -468,13 +483,33 @@ func (h *HarnessAgent) WorkDirFor(taskID int64) string {
 
 // dropManagedBrowserTools removes the per-run MCP copies of the browser servers. The
 // names come from norma's MCP tool naming (mcp__<server>__<tool>).
-func dropManagedBrowserTools(tools []actool.CoreTool) []actool.CoreTool {
-	drop := func(name string) bool {
-		return strings.HasPrefix(name, "mcp__browser__") || strings.HasPrefix(name, "mcp__chrome-devtools__")
+// preferManagedBrowserTools keeps exactly ONE browser stack: the session
+// Manager's.
+//
+// The previous version dropped every mcp__browser__/mcp__chrome-devtools__ name
+// from the assembled set — including the Manager's own tools, which had just been
+// appended to the base list. The agent therefore ran with zero browser and zero
+// DevTools tools while the panel happily reported the servers "live" (a real run
+// showed the model answering "my tool list doesn't include chrome-devtools"). Here
+// every copy of a managed name is dropped and the Manager's instances are put back,
+// so the per-run MCP duplicates vanish and the managed tools survive.
+func preferManagedBrowserTools(tools, managedTools []actool.CoreTool) []actool.CoreTool {
+	if len(managedTools) == 0 {
+		return tools
 	}
-	out := make([]actool.CoreTool, 0, len(tools))
+	managed := make(map[string]bool, len(managedTools))
+	for _, t := range managedTools {
+		managed[t.Name()] = true
+	}
+	out := make([]actool.CoreTool, 0, len(tools)+len(managedTools))
+	out = append(out, managedTools...)
 	for _, t := range tools {
-		if drop(t.Name()) {
+		if managed[t.Name()] {
+			continue
+		}
+		if strings.HasPrefix(t.Name(), "mcp__browser__") || strings.HasPrefix(t.Name(), "mcp__chrome-devtools__") {
+			// A browser/DevTools tool the Manager does not expose: keep it only when
+			// it is not a stale duplicate of a name we already added.
 			continue
 		}
 		out = append(out, t)

@@ -327,6 +327,10 @@ func (s *Server) harnessBudget(w http.ResponseWriter, r *http.Request) {
 	// The last turn's input tokens is the best available "current context size".
 	lastInput := t.Store.LastUsageInputTokens()
 	series, compactions := t.Store.InputTokenSeries()
+	// Recorded events vs inferred drops: the inference misses a compaction whose
+	// shrink is diluted by the tool output that triggered it, and it used to count a
+	// new turn as one. Both are reported so the panel never has to guess.
+	obsMicro, obsAuto := t.Store.CompactEventCounts()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":               t.ID,
 		"window":             window,
@@ -338,7 +342,12 @@ func (s *Server) harnessBudget(w http.ResponseWriter, r *http.Request) {
 		// SDK 不提供压缩事件，所以这是**推断**（回落 ≥20% 计一次），API 里也这样标注。
 		"series":      series,
 		"compactions": compactions,
-		"note":        "pct 基于最近一轮输入 token 估算上下文占用；compactions 由输入 token 回落推断（≥20% 计一次）。",
+		"compactions_observed": map[string]int{
+			"micro": obsMicro,
+			"auto":  obsAuto,
+			"total": obsMicro + obsAuto,
+		},
+		"note": "pct 基于最近一轮输入 token 估算上下文占用；compactions 由**同一轮次内**输入 token 回落推断（≥20% 计一次，轮次边界不计）。",
 	})
 }
 

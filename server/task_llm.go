@@ -616,6 +616,19 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	if t.Guard != nil {
 		hx.SetHooks(t.Guard.Hooks())
 	}
+	// 压缩事件直接落 activity（不新建表）：观测口径与回放同一份真值，且
+	// "压缩发生了" 变成被记录的事实，而不是从 token 回落推断出来的猜测。
+	hx.SetCompactHook(func(kind string, preTokens int) {
+		if t.Store == nil {
+			return
+		}
+		_, _ = t.Store.AppendActivity(db.Activity{
+			Worker:  "harness",
+			Kind:    "compact",
+			Tool:    kind,
+			Summary: "上下文压缩：" + kind + "（触发时约 " + strconv.Itoa(preTokens) + " tokens）",
+		})
+	})
 	// 浏览器会话由 Manager 持有（一任务一会话，Playwright 与 DevTools 共用），docs/09 §2
 	hx.SetBrowserTools(func(ctx context.Context, taskID int64) ([]actool.CoreTool, error) {
 		return s.browserToolsFor(ctx, taskID)

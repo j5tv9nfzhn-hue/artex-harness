@@ -263,6 +263,7 @@ func NewExecuteExtraTool(reg *Registry, unlock *UnlockSet) CoreTool {
 			if len(params) == 0 {
 				params = json.RawMessage("{}")
 			}
+			params = CoerceNumericParams(t.InputSchema(), params)
 			if err := ValidateInput(t.InputSchema(), params); err != nil {
 				return Errorf("Error: invalid params for " + args.ToolName + ": " + err.Error()), nil
 			}

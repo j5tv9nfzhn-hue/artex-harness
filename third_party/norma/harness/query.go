@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -403,8 +405,14 @@ func (l *loop) run() {
 
 		// Non-destructive proactive compaction (MicroCompact → AutoCompact).
 		if l.in.Compactor != nil {
+			before := len(l.messages)
 			l.messages = l.in.Compactor.Pre(l.ctx, l.messages, l.lastInputTokens)
+			if compactDebug() {
+				log.Printf("[compact] lastInput=%d messages %d→%d", l.lastInputTokens, before, len(l.messages))
+			}
 			l.recordNewBoundary()
+		} else if compactDebug() {
+			log.Printf("[compact] 未启用（Compactor=nil, lastInput=%d）", l.lastInputTokens)
 		}
 
 		usageBefore := l.usage
@@ -939,3 +947,8 @@ func jsonValid(s string) bool {
 	}
 	return depth == 0 && !inStr
 }
+
+// compactDebug gates the opt-in compaction trace. Off by default: one line per
+// model step is noise for everyone but the person chasing "the context grew and
+// nothing compacted" (HARNESS_DEBUG_COMPACT=1 turns it on).
+func compactDebug() bool { return os.Getenv("HARNESS_DEBUG_COMPACT") == "1" }

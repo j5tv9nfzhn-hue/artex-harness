@@ -2049,26 +2049,74 @@ ORDER BY id DESC LIMIT 1`, s.expID).Scan(&n)
 // "Sharp drop" stands in for "compaction happened": the SDK emits no compaction
 // event, but compaction IS a large reduction of the request context, so the next
 // usage row's input_tokens falls. Derived, not reported — the API says so.
+// CompactEventCounts returns how many compactions were actually recorded on this
+// task, split by kind. These are events the compactor reported as it changed the
+// history — the audit trail behind the budget panel's "压缩 N 次", as opposed to
+// the token-delta estimate in InputTokenSeries.
+func (s *ExplorationStore) CompactEventCounts() (micro, auto int) {
+	rows, err := s.q().Query(`
+SELECT tool, count(*) FROM activity
+WHERE exploration_id=$1 AND kind='compact'
+GROUP BY tool`, s.expID)
+	if err != nil {
+		return 0, 0
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		var n int
+		if err := rows.Scan(&kind, &n); err != nil {
+			return micro, auto
+		}
+		switch kind {
+		case "micro":
+			micro = n
+		case "auto":
+			auto = n
+		}
+	}
+	return micro, auto
+}
+
+// InputTokenSeries returns the per-request input token counts of this task and the
+// number of compactions observed in them.
+//
+// A compaction is a >=20% drop **within one turn**. The qualifier is the whole
+// point: a new turn starts from a fresh session, so its first request is small
+// again, and counting that as a compaction reported a shrink that never happened —
+// task 154 showed 57840 -> 14002 across a turn boundary and the first version of
+// this function called it a compaction. Turns are identified by the revision rows
+// in harness_revisions; rows that cannot be attributed to a revision are adjacent
+// to nothing and therefore never count.
 func (s *ExplorationStore) InputTokenSeries() ([]int, int) {
 	rows, err := s.q().Query(`
-SELECT COALESCE(input_tokens,0) FROM activity
-WHERE exploration_id=$1 AND input_tokens IS NOT NULL AND input_tokens > 0
-ORDER BY id ASC`, s.expID)
+SELECT a.input_tokens,
+       COALESCE((SELECT max(r.revision) FROM harness_revisions r
+                  WHERE r.exploration_id = a.exploration_id AND r.created_at <= a.created_at), 0)
+FROM activity a
+WHERE a.exploration_id=$1 AND a.input_tokens IS NOT NULL AND a.input_tokens > 0
+ORDER BY a.id ASC`, s.expID)
 	if err != nil {
 		return nil, 0
 	}
 	defer rows.Close()
 	out := make([]int, 0, 32)
+	revs := make([]int64, 0, 32)
 	for rows.Next() {
 		var n int
-		if err := rows.Scan(&n); err != nil {
+		var rev int64
+		if err := rows.Scan(&n, &rev); err != nil {
 			return out, 0
 		}
 		out = append(out, n)
+		revs = append(revs, rev)
 	}
 	compactions := 0
 	for i := 1; i < len(out); i++ {
 		prev, cur := out[i-1], out[i]
+		if revs[i] == 0 || revs[i] != revs[i-1] {
+			continue // different turn (or unknown): not comparable
+		}
 		if prev > 0 && float64(cur) < float64(prev)*0.8 {
 			compactions++
 		}
