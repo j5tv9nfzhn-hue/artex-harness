@@ -115,6 +115,11 @@ html, body, #root { height: 100%; margin: 0; }
 @keyframes artex-spin { to { transform: rotate(360deg); } }
 .spin { animation: artex-spin 0.9s linear infinite; }
 
+/* 有新构建时的提示：固定右下角，点一下整页刷新 */
+.stale-pill { position: fixed; right: 18px; bottom: 44px; z-index: 60; cursor: pointer;
+  border: 1px solid var(--accent-7); background: var(--accent-3); color: var(--accent-11);
+  border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 12px; box-shadow: var(--shadow-3); }
+
 /* 对话里用户自己说的话：右对齐气泡，和 agent 的正文区分开 */
 .user-row { display: flex; justify-content: flex-end; padding: 2px 0; }
 

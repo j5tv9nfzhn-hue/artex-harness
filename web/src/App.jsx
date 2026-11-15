@@ -74,6 +74,7 @@ export default function App() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [subOpen, setSubOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);   // 新建对话：侧栏/标题栏/命令面板共用一个
+  const [stale, setStale] = useState(false);       // 页面跑的是旧包 → 提示刷新
   const [convs, setConvs] = useState([]);          // 对话（无目标，首条消息才开跑）
   const [convId, setConvId] = useState(null);
   const [convTitle, setConvTitle] = useState("");
@@ -200,6 +201,26 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // 已经打开的标签页会一直跑旧包（入口 HTML 是 no-store，但已加载的 JS 不会自己换）。
+  // 每次重建后行为都会变，用户却看不到，于是把"已经修好"当成"没修"。这里比对入口
+  // HTML 引用的资源名，不一致就提示刷新。
+  useEffect(() => {
+    const mine = Array.from(document.querySelectorAll('script[type="module"]')).map((s) => s.src).join(",");
+    let dead = false;
+    const check = async () => {
+      try {
+        const r = await authedFetch("/app/index.html", { cache: "no-store" });
+        if (!r.ok) return;
+        const html = await r.text();
+        const m = html.match(/assets\/index-[A-Za-z0-9_-]+\.js/);
+        if (!dead && m && !mine.includes(m[0])) setStale(true);
+      } catch { /* 离线就下次再说 */ }
+    };
+    const id = setInterval(check, 60000);
+    check();
+    return () => { dead = true; clearInterval(id); };
   }, []);
 
   async function control(action) {
@@ -378,6 +399,13 @@ export default function App() {
           {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {budget.compactions_observed?.total ?? budget.compactions ?? 0}</Text></>) : null}
           <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">Radix Themes · lucide · motion · cmdk · recharts</Text></Box>
         </Flex>
+
+        {stale ? (
+          <motion.button className="stale-pill" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                         onClick={() => location.reload()}>
+            界面已更新 · 点此刷新
+          </motion.button>
+        ) : null}
 
         {palette ? (
           <Palette tasks={harnessRuns} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
