@@ -577,3 +577,21 @@ button{ white-space: nowrap; }
   .topbar{ padding: 10px 12px 0; }
   .tabs{ margin: 6px -12px 0; padding: 0 12px; }
 }
+
+/* ── 右栏默认收起 ─────────────────────────────────────────────────────────
+   三栏常驻在 1280 宽下把事件流挤到 <600px，而右栏多数时间是空状态。默认收起：
+   两栏 + 一个可随时打开的浮层，状态记在 localStorage，刷新后保持。 */
+.app{ grid-template-columns: 292px minmax(0,1fr); }
+.dock{
+  position: fixed; right: 0; top: 0; bottom: 27px; width: min(420px, 92vw);
+  z-index: 70; transform: translateX(100%);
+  transition: transform var(--t) var(--ease);
+  box-shadow: var(--sh-3); border-left: 1px solid var(--line);
+}
+.dock.open{ transform: none; }
+.dock-toggle{ display: inline-flex; }
+@media (max-width: 720px){
+  .app{ grid-template-columns: 1fr; }
+}
+.rail-toggle{ display: none; }
+@media (max-width: 720px){ .rail-toggle{ display: inline-flex; } }

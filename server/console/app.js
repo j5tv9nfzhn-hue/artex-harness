@@ -1022,14 +1022,35 @@ document.addEventListener("keydown", (ev) => {
   if (document.getElementById("btn-dock-toggle")) return;
   const bar = document.querySelector(".topbar-actions");
   if (!bar) return;
-  const mk = (id, label, title, target) => {
+  const mk = (id, label, title, target, cls) => {
     const b = document.createElement("button");
-    b.id = id; b.className = "sm dock-toggle"; b.textContent = label; b.title = title;
-    b.addEventListener("click", () => document.querySelector(target)?.classList.toggle("open"));
+    b.id = id; b.className = "sm " + cls; b.textContent = label; b.title = title;
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", () => {
+      const el = document.querySelector(target);
+      if (!el) return;
+      const open = el.classList.toggle("open");
+      b.setAttribute("aria-expanded", String(open));
+    });
     bar.appendChild(b);
   };
-  mk("btn-dock-toggle", "面板", "切换右栏（窄屏抽屉）", ".dock");
-  mk("btn-rail-toggle", "任务", "切换任务栏（窄屏抽屉）", ".rail");
+  mk("btn-dock-toggle", "面板", "切换右侧面板（Esc 关闭）", ".dock", "dock-toggle");
+  mk("btn-rail-toggle", "任务", "切换任务栏（窄屏）", ".rail", "rail-toggle");
+
+  // 右栏默认收起，状态记住：多数时间它是空状态，常驻只会挤压事件流。
+  const KEY = "artex.harness.dock";
+  const dock = document.querySelector(".dock");
+  if (dock && getStored(KEY) === "open") dock.classList.add("open");
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && dock && dock.classList.contains("open") && !cmdkState) {
+      dock.classList.remove("open");
+      store(KEY, "closed");
+    }
+  });
+  if (dock) {
+    new MutationObserver(() => store(KEY, dock.classList.contains("open") ? "open" : "closed"))
+      .observe(dock, { attributes: true, attributeFilter: ["class"] });
+  }
 })();
 
 /* ── 状态栏：把"连没连上、有多少任务、现在是哪个"放到常驻位置 ─────────────
@@ -1063,3 +1084,7 @@ updateStatusbar();
     });
   });
 })();
+
+/* 轻量本地偏好读写：失败（隐私模式/配额）不抛错，只是不记忆 */
+function getStored(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function store(key, val) { try { val === null ? localStorage.removeItem(key) : localStorage.setItem(key, val); } catch {} }
