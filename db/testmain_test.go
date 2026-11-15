@@ -30,16 +30,17 @@ func TestMain(m *testing.M) {
 	}
 	// 每个包在持锁后重建 schema：破坏性用例必须自带干净起点，否则第二次运行会
 	// 撞上一次留下的唯一约束，go test 就变成了"看历史"而不是"看代码"。
-	if err := ResetTestSchema(context.Background(), conn); err != nil {
-		os.Stderr.WriteString("[test] reset schema failed: " + err.Error() + "\n")
-		os.Exit(1)
-	}
-	defer conn.Exec(`SELECT pg_advisory_unlock(7337741002)`) //nolint:errcheck
 	// 破坏性用例必须显式指名一个测试库：这些 suite 会 TRUNCATE 真实表，
 	// 早先它们与开发服务器共用同一个库，一次 go test 就把在用的 LLM profile 删了。
+	// 这一步必须排在 ResetTestSchema 之前——schema 重建本身就是破坏性动作。
 	if ok, why := TestDatabaseAllowed(dsn, "ARTEX_TEST_DB"); !ok {
 		os.Stderr.WriteString("[test] skipped destructive DB suite: " + why + "\n")
 		os.Exit(0)
+	}
+	defer conn.Exec(`SELECT pg_advisory_unlock(7337741002)`) //nolint:errcheck
+	if err := ResetTestSchema(context.Background(), conn); err != nil {
+		os.Stderr.WriteString("[test] reset schema failed: " + err.Error() + "\n")
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
