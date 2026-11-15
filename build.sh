@@ -15,8 +15,8 @@
 #   ARTEX_PACKAGE_DIR=dist            Directory for release archives.
 #   ARTEX_COMPRESS=off                UPX mode: off, auto, or required.
 #   ARTEX_UPX_ARGS="--best --lzma"    Arguments passed to UPX.
-#   ARTEX_SKIP_FRONTEND=1             Reuse server/webui/dist (for CI artifact builds).
-#   ARTEX_SKIP_NPM_CI=1               Skip npm ci while rebuilding the frontend.
+#   ARTEX_SKIP_FRONTEND=1             Reuse the committed server/console-app (for CI artifact builds).
+#   ARTEX_SKIP_NPM_CI=1               Skip npm ci while rebuilding the console.
 #   ARTEX_GOSUMDB=sum.golang.org      Go checksum database.
 set -euo pipefail
 
@@ -111,19 +111,18 @@ else
   ARTEX_TARGETS="${ARTEX_TARGETS:-${ARTEX_TARGET_OS}/${ARTEX_TARGET_ARCH}}"
 fi
 
+# 控制台是 web/（React + Vite），产物提交在 server/console-app，由 go:embed 无条件嵌入。
+# 因此发布构建默认**不需要重建前端**：仓库里已有产物，纯 Go 环境也能出可执行文件。
+# （上游那套 Next.js 静态导出 + -tags embedui 已随前端下线移除。）
 if [ "${ARTEX_SKIP_FRONTEND:-0}" = "1" ]; then
-  [ -d server/webui/dist ] || die "ARTEX_SKIP_FRONTEND=1 但 server/webui/dist 不存在"
+  [ -f server/console-app/index.html ] || die "ARTEX_SKIP_FRONTEND=1 但 server/console-app/index.html 不存在"
 else
-  command -v npm >/dev/null 2>&1 || die "未检测到 npm（前端静态构建需要 Node.js/npm）"
-  command -v rsync >/dev/null 2>&1 || die "未检测到 rsync"
-  info "构建前端静态资源"
+  command -v npm >/dev/null 2>&1 || die "未检测到 npm（重建控制台需要 Node.js/npm）"
+  info "重新构建控制台（产物写入 server/console-app）"
   if [ "${ARTEX_SKIP_NPM_CI:-0}" != "1" ]; then
-    (cd web && npm ci)
+    (cd web && npm ci --no-audit --no-fund)
   fi
-  (cd web && npm run build:static)
-  info "同步前端资源到 server/webui/dist"
-  mkdir -p server/webui/dist
-  rsync -a --delete web/out/ server/webui/dist/
+  (cd web && npm run build)
 fi
 
 compress_binary() {
@@ -217,7 +216,6 @@ build_target() {
   GOOS="$goos" \
   GOARCH="$goarch" \
   go build \
-    -tags embedui \
     -trimpath \
     -ldflags "-s -w -buildid= -X main.version=${ARTEX_BUILD_VERSION}" \
     -o "$output" \

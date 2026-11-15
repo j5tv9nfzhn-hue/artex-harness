@@ -74,3 +74,5 @@ Thumbs.db
 /ACTION/
 # 前端静态导出中间产物（build.sh 会同步进 server/webui/dist，那份已被忽略）
 /web/out/
+# 交叉编译产物
+/dist/
