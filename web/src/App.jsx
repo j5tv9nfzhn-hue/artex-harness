@@ -7,6 +7,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Command } from "cmdk";
 import Sidebar from "./Sidebar.jsx";
+import Composer from "./Composer.jsx";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
@@ -78,6 +79,9 @@ export default function App() {
             const data = chunk.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("");
             if (!data) continue;
             let ev; try { ev = JSON.parse(data); } catch { continue; }
+            if (ev.type === "TEXT_MESSAGE_CONTENT" && ev.delta) {
+              window.dispatchEvent(new CustomEvent("agui:text", { detail: ev.delta }));
+            }
             setRows((prev) => applyEvent(prev, ev));
           }
         }
@@ -143,6 +147,7 @@ export default function App() {
               {rows.map((r) => <Row key={r.key} row={r} />)}
             </AnimatePresence>
           </div>
+          <Composer taskId={taskId} live={live} budget={budget} onSent={() => setLive("connecting")} />
         </div>
 
         <Flex className="statusbar" align="center" gap="3">
