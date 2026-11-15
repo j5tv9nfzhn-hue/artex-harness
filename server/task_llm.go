@@ -612,6 +612,10 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	hx.SetNoaEnabled(s.m.NoaCompactionEnabled)
 	hx.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	hx.SetWebSearch(s.webSearchFor("harness"))
+	// 平台审批门：没有这一行，HARNESS 运行会绕过内置破坏性命令拦截（eval gate 抓到的真实缺陷）
+	if t.Guard != nil {
+		hx.SetHooks(t.Guard.Hooks())
+	}
 	// 浏览器会话由 Manager 持有（一任务一会话，Playwright 与 DevTools 共用），docs/09 §2
 	hx.SetBrowserTools(func(ctx context.Context, taskID int64) ([]actool.CoreTool, error) {
 		return s.browserToolsFor(ctx, taskID)

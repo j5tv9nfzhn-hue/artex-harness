@@ -49,7 +49,10 @@ type HarnessAgent struct {
 	findingRecorder FindingRecorder
 	// browserTools, when set, returns the session-managed browser tools for a task
 	// (docs/09 §2). They replace the per-run MCP clients for those servers.
-	browserTools   func(ctx context.Context, taskID int64) ([]actool.CoreTool, error)
+	browserTools func(ctx context.Context, taskID int64) ([]actool.CoreTool, error)
+	// hooks = platform gate (intercept rules / approvals). nil = NO GATE;
+	// an unwired harness agent would execute every tool unchecked.
+	hooks          harness.HookRunner
 	nonStreamingFn func() bool
 	noaEnabledFn   func() bool
 	maxTokensFn    func() int
@@ -71,6 +74,10 @@ func (h *HarnessAgent) SetNoaEnabled(fn func() bool)              { h.noaEnabled
 func (h *HarnessAgent) SetMaxTokens(fn func() int)                { h.maxTokensFn = fn }
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
 func (h *HarnessAgent) SetFindingRecorder(f FindingRecorder)      { h.findingRecorder = f }
+
+// SetHooks wires the platform gate (guard/intercept hooks). Optional in the type but
+// mandatory in practice: an unwired harness agent executes every tool unchecked.
+func (h *HarnessAgent) SetHooks(r harness.HookRunner) { h.hooks = r }
 
 // SetBrowserTools wires the session-managed browser tools (nil = use the per-run MCP
 // augmentation path, which is what happens before the Manager exists).
@@ -207,6 +214,9 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 	}
 	runCfg.ApplyModelDefaults(&opts)
 	runCfg.WithTodos(&opts)
+	if h.hooks != nil {
+		opts.Hooks = h.hooks
+	}
 	if h.tx != nil {
 		opts.Transcript = h.tx
 		opts.SessionID = fmt.Sprintf("exp%d-harness", req.Store.ID())

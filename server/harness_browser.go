@@ -213,7 +213,7 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 				items := make([]item, 0, 8)
 				for i := len(acts) - 1; i >= 0 && len(items) < 12; i-- {
 					a := acts[i]
-					if !strings.HasPrefix(a.Tool, "mcp__browser__") {
+					if !strings.HasPrefix(a.Tool, "mcp__browser__") && !strings.HasPrefix(a.Tool, "mcp__chrome-devtools__") {
 						continue
 					}
 					items = append(items, item{ID: a.ID, Tool: a.Tool, Kind: a.Kind, Summary: truncateSummary(a.Summary, 200)})

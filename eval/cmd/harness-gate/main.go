@@ -50,6 +50,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	if err := assertTerminal(ctx, *dsn, *baseTask); err != nil {
+		fmt.Fprintf(os.Stderr, "baseline: %v\n", err)
+		os.Exit(2)
+	}
+	if err := assertTerminal(ctx, *dsn, *candTask); err != nil {
+		fmt.Fprintf(os.Stderr, "candidate: %v\n", err)
+		os.Exit(2)
+	}
 	base, baseLabel, err := load(ctx, *baseFile, *baseTask, *dsn, *from, *to)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "baseline: %v\n", err)
@@ -144,4 +152,34 @@ func short(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// assertTerminal refuses to judge a task that is still running.
+//
+// Why this matters: a run in flight has not recorded its later events, so comparing it
+// with a finished run reports differences that are really "not done yet" — exactly the
+// false wording mismatch the first real gate run produced. Exit code 2 = cannot judge.
+func assertTerminal(ctx context.Context, dsn string, taskID int64) error {
+	if taskID <= 0 {
+		return nil // file-based replay: caller owns completeness
+	}
+	if strings.TrimSpace(dsn) == "" {
+		return nil
+	}
+	d, err := db.Open(dsn)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	t, err := d.GetTask(taskID)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return fmt.Errorf("task %d not found", taskID)
+	}
+	if t.Status != "done" && t.Status != "failed" && t.Status != "timeout" {
+		return fmt.Errorf("task %d 状态=%s（未终态）：请等它结束再比对，否则差异来自\"还没跑完\"", taskID, t.Status)
+	}
+	return nil
 }

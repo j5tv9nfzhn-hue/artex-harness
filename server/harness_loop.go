@@ -23,6 +23,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/harness/protocol"
+	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/harness"
 )
 
@@ -99,8 +100,11 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 			e.emitActivity(t, r)
 		}
 
+		// Task-scoped intercept context: an `ask` verdict must land in THIS task's
+		// stream and resolve against THIS task's rules (same contract as a work run).
+		runCtx := intercept.WithTaskContext(ctx, t.ID, "harness", emit)
 		e.BeginLLMCall(t.ID)
-		text, reason, err := h.Run(ctx, agent.HarnessRunRequest{
+		text, reason, err := h.Run(runCtx, agent.HarnessRunRequest{
 			TaskID:      mustTaskID(t.ID),
 			Goal:        t.Goal,
 			Description: t.Description,

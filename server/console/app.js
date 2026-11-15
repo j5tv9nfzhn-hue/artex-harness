@@ -469,7 +469,19 @@ async function renderBrowserPanel() {
           <span class="dim">${esc(r.kind)}</span></div>
         <div class="dcard-res">${esc(r.summary || "")}</div>
       </div>`).join("");
-    box.innerHTML = sessHTML + `
+    let obs = null;
+    try { obs = await api(`/api/harness/budget/${encodeURIComponent(S.task.id)}`); } catch {}
+    const series = (obs && obs.series) || [];
+    const spark = series.length > 1 ? sparkline(series, 260, 34) : "";
+    const obsHTML = obs ? `
+      <div class="dcard">
+        <div class="dcard-head"><span class="tag">上下文观测</span>
+          <span class="${(obs.compactions || 0) > 0 ? "eval-pass" : "dim"}">压缩 ${obs.compactions || 0} 次</span></div>
+        ${spark}
+        <div class="dcard-res">每轮输入 token ${series.join(" → ") || "—"}
+预算 ${Math.round((obs.run_budget_seconds || 0) / 60)} 分钟 · 当前占用 ${Math.round(obs.pct || 0)}%</div>
+      </div>` : "";
+    box.innerHTML = sessHTML + obsHTML + `
       <div class="dstat">
         <span>已配置 <b>${b.configured ? "是" : "否"}</b></span>
         <span>已启用 <b>${b.enabled ? "是" : "否"}</b></span>
@@ -484,6 +496,13 @@ async function renderBrowserPanel() {
         <div class="dcard-res">${esc((b.devtools && (b.devtools.hint || (b.devtools.enabled ? "已启用 · 工具缓存 " + b.devtools.tools_cached : "未启用"))) || "未配置")}</div>
         ${b.f12_hint ? `<div class="dcard-res">${esc(b.f12_hint)}</div>` : ""}
       </div>
+      ${(() => {
+        const f12 = (b.recent || []).filter((r) => r.tool.startsWith("mcp__chrome-devtools__"));
+        if (!f12.length) return `<p class="dim xs">F12 动作：本任务还没有（启用后 agent 的 console/network 查询会出现在这里）。</p>`;
+        return `<div class="dcard"><div class="dcard-head"><span class="tag">F12 · 最近动作</span>
+          <span class="dim">${f12.length}</span></div>
+          <div class="dcard-res">${f12.map((r) => `${r.tool.replace("mcp__chrome-devtools__","")} · ${r.kind}\n${(r.summary || "").slice(0, 300)}`).join("\n\n")}</div></div>`;
+      })()}
       ${recent || `<p class="dim xs">本任务还没有浏览器动作。</p>`}
       <p class="dim xs">说明：截图以缩略图形式挂在事件流每条浏览器动作旁（点击看大图）；存储按哈希去重、24h TTL、上限 2000 张。</p>`;
     const tabBtn = $("#btn-br-tab");
@@ -813,3 +832,20 @@ $("#drawer-cmd").addEventListener("keydown", (ev) => { if (ev.key === "Enter") {
 /* ── init ─────────────────────────────────────────────────────────────── */
 renderDockTabs();
 boot();
+
+/* sparkline：把每轮输入 token 画成内联 SVG（无外部依赖、无实时通道）。
+   compactions 由后端推断，这里用竖线标出"回落点"，与 budget 面板同源。 */
+function sparkline(values, w, h) {
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 4) - 2).toFixed(1)}`);
+  let drops = "";
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] < values[i - 1] * 0.8) {
+      drops += `<line x1="${(i * step).toFixed(1)}" y1="0" x2="${(i * step).toFixed(1)}" y2="${h}" stroke="var(--ok)" stroke-width="1" stroke-dasharray="2 2" />`;
+    }
+  }
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin:4px 0">
+    ${drops}<polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${pts.join(" ")}" />
+  </svg>`;
+}
