@@ -61,7 +61,7 @@ func TestAgentToolSurvivesParentCancel(t *testing.T) {
 	h := NewHarnessAgent(prov, "fake", t.TempDir(), nil, 64000, 4)
 	h.SetNonStreaming(func() bool { return true })
 
-	tool := h.agentTool(nil, nil)
+	tool := h.agentTool(nil, nil, 1)
 	parent, parentCancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(20 * time.Millisecond) // cancel while the child is in flight
@@ -92,7 +92,7 @@ func TestAgentToolRefusesToStartAfterCancel(t *testing.T) {
 	prov := &fakeSubagentProvider{}
 	h := NewHarnessAgent(prov, "fake", t.TempDir(), nil, 64000, 4)
 	h.SetNonStreaming(func() bool { return true })
-	tool := h.agentTool(nil, nil)
+	tool := h.agentTool(nil, nil, 1)
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -113,7 +113,7 @@ func TestAgentToolRefusesToStartAfterCancel(t *testing.T) {
 func TestAgentToolRejectsUnknownType(t *testing.T) {
 	h := NewHarnessAgent(&fakeSubagentProvider{}, "fake", t.TempDir(), nil, 64000, 4)
 	h.SetNonStreaming(func() bool { return true })
-	tool := h.agentTool(nil, nil)
+	tool := h.agentTool(nil, nil, 1)
 	res, err := tool.Call(context.Background(), json.RawMessage(`{"agent_type":"nope","prompt":"x"}`),
 		&actool.ToolContext{WorkingDir: t.TempDir()})
 	if err != nil {

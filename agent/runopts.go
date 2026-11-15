@@ -37,6 +37,10 @@ type ModelRunConfig struct {
 	NonStreaming bool
 	// MaxTokens caps the reply; 0 = no cap sent (endpoint default applies).
 	MaxTokens int
+	// EscalateMaxTokens retries a truncated reply with a raised output cap once,
+	// before the resume-with-nudge recovery (norma/harness/query.go). The
+	// connection-test path deliberately leaves it off (see agent/provider.go).
+	EscalateMaxTokens bool
 }
 
 // ApplyModelDefaults writes the shared model/runtime fields onto opts.
@@ -68,6 +72,7 @@ func (c ModelRunConfig) ApplyModelDefaults(opts *agentcore.Options) {
 	opts.Compaction = compactionConfig(c.ContextWindow)
 	opts.NonStreaming = c.NonStreaming
 	opts.MaxTokens = c.MaxTokens
+	opts.EscalateMaxTokens = c.EscalateMaxTokens
 }
 
 // WithTodos attaches a session-scoped todo store. Both conversational runners use

@@ -102,7 +102,9 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 
 		// Task-scoped intercept context: an `ask` verdict must land in THIS task's
 		// stream and resolve against THIS task's rules (same contract as a work run).
-		runCtx := intercept.WithTaskContext(ctx, t.ID, "harness", emit)
+		// The optional policyEmit hook lets the server layer write typed
+		// permission-decision rows into the same stream (Sprint 2).
+		runCtx := intercept.WithTaskContext(ctx, t.ID, "harness", emit, e.policyEmit)
 		e.BeginLLMCall(t.ID)
 		text, reason, err := h.Run(runCtx, agent.HarnessRunRequest{
 			TaskID:      taskIDInt(t.ID),
@@ -142,7 +144,16 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 
 		// A turn is finished. If nothing was queued while it ran, the conversation
 		// is at rest: mark the task done so it stops looking "running" forever.
-		// Say() flips it back and restarts the loop.
+		//
+		// Park, do NOT return. The loop goroutine IS this task's harness consumer:
+		// returning left e.started set (only StopTask clears it) while the goroutine
+		// was gone, so the next Say()/background-delegation wake called Resume→Notify
+		// on a channel with nobody reading it — the message was accepted (revision
+		// returned) and then never ran. That was reachable purely through the UI: rest
+		// a HARNESS task, send another message, nothing happens. Parking on the inbox
+		// keeps one goroutine per live idle task — exactly the "等待人工指示" state it
+		// represents — and both the human inbox and <task-notification> wake it. Delete
+		// and shutdown cancel rt.ctx, so the parked select unblocks and exits cleanly.
 		if !t.HasPendingHarnessMessage() {
 			if won, serr := e.m.SetTaskStatusGuarded(t.ID, "done"); serr != nil {
 				log.Printf("[harness] task %s 落完成态失败: %v", t.ID, serr)
@@ -152,7 +163,6 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 					Summary: "本轮结束，等待人工指示（发送消息即继续）",
 				})
 			}
-			return
 		}
 	}
 }
@@ -212,6 +222,38 @@ func (e *Engine) Say(t *Task, message string) (int64, error) {
 		e.Resume(t)
 	}
 	return turn.Revision, nil
+}
+
+// NotifyDelegation wakes a harness task with a background delegation's
+// <task-notification>. This is the mirror of Say for delegated work: the agent
+// decides whether the result changes its plan, and a resting task is revived
+// (ADR-0005: still one conversational agent holding every verb).
+//
+// It is best-effort by design. A notification that cannot be delivered (paused,
+// deleted, inbox full) is NOT an error: the delegation's tool_result was already
+// recorded, the completion lifecycle activity exists, and the delegations API
+// reports the terminal state — so no information is lost, only the nudge.
+func (e *Engine) NotifyDelegation(t *Task, text string) {
+	if t == nil || !t.HarnessMode {
+		return
+	}
+	if e.IsDeleting(t.ID) || e.IsPaused(t.ID) {
+		return
+	}
+	// A human message in flight wins the inbox slot: notifications are additive,
+	// operator input is not, and dropping the nudge costs nothing recoverable.
+	if !t.PushHarnessMessage(text) {
+		return
+	}
+	revived := false
+	if isTerminalStatus(e.m.TaskStatus(t.ID)) {
+		if won, err := e.m.SetTaskStatusGuarded(t.ID, "running"); err == nil && won {
+			revived = true
+		}
+	}
+	if revived || !e.Started(t.ID) {
+		e.Resume(t)
+	}
 }
 
 // protocolTurn builds the protocol view of the current turn (used by the console's

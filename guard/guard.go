@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/hook"
 )
@@ -75,6 +76,13 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		cmd = in.Text
 	}
 	g.record(ev.ToolName, "allow", "", cmd)
+	// Sprint 2: make the policy layer's view of this call replayable. The event
+	// carries no verdict — the server-side emitter attaches the active policy's
+	// decision. This is observation only; applyIntercept below is still the veto.
+	intercept.EmitPolicyDecision(ctx, db.Activity{
+		Worker: "harness", Kind: "permission_decision", Tool: ev.ToolName,
+		Summary: "权限策略评估：" + ev.ToolName,
+	})
 	return g.applyIntercept(ctx, ev)
 }
 

@@ -16,11 +16,14 @@ import Sidebar from "./Sidebar.jsx";
 import Composer from "./Composer.jsx";
 import SettingsView from "./SettingsView.jsx";
 import Subagents from "./Subagents.jsx";
+import Trajectory from "./Trajectory.jsx";
+import Checkpoints from "./Checkpoints.jsx";
+import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
-  Search, SquareTerminal, Users, Wrench, XCircle,
+  Search, ShieldAlert, SquareTerminal, Users, Wrench, XCircle,
 } from "lucide-react";
 
 /* 视觉层全部来自库：
@@ -52,7 +55,12 @@ export default function App() {
   const [err, setErr] = useState("");
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
-  const [view, setView] = useState("chat"); // chat | settings
+  const [view, setView] = useState("chat"); // chat | trajectory | checkpoints | settings
+  const [tabs, setTabs] = useState([]);   // 打开过的会话/任务标签
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchHits, setSearchHits] = useState([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const [version, setVersion] = useState("");
   const [health, setHealth] = useState(null);
   const [appearance, setAppearance] = useState(() => { try { return localStorage.getItem("artex.appearance") || "inherit"; } catch { return "inherit"; } });
@@ -85,6 +93,20 @@ export default function App() {
         const list = Array.isArray(d) ? d : (d.tasks || d.items || []);
         setTasks(list);
       if (list.length && !taskId) setTaskId(String(list[0].id));
+      // 把当前任务加入标签（只加不删，切换标签不中断运行）
+      setTabs((prev) => {
+        const next = [...prev];
+        for (const t of list.filter((x) => x.harness_mode).slice(0, 12)) {
+          const id = String(t.id);
+          if (!next.some((x) => x.type === "task" && String(x.id) === id)) {
+            next.push({ type: "task", id, title: t.goal || t.description || "运行 #" + id, status: t.status });
+          } else {
+            const i = next.findIndex((x) => x.type === "task" && String(x.id) === id);
+            next[i] = { ...next[i], status: t.status };
+          }
+        }
+        return next;
+      });
     } catch (e) { setErr("加载任务失败：" + e.message); }
   }, [taskId]);
 
@@ -164,6 +186,34 @@ export default function App() {
     api("/api/health").then((d) => { setVersion(d.version || ""); setHealth(d); }).catch(() => {});
     api("/api/llm/profiles").then((d) => setProfiles(Array.isArray(d) ? d : (d.profiles || []))).catch(() => {});
   }, []);
+
+  // 待处理审批的全局徽标：长任务切到别的标签也不丢"有人在等我"。
+  useEffect(() => {
+    let dead = false;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/intercept/pending", { headers: authHeaders(), credentials: "include" });
+        if (r.ok && !dead) {
+          const d = await r.json();
+          const list = Array.isArray(d) ? d : (d.items || d.pending || []);
+          setPendingCount(list.length);
+        }
+      } catch { /* 徽标不是关键路径 */ }
+    };
+    tick();
+    const id = setInterval(tick, 15000);
+    return () => { dead = true; clearInterval(id); };
+  }, []);
+
+  // 跨会话全文搜索：命中 summary 或完整 detail（后端按活动正文检索）。
+  const runSearch = useCallback(async () => {
+    const q = searchQ.trim();
+    if (!q || !taskId) { setSearchHits([]); return; }
+    try {
+      const d = await api(`/api/harness/search?task=${encodeURIComponent(taskId)}&q=${encodeURIComponent(q)}&limit=50`);
+      setSearchHits(d.results || []);
+    } catch (e) { toast.error("搜索失败：" + e.message); }
+  }, [searchQ, taskId]);
 
   useEffect(() => {
     if (!taskId) { setBudget(null); return; }
@@ -245,6 +295,22 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  const openTab = useCallback((tab) => {
+    setTabs((prev) => prev.some((x) => x.type === tab.type && String(x.id) === String(tab.id))
+      ? prev.map((x) => x.type === tab.type && String(x.id) === String(tab.id) ? { ...x, ...tab } : x)
+      : [...prev, tab]);
+  }, []);
+
+  const pickTab = useCallback((tab) => {
+    if (tab.type === "conv") { setConvId(String(tab.id)); setTaskId(null); setConvTitle(tab.title || "对话"); }
+    else { setTaskId(String(tab.id)); setConvId(null); }
+    setView("chat");
+  }, []);
+
+  const closeTab = useCallback((tab) => {
+    setTabs((prev) => prev.filter((x) => !(x.type === tab.type && String(x.id) === String(tab.id))));
+  }, []);
+
   const newConversation = useCallback(async () => {
     try {
       const r = await authedFetch("/api/conversations", {
@@ -255,15 +321,17 @@ export default function App() {
       if (!r.ok) throw new Error((await r.text()).slice(0, 160));
       const c = await r.json();
       setConvs((prev) => [c, ...prev.filter((x) => String(x.id) !== String(c.id))]);
-      setConvId(String(c.id)); setConvTitle(c.title || "新对话"); setTaskId(null);
+      setConvId(String(c.id)); setConvTitle(c.title || "新对话"); setTaskId(null); setView("chat");
+      openTab({ type: "conv", id: String(c.id), title: c.title || "新对话", status: "done" });
     } catch (e) { toast.error("新建对话失败：" + e.message); }
-  }, []);
+  }, [openTab]);
 
   const pickConversation = useCallback((id) => {
     setConvId(String(id)); setTaskId(null);
     const c = convs.find((x) => String(x.id) === String(id));
-    setConvTitle(c?.title || "对话");
-  }, [convs]);
+    setConvTitle(c?.title || "对话"); setView("chat");
+    openTab({ type: "conv", id: String(id), title: c?.title || "对话", status: "done" });
+  }, [convs, openTab]);
 
   // 对话用轮询（后端提供 ?since= 增量），不走 AG-UI SSE：它没有 task 活动流。
   useEffect(() => {
@@ -317,14 +385,22 @@ export default function App() {
                  onOpenSettings={() => setView("settings")} />
 
         <div className="main">
-          <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+          <WorkspaceTabs open={tabs} active={convId ? { type: "conv", id: convId } : taskId ? { type: "task", id: taskId } : null}
+                         onPick={pickTab} onClose={closeTab} onNew={newConversation}
+                         pendingByTask={pendingCount ? { [String(taskId)]: pendingCount } : {}} />
+          <Flex align="center" gap="3" px="4" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
             <Activity size={15} />
-            <Text size="2" weight="medium" truncate style={{ maxWidth: "42vw" }}>
+            <Text size="2" weight="medium" truncate style={{ maxWidth: "34vw" }}>
               {convId ? (convTitle || "对话")
                 : cur ? (cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
             </Text>
             <Box style={{ marginLeft: "auto" }}>
               <Flex gap="2" align="center">
+                <SegmentedView view={view} onChange={setView} disabled={convId || !taskId} />
+                <Tooltip content="搜索本会话正文（summary + 完整 detail）">
+                  <Button size="1" variant={searchOpen ? "solid" : "soft"} disabled={!taskId || !!convId}
+                          onClick={() => setSearchOpen((v) => !v)}><Search size={12} /> 搜索</Button>
+                </Tooltip>
                 <Tooltip content="新建对话（⌘N）——不设目标，发第一条消息才开始">
                   <Button size="1" variant="soft" onClick={newConversation}><Plus size={13} /> 新建对话</Button>
                 </Tooltip>
@@ -335,7 +411,13 @@ export default function App() {
                 <Tooltip content="恢复任务">
                   <IconButton size="1" variant="ghost" aria-label="恢复" onClick={() => control("resume")}><Play size={13} /></IconButton>
                 </Tooltip>
+                {budget ? <ContextRing pct={budget.pct} window={budget.window} last={budget.last_input} /> : null}
                 {budget ? <BudgetSpark data={series} pct={budget.pct} /> : null}
+                {pendingCount > 0 ? (
+                  <Tooltip content={`${pendingCount} 个审批等待处理`}>
+                    <Badge size="1" color="amber"><ShieldAlert size={11} /> {pendingCount}</Badge>
+                  </Tooltip>
+                ) : null}
                 <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
                   <Button size="1" variant={subOpen ? "solid" : "soft"} onClick={() => setSubOpen((v) => !v)}>
                     <Users size={12} /> 子代理
@@ -350,6 +432,37 @@ export default function App() {
             </Box>
           </Flex>
 
+          {searchOpen && !convId ? (
+            <Flex align="center" gap="2" px="4" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+              <Search size={13} />
+              <RTextField.Root placeholder="搜索本会话的活动正文…" value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }} style={{ flex: 1 }} />
+              <Button size="1" variant="soft" onClick={runSearch}>搜索</Button>
+              <Button size="1" variant="ghost" onClick={() => { setSearchOpen(false); setSearchHits([]); setSearchQ(""); }}>关闭</Button>
+              {searchHits.length ? <Badge size="1" variant="soft">{searchHits.length} 命中</Badge> : null}
+            </Flex>
+          ) : null}
+          {searchOpen && searchHits.length ? (
+            <Box px="4" py="2" style={{ maxHeight: 180, overflow: "auto", borderBottom: "1px solid var(--gray-a5)" }}>
+              {searchHits.map((h) => (
+                <Flex key={h.id} gap="2" py="1" align="start" style={{ borderBottom: "1px solid var(--gray-a3)" }}>
+                  <Badge size="1" variant="soft">{h.kind}</Badge>
+                  <Text size="1" className="mono" style={{ flex: 1, whiteSpace: "pre-wrap" }}>
+                    {h.summary || h.detail?.slice(0, 160) || "(无正文)"}
+                  </Text>
+                  <Text size="1" color="gray">#{h.id}</Text>
+                </Flex>
+              ))}
+            </Box>
+          ) : null}
+
+          {view === "trajectory" && taskId && !convId ? (
+            <Trajectory taskId={taskId} onClose={() => setView("chat")} onLocate={() => setView("chat")} />
+          ) : view === "checkpoints" && taskId && !convId ? (
+            <Box style={{ flex: 1, minHeight: 0 }}><Checkpoints taskId={taskId} onRestored={() => setRetryNonce((n) => n + 1)} /></Box>
+          ) : (
+          <>
           <div className="stream" ref={scroller} onScroll={onStreamScroll}>
             {err ? (
               <Card size="1" style={{ borderColor: "var(--red-7)" }}>
@@ -386,6 +499,8 @@ export default function App() {
           ) : null}
           <Composer taskId={taskId} convId={convId} live={live} budget={budget} task={cur}
                     onSent={() => setRetryNonce((n) => n + 1)} onTuned={loadTasks} />
+          </>
+          )}
         </div>
 
         {subOpen ? <Subagents taskId={taskId} live={live} onClose={() => setSubOpen(false)} /> : null}
@@ -533,6 +648,39 @@ function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
         </Command>
       </div>
     </div>
+  );
+}
+
+function SegmentedView({ view, onChange, disabled }) {
+  const items = [
+    { key: "chat", label: "对话" },
+    { key: "trajectory", label: "轨迹" },
+    { key: "checkpoints", label: "检查点" },
+  ];
+  return (
+    <Flex gap="1" className="view-seg" role="tablist" aria-label="工作区视图">
+      {items.map((it) => (
+        <button key={it.key} role="tab" aria-selected={view === it.key}
+                className={"view-seg-btn" + (view === it.key ? " active" : "")}
+                disabled={disabled && it.key !== "chat"}
+                onClick={() => onChange(it.key)}>{it.label}</button>
+      ))}
+    </Flex>
+  );
+}
+
+// ContextRing：上下文占用环。颜色分级与后端 budget.pct 一致（≥70 琥珀、≥90 红）。
+function ContextRing({ pct, window, last }) {
+  const v = Math.max(0, Math.min(100, Math.round(pct || 0)));
+  const color = v >= 90 ? "var(--red-9)" : v >= 70 ? "var(--amber-9)" : "var(--green-9)";
+  const deg = v * 3.6;
+  return (
+    <Tooltip content={`上下文占用 ${v}% · 窗口 ${window || "?"} · 最近输入 ${last || 0} tokens`}>
+      <Box className="ctx-ring" style={{ background: `conic-gradient(${color} ${deg}deg, var(--gray-a4) 0)` }}
+           title={`${v}%`}>
+        <span>{v}</span>
+      </Box>
+    </Tooltip>
   );
 }
 

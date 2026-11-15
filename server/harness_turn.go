@@ -50,8 +50,28 @@ func (e *Engine) OpenTurn(t *Task, kind, ref, summary string) protocol.Turn {
 	// Boundary item so a live subscriber learns about the new turn even if the
 	// turn produces no other activity (a planner round that dispatches nothing).
 	e.BroadcastTurn(t, turn)
+	e.turnMu.Lock()
+	hook := e.turnOpened
+	e.turnMu.Unlock()
+	if hook != nil {
+		// Snapshot failures are the host's responsibility to log; a failed
+		// checkpoint must never stop the run.
+		hook(t, turn)
+	}
 	return turn
 }
+
+// SetTurnOpenedHook installs the optional per-turn host hook.
+func (e *Engine) SetTurnOpenedHook(fn func(t *Task, turn protocol.Turn)) {
+	e.turnMu.Lock()
+	e.turnOpened = fn
+	e.turnMu.Unlock()
+}
+
+// SetPolicyEmitter installs the optional permission-decision emitter. The
+// signature is intentionally the raw activity callback: the policy layer stays
+// observational and cannot veto anything through it.
+func (e *Engine) SetPolicyEmitter(fn func(context.Context, db.Activity)) { e.policyEmit = fn }
 
 // CurrentTurn returns the task's current Turn (zero Turn when none is open).
 func (e *Engine) CurrentTurn(taskID string) protocol.Turn {

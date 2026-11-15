@@ -49,6 +49,14 @@ type Capability struct {
 	// a factual property, not a risk score: the harness reports it, the operator
 	// judges it (decision 5 — no new hard constraints).
 	Exec bool `json:"exec"`
+	// ConcurrencySafe reports that this capability may run alongside other
+	// concurrency-safe capabilities. It mirrors norma's CoreTool.IsConcurrencySafe:
+	// the streaming executor runs safe tools in parallel and gives non-safe tools
+	// exclusive access. A factual property, like Exec — no policy is attached.
+	ConcurrencySafe bool `json:"concurrency_safe"`
+	// Deferred reports that the capability's schema is withheld until the model
+	// unlocks it through the deferred-tool access tools.
+	Deferred bool `json:"deferred"`
 }
 
 // ToolRow is the subset of a tools-table row the classifier needs.
@@ -58,6 +66,9 @@ type ToolRow struct {
 	Desc    string
 	Enabled bool
 	Agents  []string
+	// Deferred mirrors tools.deferred. ConcurrencySafe is derived from the
+	// runtime tool's IsConcurrencySafe, not the row (see ClassifyRuntime).
+	Deferred bool
 }
 
 // MCPRow is one configured MCP server.
@@ -98,6 +109,11 @@ func Classify(tools []ToolRow, mcps []MCPRow, skills []SkillRow) []Capability {
 			Agents:  append([]string(nil), t.Agents...),
 			Enabled: t.Enabled,
 			Exec:    exec,
+			// A read-only builtin is explicitly safe to run concurrently; anything
+			// else is conservatively treated as exclusive. ClassifyRuntime overrides
+			// this with the real runtime tool's verdict when available.
+			ConcurrencySafe: surface == SurfaceBuiltin && readOnlyBuiltin[t.Key],
+			Deferred:        t.Deferred,
 		}
 		sort.Strings(c.Agents)
 		out = append(out, c)
@@ -158,6 +174,27 @@ func surfaceOfKind(kind string) (surface string, exec bool) {
 	}
 }
 
+// ClassifyRuntime overlays the real runtime tool flags onto a classified list.
+//
+// Why a separate step: Classify is pure (DB/disk inputs only) and is what the
+// tests pin. The concurrency flag is a property of the Go handler, not of a
+// tools-table row, so it must come from the assembled CoreTool. Passing a map of
+// name → verdict keeps this package free of a norma import.
+//
+// A capability absent from the map keeps Classify's conservative default; a
+// capability whose runtime tool is explicitly safe is upgraded to parallelisable.
+// MCP/skill entries have no CoreTool in the assembled set and are left alone.
+func ClassifyRuntime(caps []Capability, safe map[string]bool) []Capability {
+	out := make([]Capability, len(caps))
+	copy(out, caps)
+	for i := range out {
+		if verdict, ok := safe[out[i].Name]; ok {
+			out[i].ConcurrencySafe = verdict
+		}
+	}
+	return out
+}
+
 // Summary counts capabilities per surface, for a compact header in the console.
 func Summary(caps []Capability) map[string]int {
 	out := map[string]int{}
@@ -165,6 +202,18 @@ func Summary(caps []Capability) map[string]int {
 		out[c.Surface]++
 	}
 	return out
+}
+
+// ConcurrencySummary counts how many capabilities are parallelisable vs exclusive.
+func ConcurrencySummary(caps []Capability) (parallel, exclusive int) {
+	for _, c := range caps {
+		if c.ConcurrencySafe {
+			parallel++
+		} else {
+			exclusive++
+		}
+	}
+	return parallel, exclusive
 }
 
 // readOnlyBuiltin names the builtin capabilities that cannot cause a side effect

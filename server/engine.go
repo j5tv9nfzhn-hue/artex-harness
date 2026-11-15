@@ -165,6 +165,14 @@ type Engine struct {
 	turnMu  sync.Mutex
 	turn    map[string]protocol.Turn
 	itemSeq map[string]int
+	// turnOpened is an optional host hook fired after a Turn is installed. It lets
+	// the server layer take a per-turn workspace snapshot without the Engine
+	// learning about filesystem paths (Sprint 2 checkpoints).
+	turnOpened func(t *Task, turn protocol.Turn)
+	// policyEmit, when set, receives typed permission-decision activities so the
+	// policy layer's decisions are replayable. Installed by the server layer.
+	// The context carries the task id (intercept.WithTaskContext).
+	policyEmit func(context.Context, db.Activity)
 }
 
 type taskRuntime struct {

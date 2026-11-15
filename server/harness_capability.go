@@ -10,6 +10,7 @@ package server
 // evidence behind them?". Neither enforces anything (decision 5).
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -17,8 +18,33 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/harness/capability"
+	actool "github.com/Autumn-27/norma/tool"
 )
+
+// assembleCapabilityTools builds the HARNESS tool pool once (no stores needed —
+// every constructor only closes over them) so the registry can report the real
+// IsConcurrencySafe verdict of each handler. This is the same base pool the run
+// uses, minus the per-run MCP/browser augmentation, which has no tools-table row.
+func assembleCapabilityTools() []actool.CoreTool {
+	ts := agent.NewToolSet(nil, "harness")
+	tools := ts.MainAgentTools()
+	tools = append(tools, actool.DefaultTools()...)
+	return tools
+}
+
+// capabilityConcurrencyVerdicts reports a tool's concurrency safety with an empty
+// input. Tools whose safety depends on arguments are reported conservatively: the
+// run may still parallelise them, the registry just does not claim they are
+// always safe.
+func capabilityConcurrencyVerdicts() map[string]bool {
+	out := map[string]bool{}
+	for _, t := range assembleCapabilityTools() {
+		out[t.Name()] = t.IsConcurrencySafe(json.RawMessage(`{}`))
+	}
+	return out
+}
 
 // collectCapabilities gathers the three DB/disk inputs and normalises them.
 func (s *Server) collectCapabilities() []capability.Capability {
@@ -30,11 +56,12 @@ func (s *Server) collectCapabilities() []capability.Capability {
 		}
 		for _, t := range rows {
 			tools = append(tools, capability.ToolRow{
-				Key:     t.Key,
-				Kind:    t.Kind,
-				Desc:    t.Description,
-				Enabled: t.Enabled,
-				Agents:  t.Agents,
+				Key:      t.Key,
+				Kind:     t.Kind,
+				Desc:     t.Description,
+				Enabled:  t.Enabled,
+				Agents:   t.Agents,
+				Deferred: t.Deferred,
 			})
 		}
 	}
@@ -52,7 +79,10 @@ func (s *Server) collectCapabilities() []capability.Capability {
 			})
 		}
 	}
-	return capability.Classify(tools, mcps, s.collectSkills())
+	return capability.ClassifyRuntime(
+		capability.Classify(tools, mcps, s.collectSkills()),
+		capabilityConcurrencyVerdicts(),
+	)
 }
 
 // collectSkills lists the skill bundles on disk. Skills are files, not rows, so
@@ -106,12 +136,18 @@ func countFiles(dir string, limit int) int {
 // harnessCapabilities reports every capability this deployment exposes.
 func (s *Server) harnessCapabilities(w http.ResponseWriter, _ *http.Request) {
 	caps := s.collectCapabilities()
+	parallel, exclusive := capability.ConcurrencySummary(caps)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"capabilities": caps,
 		"summary":      capability.Summary(caps),
+		"concurrency": map[string]int{
+			"parallel":  parallel,
+			"exclusive": exclusive,
+		},
 		"note": "能力注册表：harness 只把这些供给面统一成同一种『能力』，" +
-			"不实现扫描/利用逻辑（判据见 docs/02 §6.1）。exec=true 表示它能在主机上执行代码或发起请求，" +
-			"这是事实描述，不是风险评分。",
+			"不实现扫描/利用逻辑（判据见 docs/02 §6.1）。exec=true 表示它能在主机上执行代码或发起请求；" +
+			"concurrency_safe=true 表示可与其它安全能力并行（由流式执行器按 FIFO+互斥规则调度）。" +
+			"两者都是事实描述，不是风险评分。",
 	})
 }
 

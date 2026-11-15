@@ -105,3 +105,61 @@ func TestSummaryCounts(t *testing.T) {
 		t.Fatalf("summary = %v", sum)
 	}
 }
+
+func TestConcurrencyMetadata(t *testing.T) {
+	caps := Classify(
+		[]ToolRow{
+			{Key: "graph_overview", Kind: "builtin", Deferred: true},
+			{Key: "add_finding", Kind: "builtin"},
+			{Key: "my_scanner", Kind: "command"},
+		},
+		nil, nil,
+	)
+	byName := map[string]Capability{}
+	for _, c := range caps {
+		byName[c.Name] = c
+	}
+	if !byName["graph_overview"].ConcurrencySafe {
+		t.Error("a read-only builtin should be parallelisable by default")
+	}
+	if byName["add_finding"].ConcurrencySafe || byName["my_scanner"].ConcurrencySafe {
+		t.Error("unknown/mutating capabilities must default to exclusive")
+	}
+	if !byName["graph_overview"].Deferred || byName["add_finding"].Deferred {
+		t.Error("deferred flag did not round-trip")
+	}
+
+	// The runtime overlay is authoritative: a tool whose handler says "safe"
+	// upgrades the classification, and one that says "exclusive" downgrades it.
+	runtime := ClassifyRuntime(caps, map[string]bool{
+		"graph_overview": false,
+		"add_finding":    true,
+	})
+	for _, c := range runtime {
+		switch c.Name {
+		case "graph_overview":
+			if c.ConcurrencySafe {
+				t.Error("runtime verdict must override the conservative default")
+			}
+		case "add_finding":
+			if !c.ConcurrencySafe {
+				t.Error("runtime verdict must override the conservative default")
+			}
+		case "my_scanner":
+			if c.ConcurrencySafe {
+				t.Error("capabilities absent from the runtime map keep the default")
+			}
+		}
+	}
+}
+
+func TestConcurrencySummary(t *testing.T) {
+	caps := Classify(
+		[]ToolRow{{Key: "graph_overview", Kind: "builtin"}, {Key: "add_finding", Kind: "builtin"}},
+		nil, nil,
+	)
+	parallel, exclusive := ConcurrencySummary(caps)
+	if parallel != 1 || exclusive != 1 {
+		t.Fatalf("parallel=%d exclusive=%d, want 1/1", parallel, exclusive)
+	}
+}

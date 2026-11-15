@@ -115,7 +115,23 @@
 **未改动**：规划者/执行者的既有实现与行为（仅由 `harness_mode` 决定是否启动），
 以及全部提示词、内置拦截规则、默认策略。
 
-### 3.5 `README.md` / `CHANGELOG.md` / `docs/` 重排
+### 3.5 `third_party/norma/harness/query.go` — max-tokens 恢复不再重复抬额（Sprint 1.3）
+
+```diff
+-if l.in.EscalateMaxTokens && l.maxOutputTokensOverride == 0 {
++if l.in.EscalateMaxTokens && !l.maxOutputTokensEscalated {
++    l.maxOutputTokensEscalated = true
+```
+
+**原因**：`maxOutputTokensOverride` 会在注入「继续」提示时被清零（`query.go:468`），
+而重入 `handleMaxOutputTokens` 时又用「override == 0」判断是否需要抬额。结果是
+escalate 与 nudge 交替触发，`EscalateMaxTokens` 名为「一次」实为多次，永远截断的
+provider 会被调用 8 次而不是承诺的 5 次。新增独立布尔标志后，抬额在整个轮次链里
+只发生一次，恢复次数回到 `1 + 3` 的设计值。**不影响提示词、拦截规则或任何模型可见文本**，
+只修正恢复循环的次数。负向对照：`third_party/norma/harness/recovery_contract_test.go`
+的 `TestMaxTokensRecoveryIsBounded` 断言「恰好 5 次模型调用」，去掉该修复即失败。
+
+### 3.6 `README.md` / `CHANGELOG.md` / `docs/` 重排
 
 上游 `README.md` 是一份完整的项目说明（安装、更新、架构、免责）；本仓库需要自己的 README
 来解释"harness 而非工具集"的定位。故：上游 README 原文保留为 `README-ARTEX.md`，本仓库新增

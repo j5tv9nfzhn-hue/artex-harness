@@ -1812,6 +1812,40 @@ func (s *ExplorationStore) ActivityTraceForTerminalIntent(nodeID int64, limit in
 	return scanTrace(rows)
 }
 
+// ActivitySearch finds any recorded activity whose summary OR full detail matches
+// q, across the whole task (not just worker traces). Sprint 2 session search:
+// unlike ActivityTraceSearch it does not require a node_id, so human messages,
+// system prompts, results and tool calls are all findable. detail is returned so
+// the UI can show the matching line; thinking rows are searchable too.
+func (s *ExplorationStore) ActivitySearch(q string, limit int) ([]Activity, error) {
+	if strings.TrimSpace(q) == "" {
+		return []Activity{}, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	like := "%" + strings.TrimSpace(q) + "%"
+	rows, err := s.q().Query(`SELECT id, node_id, COALESCE(worker,''), COALESCE(kind,''), COALESCE(tool,''),
+		COALESCE(tool_use_id,''), is_error, COALESCE(summary,''), COALESCE(detail,''), created_at
+	FROM activity WHERE exploration_id=$1
+	AND (summary ILIKE $2 OR detail ILIKE $2)
+	ORDER BY id DESC LIMIT $3`, s.expID, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Activity{}
+	for rows.Next() {
+		var a Activity
+		if err := rows.Scan(&a.ID, &a.NodeID, &a.Worker, &a.Kind, &a.Tool, &a.ToolUseID,
+			&a.IsError, &a.Summary, &a.Detail, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // ActivityTraceSearch finds steps whose summary OR detail matches q
 // (case-insensitive), returning summaries only. nodeID != nil scopes to one work;
 // nil searches across ALL works (node_id IS NOT NULL — planner/main steps have no
@@ -1977,6 +2011,42 @@ FROM activity WHERE exploration_id=$1 AND kind<>'thinking' AND id IN (`+strings.
 	for rows.Next() {
 		var a Activity
 		if err := rows.Scan(&a.ID, &a.NodeID, &a.Kind, &a.Tool, &a.IsError, &a.Detail); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ActivityByIDsWithUsage is the replay/trajectory variant: it also carries the
+// per-turn token accounting stored on usage/result rows and the worker label
+// used to attribute subagent rows. It is separate so the column order every
+// other ActivityByIDs caller depends on never changes.
+func (s *ExplorationStore) ActivityByIDsWithUsage(ids []int64) ([]Activity, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, len(ids)+1)
+	args[0] = s.expID
+	for i, id := range ids {
+		ph[i] = fmt.Sprintf("$%d", i+2)
+		args[i+1] = id
+	}
+	rows, err := s.q().Query(`SELECT id, node_id, COALESCE(worker,''), COALESCE(kind,''), COALESCE(tool,''),
+		COALESCE(tool_use_id,''), is_error, COALESCE(summary,''), COALESCE(detail,''), created_at,
+		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+FROM activity WHERE exploration_id=$1 AND id IN (`+strings.Join(ph, ",")+`) ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Activity{}
+	for rows.Next() {
+		var a Activity
+		if err := rows.Scan(&a.ID, &a.NodeID, &a.Worker, &a.Kind, &a.Tool, &a.ToolUseID,
+			&a.IsError, &a.Summary, &a.Detail, &a.CreatedAt,
+			&a.InputTokens, &a.OutputTokens, &a.CacheReadTokens, &a.CacheWriteTokens); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

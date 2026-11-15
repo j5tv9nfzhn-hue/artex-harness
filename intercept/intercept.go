@@ -47,8 +47,9 @@ func ConvIDFromContext(ctx context.Context) int64 {
 type taskCtxKey int
 
 const (
-	taskInfoCtxKey taskCtxKey = 1
-	taskEmitCtxKey taskCtxKey = 2
+	taskInfoCtxKey   taskCtxKey = 1
+	taskEmitCtxKey   taskCtxKey = 2
+	policyEmitCtxKey taskCtxKey = 3
 )
 
 type taskCtxInfo struct{ taskID, agentName string }
@@ -56,10 +57,15 @@ type taskCtxInfo struct{ taskID, agentName string }
 // WithTaskContext injects task metadata and an emit function into ctx so that
 // HandleAsk can tag pending records and write intercept_request activities to
 // the task's exploration stream (making them appear inline in session transcripts).
-func WithTaskContext(ctx context.Context, taskID, agentName string, emit func(db.Activity)) context.Context {
+// policyEmit, when set, receives typed permission-decision activities (Sprint 2)
+// so a policy outcome is replayable without changing the veto path.
+func WithTaskContext(ctx context.Context, taskID, agentName string, emit func(db.Activity), policyEmit ...func(context.Context, db.Activity)) context.Context {
 	ctx = context.WithValue(ctx, taskInfoCtxKey, taskCtxInfo{taskID, agentName})
 	if emit != nil {
 		ctx = context.WithValue(ctx, taskEmitCtxKey, emit)
+	}
+	if len(policyEmit) > 0 && policyEmit[0] != nil {
+		ctx = context.WithValue(ctx, policyEmitCtxKey, policyEmit[0])
 	}
 	return ctx
 }
@@ -71,9 +77,26 @@ func taskInfoFromCtx(ctx context.Context) (taskID, agentName string) {
 	return "", ""
 }
 
+// TaskIDFromContext exposes the task id for host-side policy emitters. It is a
+// read-only accessor; the host still owns where the row is written.
+func TaskIDFromContext(ctx context.Context) string {
+	id, _ := taskInfoFromCtx(ctx)
+	return id
+}
+
 func taskEmitFromCtx(ctx context.Context) func(db.Activity) {
 	f, _ := ctx.Value(taskEmitCtxKey).(func(db.Activity))
 	return f
+}
+
+// EmitPolicyDecision writes a typed permission decision into the task stream.
+// It is best-effort: the policy layer is observational, and a lost row must not
+// change whether the tool runs (the hooks remain the only veto point).
+func EmitPolicyDecision(ctx context.Context, a db.Activity) {
+	f, _ := ctx.Value(policyEmitCtxKey).(func(context.Context, db.Activity))
+	if f != nil {
+		f(ctx, a)
+	}
 }
 
 // compiledRule is an InterceptRule with the regex pre-compiled (nil for string rules).

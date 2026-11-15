@@ -44,6 +44,8 @@ const (
 	ItemIntercept ItemKind = "intercept"
 	// ItemLifecycle is a task-level lifecycle note (paused/resumed/settled).
 	ItemLifecycle ItemKind = "lifecycle"
+	// ItemContext is a harness-injected context or kernel-decision row.
+	ItemContext ItemKind = "context"
 )
 
 // Item is one unit of work inside a Turn.

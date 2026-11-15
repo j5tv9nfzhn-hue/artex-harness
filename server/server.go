@@ -22,6 +22,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/harness/browser"
+	hperm "github.com/Autumn-27/artex/harness/permission"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
@@ -120,6 +121,11 @@ type Server struct {
 	archiveWake chan struct{}
 	// projectDirs enforces "one harness task per project directory" (docs/09 §4).
 	projectDirs *projectGuard
+	// permission policy for HARNESS runs (Sprint 1.2). Cached on first use;
+	// Replace clears the session grants. The veto point remains the hooks.
+	harnessPermMu   sync.Mutex
+	harnessPerm     *hperm.Policy
+	harnessPermNote string
 	// browser owns per-task browser sessions (MCP + tab model + rebuild), docs/09 §2.
 	browser   *browser.Manager
 	archiveWG sync.WaitGroup
@@ -186,6 +192,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	s.engine.SetHarnessResolver(func(t *Task) (*agent.HarnessAgent, bool) {
 		return s.harnessAgentFor(t)
 	})
+	// Sprint 2: snapshot the workspace at the start of every turn so the console
+	// can offer "undo this turn". Best-effort; failures never stop a run.
+	s.wireCheckpoints()
+	s.wirePolicyEvents()
 	// Wire DB-stored prompt templates into the agents (新版方案 §3.3 / §5a). With no
 	// override row, agents keep their built-in defaults — behavior is unchanged.
 	if m.pg != nil {
@@ -844,12 +854,25 @@ func (s *Server) Handler() http.Handler {
 
 	// 回放与一致性评测（S3）：只读历史，不触碰探索状态。
 	mux.HandleFunc("GET /api/harness/replay", s.harnessReplay)
+	mux.HandleFunc("GET /api/harness/trajectory", s.harnessTrajectory)
+	mux.HandleFunc("GET /api/harness/search", s.harnessSearch)
 	mux.HandleFunc("POST /api/harness/consistency", s.harnessConsistency)
 	mux.HandleFunc("GET /api/harness/scenarios", s.evalScenarios)
 
 	// 能力注册表与证据完整性（S4）：只读视图，不做强制（决策 5）。
 	mux.HandleFunc("GET /api/harness/capabilities", s.harnessCapabilities)
 	mux.HandleFunc("GET /api/harness/evidence-integrity", s.harnessEvidenceIntegrity)
+
+	// HARNESS 权限策略（Sprint 1.2）：规则 / 模式 / 会话级放行。
+	// 只是策略，不是审批门；否决权仍在 guard/intercept 的 PreToolUse hooks。
+	mux.HandleFunc("GET /api/harness/permission", s.harnessPermissionView)
+	mux.HandleFunc("PUT /api/harness/permission", s.harnessPermissionReplace)
+	mux.HandleFunc("POST /api/harness/permission/grant", s.harnessPermissionGrant)
+
+	// 检查点（Sprint 2）：每轮工作区快照、预览回滚范围、显式回滚。
+	mux.HandleFunc("GET /api/harness/checkpoints/{id}", s.harnessCheckpoints)
+	mux.HandleFunc("GET /api/harness/checkpoints/{id}/{rev}", s.harnessCheckpoints)
+	mux.HandleFunc("POST /api/harness/checkpoints/{id}/{rev}/restore", s.harnessCheckpointRestore)
 
 	// HARNESS 运行模式（docs/07）：一个任务一个会话 agent。
 	mux.HandleFunc("GET /api/harness/ready", s.harnessReady)
@@ -861,6 +884,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/budget/{id}", s.harnessBudget)
 	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)
 	mux.HandleFunc("GET /api/harness/subagent/{agent}", s.harnessSubagentDetail)
+	// 委派 API（Sprint 3）：后台委派的权威状态、结果与停止。
+	mux.HandleFunc("GET /api/harness/delegations/{id}", s.harnessDelegations)
+	mux.HandleFunc("GET /api/harness/delegations/{id}/{did}", s.harnessDelegationOne)
+	mux.HandleFunc("POST /api/harness/delegations/{id}/{did}/stop", s.harnessDelegationStop)
 	// AG-UI 事件流（公开协议）：上游 agent UI 直接消费，docs/10 §4
 	mux.HandleFunc("GET /api/agui/agent", s.aguiAgent)
 	mux.HandleFunc("GET /api/harness/browser", s.harnessBrowserStatus)

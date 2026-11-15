@@ -48,12 +48,12 @@ func Load(ctx context.Context, d *db.DB, taskID int64, from, to int64) (*Run, er
 	events := make([]Event, 0, len(ids))
 	if len(ids) > 0 {
 		store := d.Exploration(t.ExplorationID)
-		acts, err := store.ActivityByIDs(ids)
+		acts, err := store.ActivityByIDsWithUsage(ids)
 		if err != nil {
 			return nil, fmt.Errorf("load activities: %w", err)
 		}
 		for _, a := range acts {
-			events = append(events, Event{
+			e := Event{
 				Revision:   revOf[a.ID],
 				ActivityID: a.ID,
 				Kind:       a.Kind,
@@ -65,7 +65,20 @@ func Load(ctx context.Context, d *db.DB, taskID int64, from, to int64) (*Run, er
 				IsError:    a.IsError,
 				NodeID:     a.NodeID,
 				At:         a.CreatedAt,
-			})
+			}
+			if a.InputTokens != nil {
+				e.InputTokens = *a.InputTokens
+			}
+			if a.OutputTokens != nil {
+				e.OutputTokens = *a.OutputTokens
+			}
+			if a.CacheReadTokens != nil {
+				e.CacheReadTokens = *a.CacheReadTokens
+			}
+			if a.CacheWriteTokens != nil {
+				e.CacheWriteTokens = *a.CacheWriteTokens
+			}
+			events = append(events, e)
 		}
 	}
 

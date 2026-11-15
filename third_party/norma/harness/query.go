@@ -248,6 +248,7 @@ type loop struct {
 	// recovery / continuation state
 	maxOutputTokensOverride      int
 	maxOutputTokensRecoveryCount int
+	maxOutputTokensEscalated     bool
 	hasAttemptedReactiveCompact  bool
 	stopHookActive               bool
 	budget                       budgetTracker
@@ -637,8 +638,14 @@ func filterToolSchemas(schemas []llm.ToolSchema, disabled []string) []llm.ToolSc
 
 // handleMaxOutputTokens implements the escalate→recover(3×) flow. Returns true
 // if it injected a recovery and the loop should continue.
+//
+// Escalation happens ONCE for the whole turn chain. The flag is separate from
+// maxOutputTokensOverride because the override is intentionally cleared when a
+// nudge is injected (line 468): without this flag, "escalate once" would re-fire
+// on every other truncation and the loop would take 2× the retries it promises.
 func (l *loop) handleMaxOutputTokens() bool {
-	if l.in.EscalateMaxTokens && l.maxOutputTokensOverride == 0 {
+	if l.in.EscalateMaxTokens && !l.maxOutputTokensEscalated {
+		l.maxOutputTokensEscalated = true
 		l.maxOutputTokensOverride = escalatedMaxTokens
 		l.lastContinue = ContinueMaxOutputTokensEscalate
 		return true

@@ -27,6 +27,10 @@ func KindOf(activityKind string) ItemKind {
 		return ItemIntercept
 	case "lifecycle", "pause", "resume", "cancel":
 		return ItemLifecycle
+	case "permission_decision", "recovery":
+		// Kernel decisions are context rows in the trajectory (they explain why
+		// a turn behaved as it did) rather than chat messages.
+		return ItemContext
 	default:
 		// "result", "system", anything new: keep it visible as text so no
 		// information is lost, and let the client branch on Metadata if it cares.

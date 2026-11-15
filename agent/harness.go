@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/harness/delegation"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -58,6 +59,11 @@ type HarnessAgent struct {
 	nonStreamingFn func() bool
 	noaEnabledFn   func() bool
 	maxTokensFn    func() int
+	// delegationNotify wakes the parent conversation with a background
+	// delegation's <task-notification>. Injected by the server (the agent package
+	// must not import it). nil = notifications are still recorded as activities
+	// but cannot wake a resting task (the parent must send a message to resume).
+	delegationNotify func(taskID int64, text string)
 }
 
 // NewHarnessAgent builds the runtime for one task. Same construction contract as
@@ -69,11 +75,14 @@ func NewHarnessAgent(prov llm.Provider, model, workDir string, tx *transcript.St
 	}
 }
 
-func (h *HarnessAgent) SetProxy(addr, caCert string)              { h.proxyAddr, h.proxyCACert = addr, caCert }
-func (h *HarnessAgent) SetWebSearch(o WebSearchOpts)              { h.webSearch = o }
-func (h *HarnessAgent) SetNonStreaming(fn func() bool)            { h.nonStreamingFn = fn }
-func (h *HarnessAgent) SetNoaEnabled(fn func() bool)              { h.noaEnabledFn = fn }
-func (h *HarnessAgent) SetMaxTokens(fn func() int)                { h.maxTokensFn = fn }
+func (h *HarnessAgent) SetProxy(addr, caCert string)   { h.proxyAddr, h.proxyCACert = addr, caCert }
+func (h *HarnessAgent) SetWebSearch(o WebSearchOpts)   { h.webSearch = o }
+func (h *HarnessAgent) SetNonStreaming(fn func() bool) { h.nonStreamingFn = fn }
+func (h *HarnessAgent) SetNoaEnabled(fn func() bool)   { h.noaEnabledFn = fn }
+func (h *HarnessAgent) SetMaxTokens(fn func() int)     { h.maxTokensFn = fn }
+func (h *HarnessAgent) SetDelegationNotifier(fn func(taskID int64, text string)) {
+	h.delegationNotify = fn
+}
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
 func (h *HarnessAgent) SetFindingRecorder(f FindingRecorder)      { h.findingRecorder = f }
 
@@ -117,6 +126,10 @@ func (h *HarnessAgent) modelRunConfig() ModelRunConfig {
 		ContextWindow: h.compactionWindow(),
 		NonStreaming:  h.nonStreaming(),
 		MaxTokens:     h.maxTokens(),
+		// A truncated final answer must be resumed, not silently surfaced as a
+		// half-written conclusion. The SDK escalates the cap once, then nudges
+		// "continue where you left off" up to 3 times (Sprint 1.3).
+		EscalateMaxTokens: true,
 	}
 }
 
@@ -168,7 +181,7 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 
 	base := h.domainTools(tsx)
 	base = append(base, defaultToolsExcept("MultiEdit")...) // keep Edit/LS/Glob/Grep/Bash/Read/Write
-	base = append(base, h.agentTool(base, emit))
+	base = append(base, h.agentTool(base, emit, req.TaskID))
 	// Browser tools come from the session Manager (one session per task, shared by
 	// Playwright and DevTools). When it is wired we add them here and drop the copies
 	// the per-run augmentation would add, so there is exactly one browser stack.
@@ -385,15 +398,17 @@ func shouldStartSubagent(ctx context.Context) bool { return ctx.Err() == nil }
 // agentTool wraps norma's Agent tool so a delegation is visible in the harness
 // event stream: the parent's transcript shows who was dispatched and what came
 // back, which is what makes "the model decided to parallelise" auditable.
-func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity)) actool.CoreTool {
+//
+// Sprint 3 adds run_in_background: the model may choose to spawn a delegation
+// without blocking its turn. Background runs are tracked in delegation.Global
+// (one authoritative registry per task) and announce completion with a
+// <task-notification> activity the parent consumes on its next turn.
+func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity), taskID int64) actool.CoreTool {
 	registry := actool.NewRegistry(base...)
 	cfg := subagent.Config{
 		Provider:    h.prov,
 		ParentTools: registry,
 		Transcript:  h.tx,
-		// 子代理沿用父会话的权限语义：父会话本身是 ModeBypass，真正的否决权在平台
-		// hooks（拦截规则 / 审批门）。不设 CanUseTool 时 norma 会以"没有审批处理器"
-		// 拒掉子代理的每次 Bash，子代理只能拿 Grep/Read 硬凑，任务被拖到几分钟乃至超时。
 		CanUseTool: func(context.Context, string, json.RawMessage, acperm.Context) acperm.Decision {
 			return acperm.Allowed()
 		},
@@ -401,86 +416,252 @@ func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity))
 		Hooks: h.hooks,
 		// No definition lists "Agent", so a subagent can never delegate again: the
 		// depth guard stays as defence in depth, not as the only limit.
-		Agents: map[string]subagent.Definition{
-			"recon": {
-				Description: "侦察与信息收集：探测入口、指纹、参数、可达性。只写资产与事实，不下漏洞结论。",
-				Prompt: []string{
-					"你是侦察子代理。只做信息收集：入口、接口、指纹、参数、可达性。",
-					"把发现用 insert_assets / record_fact 写回图谱，不要下漏洞结论。",
-					"结束后用几句话说清：确认了什么、证据（命令与输出摘要）、还有什么没探。",
-				},
-				Tools:    []string{"Bash", "Read", "LS", "Glob", "Grep", "insert_assets", "record_fact", "list_assets", "graph_overview", "node_detail"},
-				MaxTurns: 0,
-			},
-			"verify": {
-				Description: "复现与验证：对给定结论用独立路径再触发一次，只回答成立/不成立及证据。",
-				Prompt: []string{
-					"你是验证子代理。任务是一个**待验证的结论**。",
-					"用与原始路径**不同**的方法独立复现；复述原证据不算验证。",
-					"只回答：成立 / 不成立 / 无法确认，并给出命令与关键输出。",
-				},
-				Tools:    []string{"Bash", "Read", "Grep", "graph_overview", "node_detail", "list_findings", "record_fact"},
-				MaxTurns: 0,
-			},
-		},
+		Agents: h.agentDefinitions(base),
 	}
 	inner := subagent.NewTool(cfg)
-	// Re-declare the same spec but stream the delegation boundaries.
+	// Re-declare the same spec, stream the delegation boundaries, and extend the
+	// schema with the background flag + a short description for the activity panel.
+	schema := inner.InputSchema()
+	if props, ok := schema["properties"].(map[string]any); ok {
+		props["run_in_background"] = map[string]any{
+			"type": "boolean", "description": "若为 true，立即返回委派 id，不阻塞当前轮次；完成后会以 task-notification 通知你。默认 false（等待结果）。",
+		}
+		props["description"] = map[string]any{
+			"type": "string", "description": "给这次委派起 5-10 词的短名，显示在活动面板里。",
+		}
+	}
 	return actool.Build(actool.Spec{
 		Name:        inner.Name(),
 		Description: inner.Description(),
 		Prompt:      inner.Prompt(),
-		Schema:      inner.InputSchema(),
+		Schema:      schema,
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision {
 			return acperm.Allowed()
 		},
 		Run: func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
-			agentType, prompt := peekAgentInput(in)
+			agentType, prompt, background, description := peekAgentInput(in)
 			// Do not start new delegated work after a stop/pause/shutdown.
 			if !shouldStartSubagent(ctx) {
 				return actool.Errorf("Error: 本轮已取消，未启动子代理 " + agentType + "（已取消的轮次不再产生新工作）"), nil
 			}
-			if emit != nil {
-				emit(db.Activity{
-					Worker: "harness", Kind: "tool_use", Tool: "Agent",
-					Summary: fmt.Sprintf("派发子代理 %s：%s", agentType, truncOutput(prompt, 160)),
-				})
+			if _, ok := cfg.Agents[agentType]; !ok {
+				return actool.Errorf("Error: unknown agent_type " + agentType), nil
 			}
-			// Detach from the parent's cancellation: the parent's turn budget must not
-			// kill a delegation that is already running (docs/08 §1). The child keeps
-			// its own timeout instead.
-			subCtx, cancelSub := subagentContext(ctx)
-			defer cancelSub()
-			res, err := inner.Call(subCtx, in, tc)
-			if err != nil && subCtx.Err() == context.DeadlineExceeded {
-				err = fmt.Errorf("子代理 %s 超时（%s）：%w", agentType, subagentTimeout(), err)
-			}
+			reg := delegation.Global.For(fmt.Sprint(taskID), h.delegationOutputDir(taskID))
+			id := reg.Start(agentType, prompt, description, tc.WorkingDir, background, time.Now())
 			if emit != nil {
-				summary := "(无输出)"
-				if len(res.Content) > 0 {
-					summary = truncOutput(res.Content[0].Text, 400)
+				label := "派发子代理"
+				if background {
+					label = "后台派发子代理"
 				}
 				emit(db.Activity{
-					Worker: "harness", Kind: "tool_result", Tool: "Agent",
-					IsError: res.IsError || err != nil, Summary: summary,
+					Worker: "harness", Kind: "tool_use", Tool: "Agent",
+					Summary: fmt.Sprintf("%s %s (#%s)：%s", label, agentType, id, truncOutput(prompt, 160)),
+					Metadata: delegation.ToJSON(map[string]any{
+						"delegation_id": id, "agent_type": agentType,
+						"background": background, "description": description,
+					}),
 				})
 			}
+			if background {
+				h.startBackgroundDelegation(reg, id, cfg, agentType, in, tc, emit, taskID)
+				return actool.Text(fmt.Sprintf(
+					"后台子代理已启动：id=%s agent_type=%s。它会独立运行，完成后你会收到 <task-notification>；"+
+						"现在可以继续做别的事。用 /api/harness/delegations/%d 查看状态。",
+					id, agentType, taskID)), nil
+			}
+			res, err := h.callDelegation(ctx, inner, in, tc, agentType)
+			h.finishDelegation(reg, id, res, err, emit, false, taskID)
 			return res, err
 		},
 	})
 }
 
-// peekAgentInput best-effort reads agent_type/prompt for the activity summary.
-func peekAgentInput(in json.RawMessage) (agentType, prompt string) {
+// agentDefinitions builds the two named subagents with a THREE-LAYER tool pool
+// (Sprint 3): global deny list → per-type allow list → MCP tools always allowed.
+// "Agent" itself is never in any allow list, so recursion is impossible by
+// construction; norma's depth guard remains defence in depth.
+func (h *HarnessAgent) agentDefinitions(base []actool.CoreTool) map[string]subagent.Definition {
+	// Layer 1: tools no subagent may ever receive, regardless of its allow list.
+	globalDeny := map[string]bool{
+		"Agent": true, "TaskOutput": true, "TaskStop": true, "TaskList": true,
+		"EnterPlanMode": true, "ExitPlanMode": true, "AskUserQuestion": true,
+	}
+	// Layer 2: per-type allow lists. Layer 3 (MCP) is appended below.
+	reconTools := []string{"Bash", "Read", "LS", "Glob", "Grep", "insert_assets", "record_fact", "list_assets", "graph_overview", "node_detail"}
+	verifyTools := []string{"Bash", "Read", "Grep", "graph_overview", "node_detail", "list_findings", "record_fact"}
+	allowMCP := func(names []string) []string {
+		keep := map[string]bool{}
+		for _, n := range names {
+			if !globalDeny[n] {
+				keep[n] = true
+			}
+		}
+		out := make([]string, 0, len(keep)+8)
+		for _, t := range base {
+			n := t.Name()
+			if strings.HasPrefix(n, "mcp__") && !globalDeny[n] {
+				keep[n] = true // layer 3: MCP tools are always available to subagents
+			}
+		}
+		for n := range keep {
+			out = append(out, n)
+		}
+		return out
+	}
+	return map[string]subagent.Definition{
+		"recon": {
+			Description: "侦察与信息收集：探测入口、指纹、参数、可达性。只写资产与事实，不下漏洞结论。",
+			Prompt: []string{
+				"你是侦察子代理。只做信息收集：入口、接口、指纹、参数、可达性。",
+				"把发现用 insert_assets / record_fact 写回图谱，不要下漏洞结论。",
+				"结束后用几句话说清：确认了什么、证据（命令与输出摘要）、还有什么没探。",
+			},
+			Tools: allowMCP(reconTools), MaxTurns: 0,
+		},
+		"verify": {
+			Description: "复现与验证：对给定结论用独立路径再触发一次，只回答成立/不成立及证据。",
+			Prompt: []string{
+				"你是验证子代理。任务是一个**待验证的结论**。",
+				"用与原始路径**不同**的方法独立复现；复述原证据不算验证。",
+				"只回答：成立 / 不成立 / 无法确认，并给出命令与关键输出。",
+			},
+			Tools: allowMCP(verifyTools), MaxTurns: 0,
+		},
+	}
+}
+
+// callDelegation runs one (foreground) subagent, detached from the parent's
+// cancellation but bounded by its own timeout (docs/08 §1).
+func (h *HarnessAgent) callDelegation(ctx context.Context, inner actool.CoreTool, in json.RawMessage,
+	tc *actool.ToolContext, agentType string) (actool.Result, error) {
+	subCtx, cancelSub := subagentContext(ctx)
+	defer cancelSub()
+	res, err := inner.Call(subCtx, in, tc)
+	if err != nil && subCtx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("子代理 %s 超时（%s）：%w", agentType, subagentTimeout(), err)
+	}
+	return res, err
+}
+
+// startBackgroundDelegation runs a delegation in its own goroutine. The child
+// context is detached from the parent's turn cancellation (so a finished parent
+// turn does not kill it) but keeps its own timeout AND an explicit cancel func
+// the operator can trigger through the registry.
+func (h *HarnessAgent) startBackgroundDelegation(reg *delegation.Registry, id string, cfg subagent.Config,
+	agentType string, in json.RawMessage, tc *actool.ToolContext, emit func(db.Activity), taskID int64) {
+	bgCtx, cancel := context.WithTimeout(context.Background(), subagentTimeout())
+	reg.AttachCancel(id, cancel)
+	_, prompt, _, _ := peekAgentInput(in)
+	// Isolate the background run in its own directory under the delegation store,
+	// NOT the parent workspace. Concurrent delegations (and their file writes)
+	// must not clobber the task's file tree, DIFF baseline, or checkpoints — those
+	// are the operator's view of the main agent's work. The isolation dir lives
+	// beside the result bodies: <delegations>/<taskID>/<did>/.
+	iso := filepath.Join(h.delegationOutputDir(taskID), id)
+	_ = os.MkdirAll(iso, 0o755)
+	reg.SetWorkDir(id, iso)
+	go func() {
+		defer cancel()
+		text, err := subagent.Run(bgCtx, cfg, agentType, prompt, iso)
+		var res actool.Result
+		if err != nil {
+			res = actool.Errorf("Error: subagent failed: " + err.Error())
+		} else {
+			res = actool.Text(text)
+		}
+		h.finishDelegation(reg, id, res, err, emit, true, taskID)
+		h.cleanupDelegationDir(iso)
+	}()
+}
+
+// cleanupDelegationDir removes a background delegation's isolated directory when
+// it is empty. A delegation that wrote scratch files keeps them (they are the
+// evidence of what it did); an empty one leaves no litter. Best-effort.
+func (h *HarnessAgent) cleanupDelegationDir(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		return
+	}
+	_ = os.Remove(dir)
+}
+
+// finishDelegation records the terminal state, writes the result body to disk,
+// emits the paired tool_result (so replay keeps tool_use/tool_result intact) and
+// — for background runs — a <task-notification> the parent will consume.
+func (h *HarnessAgent) finishDelegation(reg *delegation.Registry, id string, res actool.Result, err error,
+	emit func(db.Activity), background bool, taskID int64) {
+	body := "(无输出)"
+	if len(res.Content) > 0 {
+		body = res.Content[0].Text
+	}
+	status := delegation.StatusDone
+	if res.IsError || err != nil {
+		status = delegation.StatusFailed
+	}
+	if _, werr := reg.WriteOutput(id, body); werr != nil {
+		log.Printf("[delegation] %s 写结果文件失败: %v", id, werr)
+	}
+	reg.Finish(id, status, body, errText(err))
+	if emit != nil {
+		emit(db.Activity{
+			Worker: "harness", Kind: "tool_result", Tool: "Agent",
+			IsError:  status == delegation.StatusFailed,
+			Summary:  fmt.Sprintf("子代理 %s 返回：%s", id, truncOutput(body, 400)),
+			Metadata: delegation.ToJSON(map[string]any{"delegation_id": id, "background": background}),
+		})
+		if background {
+			for _, n := range reg.PeekNotifications() {
+				if n.TaskID == id {
+					emit(db.Activity{
+						Worker: "harness", Kind: "lifecycle",
+						Summary:  "后台委派完成通知：" + n.Summary,
+						Detail:   n.String(),
+						Metadata: delegation.ToJSON(n),
+					})
+					break
+				}
+			}
+			// Deliberately NOT drained here: the notification queue is consumed by
+			// the harness loop when it next feeds the agent (the parent may still be
+			// mid-turn, and an idle task must be woken by the completion).
+			if h.delegationNotify != nil {
+				for _, n := range reg.PeekNotifications() {
+					if n.TaskID == id {
+						h.delegationNotify(taskID, n.String())
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func (h *HarnessAgent) delegationOutputDir(taskID int64) string {
+	return filepath.Join(h.workDir, "delegations", fmt.Sprint(taskID))
+}
+
+// peekAgentInput best-effort reads the delegation arguments for the activity
+// summary. It also reports whether the model asked for a background run.
+func peekAgentInput(in json.RawMessage) (agentType, prompt string, background bool, description string) {
 	type agentIn struct {
-		AgentType string `json:"agent_type"`
-		Prompt    string `json:"prompt"`
+		AgentType       string `json:"agent_type"`
+		Prompt          string `json:"prompt"`
+		RunInBackground bool   `json:"run_in_background"`
+		Description     string `json:"description"`
 	}
 	var v agentIn
 	if err := json.Unmarshal(in, &v); err == nil {
-		return v.AgentType, v.Prompt
+		return v.AgentType, v.Prompt, v.RunInBackground, v.Description
 	}
-	return "?", ""
+	return "?", "", false, ""
 }
 
 // harnessWorkDir returns <workDir>/tasks/<taskID> — same layout as the rest of the

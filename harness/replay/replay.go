@@ -33,6 +33,13 @@ type Event struct {
 	IsError    bool      `json:"is_error,omitempty"`
 	NodeID     *int64    `json:"node_id,omitempty"`
 	At         time.Time `json:"at"`
+	// Token accounting on usage/result rows. Cumulative per model turn (the
+	// emitter writes l.usage), so the trajectory shows the latest value rather
+	// than summing every row.
+	InputTokens      int `json:"input_tokens,omitempty"`
+	OutputTokens     int `json:"output_tokens,omitempty"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // Turn groups the items emitted during one round.

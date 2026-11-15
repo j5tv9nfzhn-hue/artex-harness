@@ -651,6 +651,11 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	hx.SetBrowserTools(func(ctx context.Context, taskID int64) ([]actool.CoreTool, error) {
 		return s.browserToolsFor(ctx, taskID)
 	})
+	// 后台委派完成时唤醒父会话（Sprint 3）：通知经同一收件箱投递，空闲任务被
+	// revive，运行中任务在下一轮消费——执行权仍在这一个对话式 agent 手里。
+	hx.SetDelegationNotifier(func(taskID int64, text string) {
+		s.engine.NotifyDelegation(t, text)
+	})
 
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,

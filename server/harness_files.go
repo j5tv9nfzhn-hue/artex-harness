@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/harness/delegation"
 	"github.com/Autumn-27/artex/harness/diff"
 )
 
@@ -386,22 +387,41 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 		if a.Kind == "tool_use" {
 			at, prompt := parseAgentSummary(a.Summary)
-			out = append(out, delegationRow{ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running", StartedAt: a.CreatedAt})
+			did, bg := parseDelegationMeta(a.Metadata)
+			out = append(out, delegationRow{
+				ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running",
+				StartedAt: a.CreatedAt, DelegationID: did, Background: bg,
+			})
 			continue
 		}
-		// tool_result follows the tool_use; attach to the most recent running one
+		// tool_result follows the tool_use; attach to the most recent running one,
+		// preferring an exact delegation-id match when the result carries one.
+		did, _ := parseDelegationMeta(a.Metadata)
+		pick := -1
 		for i := len(out) - 1; i >= 0; i-- {
-			if out[i].State == "running" {
-				out[i].State = "done"
-				if a.IsError {
-					out[i].State = "error"
-				}
-				out[i].Result = a.Summary
-				if !out[i].StartedAt.IsZero() && !a.CreatedAt.IsZero() {
-					out[i].DurationMS = a.CreatedAt.Sub(out[i].StartedAt).Milliseconds()
-				}
-				break
+			if out[i].State != "running" {
+				continue
 			}
+			if did != "" {
+				if out[i].DelegationID == did {
+					pick = i
+					break
+				}
+				continue
+			}
+			pick = i
+			break
+		}
+		if pick < 0 {
+			continue
+		}
+		out[pick].State = "done"
+		if a.IsError {
+			out[pick].State = "error"
+		}
+		out[pick].Result = a.Summary
+		if !out[pick].StartedAt.IsZero() && !a.CreatedAt.IsZero() {
+			out[pick].DurationMS = a.CreatedAt.Sub(out[pick].StartedAt).Milliseconds()
 		}
 	}
 	rows := dedupeDelegations(out)
@@ -418,12 +438,63 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 	for i := range rows {
 		rows[i].AgentID = matchSubagent(idx, rows[i].Prompt, rows[i].StartedAt)
 	}
+	// Overlay the delegation registry (Sprint 3): its status is authoritative for
+	// background runs (whose tool_result lands minutes later) and it carries the
+	// delegation id the stop/inspect endpoints need. Match by delegation id when
+	// both sides have one; otherwise fall back to prompt prefix (older rows). A
+	// registry entry with no activity match is appended so the panel never
+	// silently drops running work.
+	if reg := delegation.Global.Peek(t.ID); reg != nil {
+		for _, rec := range reg.List() {
+			matched := false
+			for i := range rows {
+				if rows[i].DelegationID != "" && rows[i].DelegationID != rec.ID {
+					continue
+				}
+				prefix := firstRunes(rec.Prompt, 40)
+				if rows[i].DelegationID == "" && rec.Prompt != "" && !strings.HasPrefix(rows[i].Prompt, prefix) {
+					continue
+				}
+				rows[i].DelegationID = rec.ID
+				rows[i].Background = rec.Background
+				rows[i].State = delegationState(rec.Status)
+				rows[i].DurationMS = rec.DurationMS
+				if rec.Result != "" {
+					rows[i].Result = rec.Result
+				}
+				if rows[i].AgentID == "" {
+					rows[i].AgentID = rec.AgentID
+				}
+				matched = true
+				break
+			}
+			if !matched {
+				rows = append(rows, delegationRow{
+					AgentType: rec.AgentType, Prompt: rec.Prompt, State: delegationState(rec.Status),
+					StartedAt: rec.StartedAt, DurationMS: rec.DurationMS, Result: rec.Result,
+					AgentID: rec.AgentID, DelegationID: rec.ID, Background: rec.Background,
+				})
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":        t.ID,
 		"harness":     t.HarnessMode,
 		"delegations": rows,
-		"note":        "HARNESS 没有 worker 池：这里列出 agent 自己派出的子代理（Agent 工具）及其结果。",
+		"note":        "HARNESS 没有 worker 池：这里列出 agent 自己派出的子代理（Agent 工具）及其结果。后台委派（run_in_background）可单独停止。",
 	})
+}
+
+// delegationState maps a registry status onto the panel's running|done|error.
+func delegationState(s delegation.Status) string {
+	switch s {
+	case delegation.StatusDone:
+		return "done"
+	case delegation.StatusRunning:
+		return "running"
+	default:
+		return "error"
+	}
 }
 
 // parseAgentSummary extracts (agent_type, prompt) from either summary shape:
@@ -434,12 +505,25 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 // Both exist for one call — the harness stream records the tool call, and the
 // wrapper adds a readable line — so the panel must understand both.
 func parseAgentSummary(s string) (string, string) {
-	if strings.HasPrefix(s, "派发子代理 ") {
-		rest := strings.TrimPrefix(s, "派发子代理 ")
-		if idx := strings.Index(rest, "："); idx > 0 {
-			return rest[:idx], rest[idx+len("："):]
+	// The wrapper emits "派发子代理 recon (#d1)：<prompt>" (foreground) or
+	// "后台派发子代理 recon (#d1)：<prompt>" (background, Sprint 3). Strip the
+	// prefix and the "(#id)" before the colon — the id also lives in metadata,
+	// but the summary must stay parseable for rows predating metadata.
+	for _, p := range []string{"后台派发子代理 ", "派发子代理 "} {
+		if strings.HasPrefix(s, p) {
+			rest := strings.TrimPrefix(s, p)
+			if idx := strings.Index(rest, "："); idx > 0 {
+				at := rest[:idx]
+				if i := strings.IndexByte(at, '('); i > 0 {
+					at = strings.TrimSpace(at[:i])
+				}
+				return at, rest[idx+len("："):]
+			}
+			if i := strings.IndexByte(rest, '('); i > 0 {
+				return rest[:i], ""
+			}
+			return rest, ""
 		}
-		return rest, ""
 	}
 	if strings.HasPrefix(s, "Agent ") {
 		raw := strings.TrimPrefix(s, "Agent ")
@@ -452,6 +536,23 @@ func parseAgentSummary(s string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// parseDelegationMeta reads (delegation_id, background) from an Agent activity
+// row's metadata (Sprint 3). Missing/foreign payloads yield empty values, which
+// keeps pre-registry rows pairing by prompt as before.
+func parseDelegationMeta(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var m struct {
+		DelegationID string `json:"delegation_id"`
+		Background   bool   `json:"background"`
+	}
+	if json.Unmarshal(raw, &m) != nil {
+		return "", false
+	}
+	return m.DelegationID, m.Background
 }
 
 // dedupeDelegations collapses the two rows recorded for one Agent call (raw
@@ -512,4 +613,10 @@ type delegationRow struct {
 	// AgentID 是磁盘 sidechain 文件里的子代理 id；点开一次委派看它的明细要靠它。
 	// 空 = 没有找到对应记录（从未真正跑起来，或运行在旧版本上）。
 	AgentID string `json:"agent_id,omitempty"`
+	// DelegationID / Background come from the delegation registry (Sprint 3):
+	// the authoritative in-process state. DelegationID empty = the run predates
+	// the registry (or its activity rows came from an older build); stop/inspect
+	// via /api/harness/delegations then falls back to activity pairing only.
+	DelegationID string `json:"delegation_id,omitempty"`
+	Background   bool   `json:"background,omitempty"`
 }

@@ -2,7 +2,8 @@ import { authedFetch } from "./lib/auth.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "@radix-ui/themes";
 import { motion } from "motion/react";
-import { ArrowLeft, ChevronRight, Clock, Loader2, RefreshCw, Users, X, XCircle } from "lucide-react";
+import { ArrowLeft, ChevronRight, Clock, Loader2, RefreshCw, Square, Users, X, XCircle } from "lucide-react";
+import { toast } from "sonner";
 
 /* 子代理侧栏（对照 DSH packages/client/ui-subagent）：
  *   section.title / section.empty   —— 分节标题与空态
@@ -107,6 +108,17 @@ export default function Subagents({ taskId, live, onClose }) {
   const done = (rows || []).filter((r) => r.state === "done").length;
   const failed = (rows || []).filter((r) => r.state === "error").length;
 
+  // 后台委派可单独停止（Sprint 3）。停止只影响这一个委派；同步委派随父轮次走，
+  // 不在这里提供停止入口。
+  async function stopDelegation(did) {
+    try {
+      const r = await authedFetch(`/api/harness/delegations/${encodeURIComponent(taskId)}/${encodeURIComponent(did)}/stop`, { method: "POST" });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      toast.success(`已停止后台委派 #${did}`);
+      load(true);
+    } catch (e) { toast.error("停止失败：" + e.message); }
+  }
+
   return (
     <div className="subpanel">
       <Flex align="center" gap="2" px="3" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
@@ -154,7 +166,7 @@ export default function Subagents({ taskId, live, onClose }) {
           ) : (
             <SubagentList
               rows={rows} err={err} busy={busy} onRetry={() => load(false)}
-              onOpen={openDetail} anyRunning={anyRunning}
+              onOpen={openDetail} onStop={stopDelegation} anyRunning={anyRunning}
             />
           )}
         </Box>
@@ -163,7 +175,7 @@ export default function Subagents({ taskId, live, onClose }) {
   );
 }
 
-function SubagentList({ rows, err, busy, onRetry, onOpen }) {
+function SubagentList({ rows, err, busy, onRetry, onOpen, onStop }) {
   const total = (rows || []).length;
   return (
     <>
@@ -206,6 +218,7 @@ function SubagentList({ rows, err, busy, onRetry, onOpen }) {
                 <Flex direction="column" gap="2">
                   <Flex align="center" gap="2" wrap="wrap">
                     <Badge size="1" variant="soft" color="iris">{AGENT_LABEL[r.agent_type] || r.agent_type || "子代理"}</Badge>
+                    {r.background ? <Badge size="1" variant="outline" color="purple">后台</Badge> : null}
                     <Badge size="1" variant="soft" color={st.color}>
                       {r.state === "running" ? <Loader2 size={10} className="spin" style={{ marginRight: 4 }} /> : null}
                       {st.label}
@@ -216,6 +229,12 @@ function SubagentList({ rows, err, busy, onRetry, onOpen }) {
                       {clickable ? <ChevronRight size={13} color="var(--gray-9)" /> : null}
                     </Flex>
                   </Flex>
+                  {r.delegation_id && r.state === "running" ? (
+                    <Button size="1" variant="soft" color="red"
+                            onClick={(e) => { e.stopPropagation(); onStop?.(r.delegation_id); }}>
+                      <Square size={11} /> 停止后台委派
+                    </Button>
+                  ) : null}
                   {r.prompt ? (
                     <Text size="1" color="gray" style={{ lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {r.prompt}

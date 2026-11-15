@@ -90,10 +90,11 @@ func TestChatAgentPerRequestWebSearchGate(t *testing.T) {
 // reused Options (the SDK option struct is passed by pointer).
 func TestApplyModelDefaultsIsExplicit(t *testing.T) {
 	opts := agentcore.Options{
-		EnableWebSearch:  true,
-		WebSearchBackend: "tavily",
-		NonStreaming:     true,
-		MaxTokens:        999,
+		EnableWebSearch:   true,
+		WebSearchBackend:  "tavily",
+		NonStreaming:      true,
+		MaxTokens:         999,
+		EscalateMaxTokens: true,
 	}
 	ModelRunConfig{}.ApplyModelDefaults(&opts)
 	if opts.EnableWebSearch {
@@ -104,6 +105,9 @@ func TestApplyModelDefaultsIsExplicit(t *testing.T) {
 	}
 	if opts.MaxTokens != 0 {
 		t.Fatal("zero config must clear the cap")
+	}
+	if opts.EscalateMaxTokens {
+		t.Fatal("zero config must explicitly disable max-tokens escalation")
 	}
 	if opts.WebSearchBackend != "" {
 		t.Fatal("zero config must clear the backend label")
