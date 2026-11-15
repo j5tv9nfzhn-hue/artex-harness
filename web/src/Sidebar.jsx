@@ -32,7 +32,7 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
+export default function Sidebar({ tasks, taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -139,6 +139,26 @@ export default function Sidebar({ tasks, taskId, onPick, onNew, onPalette, onFil
           </Button>
         </Box>
       )}
+
+      {/* 对话：无目标、发第一条消息才开跑。和下面的任务（goal 驱动）是两种东西，
+          所以在侧栏里分区显示，而不是混进同一个列表。 */}
+      {!collapsed && convs.length ? (
+        <Box pb="2">
+          <Text size="1" color="gray" as="div" px="3" pb="1">对话</Text>
+          {convs.slice(0, 6).map((c) => {
+            const active = String(c.id) === String(convId);
+            return (
+              <div key={"c" + c.id} className={"row" + (active ? " active" : "")} role="button" tabIndex={0}
+                   title={c.title || "新对话"}
+                   onClick={() => onPickConv(String(c.id))}
+                   onKeyDown={(e) => { if (e.key === "Enter") onPickConv(String(c.id)); }}>
+                <span className="dot" style={{ background: "var(--accent-9)" }} />
+                <Text size="2" className="row-title">{c.title || "新对话"}</Text>
+              </div>
+            );
+          })}
+        </Box>
+      ) : null}
 
       <Flex align="center" gap="2" px="3" pb="2" style={collapsed ? { display: "none" } : undefined}>
         <Text size="1" color="gray">{tasks.length} 个会话</Text>

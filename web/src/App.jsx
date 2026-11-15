@@ -74,6 +74,9 @@ export default function App() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [subOpen, setSubOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);   // 新建对话：侧栏/标题栏/命令面板共用一个
+  const [convs, setConvs] = useState([]);          // 对话（无目标，首条消息才开跑）
+  const [convId, setConvId] = useState(null);
+  const [convTitle, setConvTitle] = useState("");
 
   const loadTasks = useCallback(async () => {
     try {
@@ -162,7 +165,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!taskId) return;
+    if (!taskId) { setBudget(null); return; }
     api(`/api/harness/budget/${encodeURIComponent(taskId)}`).then(setBudget).catch(() => setBudget(null));
   }, [taskId, live]);
 
@@ -192,7 +195,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((v) => !v); }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") { e.preventDefault(); setNewOpen(true); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") { e.preventDefault(); newConversation(); }
       if (e.key === "Escape") setPalette(false);
     };
     window.addEventListener("keydown", onKey);
@@ -200,8 +203,7 @@ export default function App() {
   }, []);
 
   async function control(action) {
-    if (!taskId) return toast.error("先选择一个会话");
-    try {
+    if (!taskId) return toast.error("先选择一个会话");    try {
       const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/control`, {
         method: "POST", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -211,6 +213,62 @@ export default function App() {
       toast.success(action === "pause" ? "已暂停" : "已恢复");
     } catch (e) { toast.error(e.message); }
   }
+
+  // ── 对话（conversation）───────────────────────────────────────────────
+  // 后端本来就有这个实体：无 goal，发第一条消息才开始跑。它与「任务」（goal 驱动、
+  // 有目标判定/子代理/预算）是两种东西，不能共用一个创建流程。
+  useEffect(() => {
+    authedFetch("/api/conversations")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setConvs(d?.conversations || (Array.isArray(d) ? d : [])))
+      .catch(() => {});
+  }, []);
+
+  const newConversation = useCallback(async () => {
+    try {
+      const r = await authedFetch("/api/conversations", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_key: "harness" }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      const c = await r.json();
+      setConvs((prev) => [c, ...prev.filter((x) => String(x.id) !== String(c.id))]);
+      setConvId(String(c.id)); setConvTitle(c.title || "新对话"); setTaskId(null);
+    } catch (e) { toast.error("新建对话失败：" + e.message); }
+  }, []);
+
+  const pickConversation = useCallback((id) => {
+    setConvId(String(id)); setTaskId(null);
+    const c = convs.find((x) => String(x.id) === String(id));
+    setConvTitle(c?.title || "对话");
+  }, [convs]);
+
+  // 对话用轮询（后端提供 ?since= 增量），不走 AG-UI SSE：它没有 task 活动流。
+  useEffect(() => {
+    if (!convId) return;
+    let dead = false, cursor = 0, timer = null;
+    setRows([]); setLive("connecting"); setErr("");
+    const tick = async () => {
+      try {
+        const r = await authedFetch(`/api/conversations/${encodeURIComponent(convId)}/messages?since=${cursor}`);
+        if (!r.ok) throw new Error(`事件流不可用（HTTP ${r.status}）${(await r.text()).slice(0, 100)}`);
+        const d = await r.json();
+        if (dead) return;
+        if (Array.isArray(d.items) && d.items.length) {
+          cursor = d.cursor ?? cursor;
+          setRows((prev) => d.items.reduce(applyActivity, prev));
+        }
+        setLive(d.running ? "streaming" : "done");
+        setErr("");
+      } catch (e) {
+        if (!dead) { setErr(e.message || "连接失败"); setLive("error"); }
+      }
+      if (!dead) timer = setTimeout(tick, 1200);
+    };
+    tick();
+    return () => { dead = true; clearTimeout(timer); };
+  }, [convId]);
 
   const cur = useMemo(() => tasks.find((t) => String(t.id) === String(taskId)), [tasks, taskId]);
   const series = (budget && budget.series) || [];
@@ -225,7 +283,8 @@ export default function App() {
                      onCreated={(t) => { setTasks((prev) => [t, ...prev]); setTaskId(String(t.id)); }} />
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
-                 onNew={() => setNewOpen(true)}
+                 convs={convs} convId={convId} onPickConv={pickConversation}
+                 onNew={newConversation}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
                  toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
                  appearance={appearance} onAppearance={changeAppearance}
@@ -235,13 +294,15 @@ export default function App() {
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
             <Activity size={15} />
             <Text size="2" weight="medium" truncate style={{ maxWidth: "42vw" }}>
-              {cur ? (cur.goal || cur.description || "task " + cur.id) : "未选择任务"}
+              {convId ? (convTitle || "对话")
+                : cur ? (cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
             </Text>
             <Box style={{ marginLeft: "auto" }}>
               <Flex gap="2" align="center">
-                <Tooltip content="新建对话（⌘N）">
-                  <Button size="1" variant="soft" onClick={() => setNewOpen(true)}><Plus size={13} /> 新建</Button>
+                <Tooltip content="新建对话（⌘N）——不设目标，发第一条消息才开始">
+                  <Button size="1" variant="soft" onClick={newConversation}><Plus size={13} /> 新建对话</Button>
                 </Tooltip>
+                {!convId ? (<>
                 <Tooltip content="暂停任务（含正在跑的轮次）">
                   <IconButton size="1" variant="ghost" aria-label="暂停" onClick={() => control("pause")}><Pause size={13} /></IconButton>
                 </Tooltip>
@@ -255,7 +316,9 @@ export default function App() {
                   </Button>
                 </Tooltip>
                 <StatusBadge status={cur && cur.status} />
-                <Badge size="1" variant="outline" color="gray">AG-UI</Badge>
+                </>) : null}
+                {!convId ? <Badge size="1" variant="outline" color="gray">AG-UI</Badge>
+                          : <Badge size="1" variant="outline" color="gray">对话</Badge>}
                 <LiveBadge live={live} />
               </Flex>
             </Box>
@@ -271,7 +334,11 @@ export default function App() {
                 </Flex>
               </Card>
             ) : null}
-            {!rows.length && !err ? <Text size="2" color="gray">选择任务后，这里按轮次显示 AG-UI 事件流。</Text> : null}
+            {!rows.length && !err ? (
+              <Text size="2" color="gray">
+                {convId ? "发第一条消息开始这段对话。" : "选择任务后，这里按轮次显示 AG-UI 事件流。"}
+              </Text>
+            ) : null}
             <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
               {rowVirtualizer.getVirtualItems().map((vi) => {
                 const r = rows[vi.index];
@@ -291,7 +358,7 @@ export default function App() {
               回到底部 ↓
             </motion.button>
           ) : null}
-          <Composer taskId={taskId} live={live} budget={budget} task={cur}
+          <Composer taskId={taskId} convId={convId} live={live} budget={budget} task={cur}
                     onSent={() => setRetryNonce((n) => n + 1)} onTuned={loadTasks} />
         </div>
 
@@ -300,7 +367,7 @@ export default function App() {
         <Flex className="statusbar" align="center" gap="3">
           <Flex align="center" gap="1"><LiveDot live={live} /><Text size="1" color="gray">{liveLabel(live)}</Text></Flex>
           <Text size="1" color="gray">·</Text>
-          <Text size="1" color="gray">{taskId ? "#" + taskId : "无任务"}</Text>
+          <Text size="1" color="gray">{convId ? "对话 #" + convId : taskId ? "#" + taskId : "无选择"}</Text>
           <Text size="1" color="gray">·</Text>
           <Text size="1" color="gray">{rows.length} 条事件</Text>
           {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {budget.compactions_observed?.total ?? budget.compactions ?? 0}</Text></>) : null}
@@ -308,8 +375,8 @@ export default function App() {
         </Flex>
 
         {palette ? (
-          <Palette tasks={tasks} onPick={(id) => { setTaskId(id); setPalette(false); }}
-                   onNew={() => setNewOpen(true)} onClose={() => setPalette(false)} />
+          <Palette tasks={tasks} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
+                   onNew={newConversation} onNewTask={() => setNewOpen(true)} onClose={() => setPalette(false)} />
         ) : null}
       </div>
     </Theme>
@@ -362,6 +429,15 @@ function Row({ row }) {
       </motion.div>
     );
 
+  if (row.role === "user")
+    return (
+      <div className="user-row">
+        <Card size="1" style={{ background: "var(--accent-a3)", maxWidth: "78%" }}>
+          <Text size="2" style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{row.text}</Text>
+        </Card>
+      </div>
+    );
+
   return (
     <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}
                 className="msg-wrap">
@@ -378,7 +454,7 @@ function Row({ row }) {
   );
 }
 
-function Palette({ tasks, onPick, onNew, onClose }) {
+function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
   return (
     <div className="cmdk-overlay" onClick={onClose}>
       <div className="cmdk-box" onClick={(e) => e.stopPropagation()}>
@@ -390,11 +466,18 @@ function Palette({ tasks, onPick, onNew, onClose }) {
           <Command.List>
             <Command.Empty><Text size="2" color="gray">没有匹配项</Text></Command.Empty>
             <Command.Group heading="操作">
-              <Command.Item value="新建对话 新建会话 新任务 new chat" onSelect={() => { onClose(); onNew?.(); }}>
+              <Command.Item value="新建对话 新建会话 聊天 new chat" onSelect={() => { onClose(); onNew?.(); }}>
                 <Flex align="center" gap="2" style={{ width: "100%" }}>
                   <Plus size={13} />
                   <Text size="2">新建对话</Text>
-                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N</Text></Box>
+                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N · 不设目标</Text></Box>
+                </Flex>
+              </Command.Item>
+              <Command.Item value="新建任务 目标 goal 渗透 授权" onSelect={() => { onClose(); onNewTask?.(); }}>
+                <Flex align="center" gap="2" style={{ width: "100%" }}>
+                  <SquareTerminal size={13} />
+                  <Text size="2">新建任务（目标驱动）</Text>
+                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">需要目标</Text></Box>
                 </Flex>
               </Command.Item>
             </Command.Group>
@@ -573,3 +656,29 @@ function applyEvent(rows, ev) {
 }
 
 function findLast(arr, pred) { for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i])) return i; return -1; }
+
+// 把一条 activity DTO 折成一行。对话（conversation）用轮询拿 ?since= 增量，字段与
+// AG-UI 那条路的来源是同一张 activity 表，所以行模型可以共用。
+function applyActivity(rows, a) {
+  const key = "a" + a.seq;
+  const callId = a.tool_use_id || key;
+  switch (a.kind) {
+    case "text": return [...rows, { type: "msg", key, role: "assistant", text: a.summary || "" }];
+    // 对话里助手的最终回复是 kind=result（不是 text）；漏了它，界面上就只剩用户自己说的话。
+    case "result": return [...rows, { type: "msg", key, role: "assistant", text: a.summary || "" }];
+    // 对话里用户自己的话也是一条 activity（kind=user），不渲染就等于自己的输入消失了。
+    case "user": return [...rows, { type: "msg", key, role: "user", text: a.summary || "" }];
+    case "thinking": return [...rows, { type: "msg", key, role: "thinking", text: a.summary || "" }];
+    case "tool_use": return [...rows, { type: "tool", key, callId, name: a.tool || "", args: a.summary || "", done: false }];
+    case "tool_result": {
+      const i = findLast(rows, (r) => r.type === "tool" && r.callId === callId);
+      if (i < 0) {
+        return [...rows, { type: "tool", key, callId, name: "", args: "", done: true, result: a.summary || "", isError: !!a.is_error }];
+      }
+      const next = rows.slice();
+      next[i] = { ...next[i], done: true, result: a.summary || "", isError: !!a.is_error };
+      return next;
+    }
+    default: return rows;
+  }
+}

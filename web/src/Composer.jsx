@@ -16,7 +16,7 @@ const authHeaders = () => {
   return t ? { Authorization: "Bearer " + t } : {};
 };
 
-export default function Composer({ taskId, live, budget, task, onSent, onTuned }) {
+export default function Composer({ taskId, convId, live, budget, task, onSent, onTuned }) {
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState("");
   const [text, setText] = useState("");
@@ -165,10 +165,14 @@ export default function Composer({ taskId, live, budget, task, onSent, onTuned }
 
   async function send() {
     const msg = text.trim();
-    if (!msg || !taskId) return;
+    if (!msg) return;
+    const url = convId
+      ? `/api/conversations/${encodeURIComponent(convId)}/messages`
+      : taskId ? `/api/tasks/${encodeURIComponent(taskId)}/say` : "";
+    if (!url) return;
     setBusy(true); setErr("");
     try {
-      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/say`, {
+      const r = await authedFetch(url, {
         method: "POST", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg }),
@@ -186,8 +190,8 @@ export default function Composer({ taskId, live, budget, task, onSent, onTuned }
         <Box style={{ position: "relative" }}>
           <TextArea
             ref={taRef}
-            placeholder={taskId ? "对 agent 说话（Enter 发送 · Shift+Enter 换行）" : "先选择一个会话"}
-            value={text} disabled={!taskId} rows={1}
+            placeholder={(taskId || convId) ? "对 agent 说话（Enter 发送 · Shift+Enter 换行）" : "先新建一个对话，或在左侧选择会话"}
+            value={text} disabled={!taskId && !convId} rows={1}
             onChange={(e) => {
               const v = e.target.value;
               setText(v);
@@ -223,7 +227,7 @@ export default function Composer({ taskId, live, budget, task, onSent, onTuned }
         <Flex align="center" gap="3" wrap="wrap">
           <Flex align="center" gap="1">
             <Text size="1" color="gray">模型</Text>
-            <Select.Root value={profileId} onValueChange={changeModel} size="1" disabled={!profiles.length}>
+            <Select.Root value={profileId} onValueChange={changeModel} size="1" disabled={!profiles.length || !!convId}>
               <Select.Trigger variant="ghost" placeholder={profiles.length ? "选择模型" : "未配置"} />
               <Select.Content position="popper">
                 {profiles.map((p) => (

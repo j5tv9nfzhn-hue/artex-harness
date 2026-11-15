@@ -115,3 +115,6 @@ html, body, #root { height: 100%; margin: 0; }
 @keyframes artex-spin { to { transform: rotate(360deg); } }
 .spin { animation: artex-spin 0.9s linear infinite; }
 
+/* 对话里用户自己说的话：右对齐气泡，和 agent 的正文区分开 */
+.user-row { display: flex; justify-content: flex-end; padding: 2px 0; }
+
