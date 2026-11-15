@@ -2,5 +2,23 @@
 <html lang="zh-CN">
   <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>artex-harness</title></head>
-  <body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>
+  <body><div id="root"></div><script type="module" src="/src/main.jsx"></script>  <script>
+    /* __errbox: 顶层错误可视化。生产界面白屏时，先看到原因，而不是只有空白。 */
+    (function(){
+      function show(title, detail){
+        var d=document.getElementById('__errbox')||document.createElement('pre');
+        d.id='__errbox';
+        d.style.cssText='position:fixed;inset:0;z-index:99999;margin:0;padding:16px;background:#fff;color:#a00;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow:auto';
+        d.textContent=title+'\n\n'+detail;
+        document.body.appendChild(d);
+      }
+      window.addEventListener('error',function(e){
+        show('RUNTIME ERROR: '+(e.message||''), (e.filename||'')+':'+(e.lineno||'')+'\n'+((e.error&&e.error.stack)||''));
+      });
+      window.addEventListener('unhandledrejection',function(e){
+        var r=e.reason; show('UNHANDLED: '+((r&&r.message)||String(r)), (r&&r.stack)||'');
+      });
+    })();
+  </script>
+</body>
 </html>

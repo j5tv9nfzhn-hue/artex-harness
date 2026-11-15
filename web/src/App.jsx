@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Badge, Box, Card, Code, Flex, Heading, ScrollArea, Separator, Text, Theme, Tooltip,
+  Badge, Box, Card, Code, Dialog, Flex, Heading, IconButton, ScrollArea, Separator,
+  Switch, Text, TextArea, TextField as RTextField, Theme, Tooltip,
 } from "@radix-ui/themes";
 import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Command } from "cmdk";
 import { Toaster, toast } from "sonner";
-import { Dialog, TextArea, TextField as RTextField, Switch } from "@radix-ui/themes";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github.css";
 import { Copy, Pause, Play, Plus } from "lucide-react";
