@@ -342,3 +342,130 @@ img.thumb{
   border: 1px solid var(--line); border-radius: 6px; background: #fff;
   box-shadow: 0 1px 2px rgba(27,26,23,.06);
 }
+
+/* ============================================================================
+   打磨层：可交付水准的细节
+   ----------------------------------------------------------------------------
+   这一层只做"看得见的专业度"，不改结构：
+   - 键盘可达：所有可交互元素都有 focus-visible 环，不靠鼠标猜；
+   - 层次：卡片用一档极浅阴影 + 一档描边，避免三栏全是同一种灰；
+   - 数据：表格表头吸顶、行悬停、数字等宽对齐，扫读不跳；
+   - 暗色：跟随系统，不额外要求用户改用另一套主题；
+   - 降级：prefers-reduced-motion 关闭过渡，动画不是必选项。
+   ========================================================================== */
+
+:root{
+  --radius:   10px;
+  --radius-s: 7px;
+  --shadow-1: 0 1px 2px rgba(27,26,23,.06);
+  --shadow-2: 0 2px 8px rgba(27,26,23,.08), 0 1px 2px rgba(27,26,23,.05);
+  --shadow-3: 0 12px 32px rgba(27,26,23,.14), 0 2px 6px rgba(27,26,23,.08);
+  --focus:    #8a3f28;
+  --dur:      140ms;
+}
+
+/* 键盘可达：全局焦点环，只在键盘导航时出现 */
+:focus-visible{
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+button, a, input, select, textarea, summary, [tabindex]{ outline-color: var(--focus); }
+
+/* 滚动条：细、可辨、不抢戏 */
+*{ scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*::-webkit-scrollbar{ width: 10px; height: 10px; }
+*::-webkit-scrollbar-track{ background: transparent; }
+*::-webkit-scrollbar-thumb{
+  background: var(--line); border-radius: 99px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover{ background: var(--ink-3); background-clip: content-box; }
+
+/* 卡片/面板：一档阴影 + 一档描边，hover 只提亮不加粗布局 */
+.dcard, .card, .panel{
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow var(--dur) ease, border-color var(--dur) ease;
+}
+.dcard:hover{ box-shadow: var(--shadow-2); }
+
+/* 徽标：小、全大写、字距略开，和正文区分 */
+.tag{
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--paper-2); color: var(--ink-2);
+}
+
+/* 表格：表头吸顶 + 行悬停 + 数字等宽 */
+table{ border-collapse: separate; border-spacing: 0; width: 100%; }
+thead th{
+  position: sticky; top: 0; z-index: 1;
+  background: var(--paper-2); border-bottom: 1px solid var(--line);
+  font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3);
+  text-align: left; padding: 6px 10px;
+}
+tbody td{ padding: 6px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+tbody tr:hover td{ background: var(--paper-2); }
+td.num, .num{ font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+/* 按钮：三档（主/次/危险），hover 有位移但不跳动 */
+button{
+  border-radius: var(--radius-s); padding: 5px 11px;
+  border: 1px solid var(--line); background: var(--paper-2); color: var(--ink);
+  cursor: pointer; transition: background var(--dur) ease, border-color var(--dur) ease, transform var(--dur) ease;
+}
+button:hover:not(:disabled){ background: #fff; border-color: var(--ink-3); }
+button:active:not(:disabled){ transform: translateY(1px); }
+button:disabled{ opacity: .5; cursor: not-allowed; }
+button.sm{ padding: 3px 8px; font-size: 12px; }
+
+/* 状态色：语义标签，不要靠颜色猜 */
+.eval-pass{ color: var(--ok); }
+.eval-fail{ color: var(--bad); }
+
+/* 空状态：给"为什么是空的"留位置，而不是一片白 */
+.empty{
+  padding: 14px; border: 1px dashed var(--line);
+  border-radius: var(--radius-s); color: var(--ink-3); font-size: 12.5px;
+}
+
+/* 代码/数据块：等宽 + 轻底，长行横向滚动而不是撑破三栏 */
+.dcard-res, pre, code{
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
+}
+.dcard-res{ overflow-x: auto; }
+
+/* 加载骨架：不闪烁，只呼吸 */
+@keyframes artex-pulse{ 0%,100%{ opacity: .45 } 50%{ opacity: .85 } }
+.skeleton{ background: var(--paper-3); border-radius: var(--radius-s); animation: artex-pulse 1.6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation: none !important; transition: none !important; }
+}
+
+/* 暗色：跟随系统。纸感换成石墨，强调色提亮一档以保对比 */
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#16161a; --paper-2:#1d1d22; --paper-3:#26262c;
+    --ink:#e8e6e1; --ink-2:#b6b2a9; --ink-3:#8b867c;
+    --line:#33333a; --line-soft:#2a2a30;
+    --accent:#e0805c; --accent-dim:#3a2a24;
+    --ok:#6fae7f; --warn:#d0a44e; --bad:#e0685e;
+    --focus:#f0a583;
+    --shadow-1: 0 1px 2px rgba(0,0,0,.5);
+    --shadow-2: 0 2px 10px rgba(0,0,0,.55);
+    --shadow-3: 0 16px 40px rgba(0,0,0,.65);
+  }
+  body{ background: var(--paper); color: var(--ink); }
+  button{ background: var(--paper-2); }
+  button:hover:not(:disabled){ background: var(--paper-3); }
+  thead th{ background: var(--paper-2); }
+}
+
+/* 打印：报告视图去掉三栏边框，只留内容 */
+@media print{
+  .dock, .gate, .dcard:hover{ display: none !important; }
+  body{ background: #fff; color: #000; }
+  *{ box-shadow: none !important; }
+}

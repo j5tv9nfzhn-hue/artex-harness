@@ -200,7 +200,7 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 				out["ready"] = true
 			}
 			if sess.Servers["chrome-devtools"] == "live" {
-				dev.Ready, dev.ToolsCached = true, dev.ToolsCached
+				dev.Ready = true
 				dev.Hint = ""
 				out["devtools"] = dev
 			}

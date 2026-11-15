@@ -12,7 +12,8 @@ import (
 // every task path is covered; this asserts the goroutine survives and still
 // releases its WaitGroup slot, i.e. the task is not leaked as "running forever".
 func TestRunTaskRoutineRecoversPanic(t *testing.T) {
-	rt := &taskRuntime{ctx: context.Background(), cancel: func() {}}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	rt := &taskRuntime{ctx: ctx, cancelCause: cancel}
 	rt.wg.Add(1)
 
 	done := make(chan struct{})

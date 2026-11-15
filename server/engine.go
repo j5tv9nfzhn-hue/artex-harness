@@ -168,9 +168,12 @@ type Engine struct {
 }
 
 type taskRuntime struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx context.Context
+	// cancelCause (not cancel) so an interruption names its reason: a bare
+	// context.CancelFunc leaves the operator with "取消方未附加具名原因" and no way
+	// to tell a delete from a shutdown from a bug.
+	cancelCause context.CancelCauseFunc
+	wg          sync.WaitGroup
 }
 
 type workExecution struct {
@@ -239,9 +242,17 @@ func (e *Engine) registerTaskRoutines(parent context.Context, taskID string, cou
 	e.runtimeMu.Lock()
 	defer e.runtimeMu.Unlock()
 	rt := e.runtimes[taskID]
+	if rt != nil && rt.ctx.Err() != nil {
+		// The entry outlived its context (StopTask cancels but a concurrent
+		// re-registration can still see the corpse). Reusing it made every run of a
+		// brand-new task abort in 0s: task 194 reported six consecutive
+		// "运行被中断：取消方未附加具名原因" before doing anything at all.
+		delete(e.runtimes, taskID)
+		rt = nil
+	}
 	if rt == nil {
-		ctx, cancel := context.WithCancel(parent)
-		rt = &taskRuntime{ctx: ctx, cancel: cancel}
+		ctx, cancel := context.WithCancelCause(parent)
+		rt = &taskRuntime{ctx: ctx, cancelCause: cancel}
 		e.runtimes[taskID] = rt
 	}
 	rt.wg.Add(count)
@@ -278,7 +289,7 @@ func (e *Engine) StopTask(taskID string) {
 	e.runtimeMu.Lock()
 	rt := e.runtimes[taskID]
 	if rt != nil {
-		rt.cancel()
+		rt.cancelCause(agent.AbortTaskDeleted)
 	}
 	e.runtimeMu.Unlock()
 	if rt != nil {

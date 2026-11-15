@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -56,6 +57,9 @@ func applySchemaWithRetry(ctx context.Context, execer schemaExecer, sleep func(t
 	}
 }
 
+// schemaLockWait bounds how long startup waits for the migration lock.
+const schemaLockWait = 60 * time.Second
+
 // withSchemaMigrationLock pins the session-level lock to one checked-out
 // connection. Running pg_advisory_lock through *sql.DB is incorrect because a
 // later schema or unlock call may use a different pooled PostgreSQL session.
@@ -65,8 +69,29 @@ func withSchemaMigrationLock(ctx context.Context, sqlDB *sql.DB, action func(*sq
 		return err
 	}
 	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, schemaMigrationLockKey); err != nil {
-		return fmt.Errorf("advisory lock: %w", err)
+	// pg_advisory_lock blocks forever. A killed instance leaves the lock held until
+	// its backend dies, and the next start then hung here with no listening socket
+	// and nothing in the log — observed once, with 29 backends stacked behind it.
+	// Take the lock with a deadline instead, and say exactly what is blocking.
+	lockDeadline := time.Now().Add(schemaLockWait)
+	for {
+		var got bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, schemaMigrationLockKey).Scan(&got); err != nil {
+			return fmt.Errorf("advisory lock: %w", err)
+		}
+		if got {
+			break
+		}
+		if time.Now().After(lockDeadline) {
+			return fmt.Errorf("advisory lock %d still held after %s: another instance (or a killed one's backend) is mid-migration; "+
+				"release it with SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%%pg_advisory_lock%%'",
+				schemaMigrationLockKey, schemaLockWait)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("advisory lock: %w", ctx.Err())
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	defer func() {
 		if _, unlockErr := conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, schemaMigrationLockKey); unlockErr != nil && err == nil {
@@ -80,6 +105,11 @@ func withSchemaMigrationLock(ctx context.Context, sqlDB *sql.DB, action func(*sq
 // mutually exclusive with startup DDL while allowing ordinary runtime queries
 // to continue normally.
 func coordinateWithSchemaMigration(tx *sql.Tx) error {
+	// Same failure mode one level down: a blocked archive transaction waits on the
+	// migration lock with no ceiling. Fail the transaction instead of the process.
+	if _, err := tx.Exec(`SET LOCAL lock_timeout = '10s'`); err != nil {
+		return fmt.Errorf("coordinate with schema migration: %w", err)
+	}
 	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, schemaMigrationLockKey); err != nil {
 		return fmt.Errorf("coordinate with schema migration: %w", err)
 	}
@@ -614,4 +644,41 @@ WHERE NOT EXISTS (SELECT 1 FROM intercept_rules WHERE name = $1)`,
 		return fmt.Errorf("rule %q: %w", name, err)
 	}
 	return d.SetSetting("intercept_default_rules_v3", "done")
+}
+
+// TestDatabaseAllowed reports whether the configured DSN points at a database a
+// test run may truncate.
+//
+// The suites in this repo delete and truncate real tables, and until now they ran
+// against whatever ARTEX_PG_DSN named — which was also the database the dev server
+// was serving. One `go test ./db/` therefore wiped the live LLM profile and the
+// task list mid-session (the config "reset to claude-x" that kept coming back).
+// A test database must be opted into explicitly, and must not be the one the
+// server is using: ARTEX_TEST_DB must equal the DSN's database name.
+func TestDatabaseAllowed(dsn string, allowEnv string) (bool, string) {
+	want := strings.TrimSpace(os.Getenv(allowEnv))
+	if want == "" {
+		return false, "ARTEX_TEST_DB 未设置：拒绝在未显式指名的数据库上运行破坏性测试（这些用例会 TRUNCATE 真实表）"
+	}
+	name := DatabaseName(dsn)
+	if name == "" {
+		return false, "无法从 DSN 解析数据库名"
+	}
+	if name != want {
+		return false, fmt.Sprintf("ARTEX_TEST_DB=%q 与 DSN 数据库 %q 不一致", want, name)
+	}
+	return true, ""
+}
+
+// DatabaseName extracts the database name from a PostgreSQL URL or keyword DSN.
+func DatabaseName(dsn string) string {
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		return strings.TrimPrefix(u.Path, "/")
+	}
+	for _, f := range strings.Fields(dsn) {
+		if strings.HasPrefix(f, "dbname=") {
+			return strings.TrimPrefix(f, "dbname=")
+		}
+	}
+	return ""
 }
