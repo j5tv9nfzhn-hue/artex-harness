@@ -84,6 +84,5 @@ html, body, #root { height: 100%; margin: 0; }
 /* ContextMenu.Trigger 默认渲染成 inline：行需要保持块级定位 */
 .rail [data-radix-popper-content-wrapper] { z-index: 90; }
 
-/* 设置：竖排标签左栏固定宽，内容区自带滚动，切换标签时对话框尺寸不变 */
-[role="dialog"] [role="tablist"][aria-orientation="vertical"] { min-width: 150px; }
-[role="dialog"] [role="tablist"][aria-orientation="vertical"] button { justify-content: flex-start; width: 100%; }
+/* 设置：内容区固定高（460px）自带滚动，标签切换不改变对话框尺寸 */
+[role="dialog"] [role="tablist"] { flex-wrap: wrap; }

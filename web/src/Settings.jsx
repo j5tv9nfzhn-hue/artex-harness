@@ -79,12 +79,12 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content style={{ width: "min(880px, 94vw)" }}>
+      <Dialog.Content maxWidth="none" style={{ width: "min(880px, 94vw)" }}>
         <Dialog.Title size="5">设置</Dialog.Title>
         <Dialog.Description size="1" color="gray">artex-harness {version ? "v" + version : ""}</Dialog.Description>
         {err ? <Box mt="2"><Text size="1" color="red">{err}</Text></Box> : null}
 
-        <Tabs.Root defaultValue="models" orientation="vertical" mt="3">
+        <Tabs.Root defaultValue="models" mt="3">
           <Tabs.List>
             <Tabs.Trigger value="models"><Cpu size={13} /> 供应商与模型</Tabs.Trigger>
             <Tabs.Trigger value="mcp"><Plug size={13} /> MCP</Tabs.Trigger>
@@ -93,7 +93,7 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
             <Tabs.Trigger value="look"><Palette size={13} /> 外观</Tabs.Trigger>
           </Tabs.List>
 
-          <Box pt="0" style={{ height: 460, overflow: "auto", paddingLeft: 16, minWidth: 0 }}>
+          <Box pt="3" style={{ height: 460, overflow: "auto", minWidth: 0 }}>
             <Tabs.Content value="models">
               <Flex direction="column" gap="3">
                 {providers.map((pv) => (
