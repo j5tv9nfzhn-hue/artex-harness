@@ -65,6 +65,9 @@ type Task struct {
 	HarnessMode bool `json:"harness_mode"`
 	// ProjectDir is the task's working directory ("" = <data>/tasks/<id>).
 	ProjectDir string                 `json:"project_dir,omitempty"`
+	// 任务级思考深度覆盖（"" = 跟随所选模型 profile）。见 db.Task 上的同名字段。
+	ThinkingType    string `json:"thinking_type,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	FirstRunAt int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt int64                  `json:"deadline_at,omitempty"`
 	Store      *pgdb.ExplorationStore `json:"-"`
@@ -856,6 +859,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
 		CoverageEnabled: pt.CoverageEnabled, HarnessMode: pt.HarnessMode, ProjectDir: pt.ProjectDir,
+		ThinkingType: pt.ThinkingType, ReasoningEffort: pt.ReasoningEffort,
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}

@@ -16,7 +16,7 @@ const authHeaders = () => {
   return t ? { Authorization: "Bearer " + t } : {};
 };
 
-export default function Composer({ taskId, live, budget, onSent }) {
+export default function Composer({ taskId, live, budget, task, onSent, onTuned }) {
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState("");
   const [text, setText] = useState("");
@@ -26,9 +26,14 @@ export default function Composer({ taskId, live, budget, onSent }) {
   const taRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [mention, setMention] = useState(null); // {q, start} | null
+  const [effort, setEffort] = useState("");     // 任务级思考深度；"" = 跟随模型
+  const [efforts, setEfforts] = useState(["low", "medium", "high"]); // 该模型认的档位
   const draftKey = taskId ? `artex.draft.${taskId}` : "";
   const startedAt = useRef(0);
   const chars = useRef(0);
+
+  // 任务切换时同步当前覆盖值（后端是唯一真相，别在本地臆测）。
+  useEffect(() => { setEffort(task?.reasoning_effort || ""); }, [task?.reasoning_effort, taskId]);
 
   useEffect(() => {
     (async () => {
@@ -106,6 +111,43 @@ export default function Composer({ taskId, live, budget, onSent }) {
 
   const current = profiles.find((p) => String(p.id) === String(profileId));
   const thinking = describeThinking(current);
+
+  // 这个模型认哪些档位：问公开目录；目录不认识就退回通用三档，不硬塞 xhigh
+  // 这种某些提供商直接 400 的值。
+  useEffect(() => {
+    const model = current?.model;
+    if (!model) return;
+    let dead = false;
+    (async () => {
+      try {
+        const r = await authedFetch(`/api/llm/model-catalog?q=${encodeURIComponent(model)}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const hit = (d.entries || []).find((e) => model.toLowerCase().startsWith(e.match));
+        if (!dead && hit?.reasoning_efforts?.length) setEfforts(hit.reasoning_efforts);
+      } catch { /* 目录不可用就保持默认档位 */ }
+    })();
+    return () => { dead = true; };
+  }, [current?.model]);
+
+  // 思考深度是**任务级覆盖**：写库后立刻对下一次调用生效，不动模型配置本身。
+  async function changeEffort(v) {
+    const prev = effort;
+    setEffort(v); setErr("");
+    if (!taskId) return;
+    try {
+      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
+        method: "PUT", credentials: "include",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ reasoning_effort: v }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      onTuned?.();
+    } catch (e) {
+      setEffort(prev);
+      setErr("切换思考深度失败：" + e.message);
+    }
+  }
 
   async function changeModel(id) {
     setProfileId(id);
@@ -195,12 +237,42 @@ export default function Composer({ taskId, live, budget, onSent }) {
 
           <Separator orientation="vertical" size="1" />
 
-          <Tooltip content="思考等级来自模型配置（在「模型设置」里改）">
+          <Tooltip content="只作用于这个会话：任务级覆盖，不改模型配置。留空/跟随模型 = 用模型自己的设置">
             <Flex align="center" gap="1">
               <Text size="1" color="gray">思考</Text>
-              <Badge size="1" variant="soft" color={thinking.color}>{thinking.label}</Badge>
+              <Select.Root value={effort || "inherit"} onValueChange={(v) => changeEffort(v === "inherit" ? "" : v)}
+                           size="1" disabled={!taskId}>
+                <Select.Trigger variant="ghost" />
+                <Select.Content position="popper">
+                  <Select.Item value="inherit">
+                    跟随模型{current?.reasoning_effort ? `（${current.reasoning_effort}）` : ""}
+                  </Select.Item>
+                  {efforts.map((e) => (
+                    <Select.Item key={e} value={e}>{EFFORT_LABEL[e] || e}</Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </Flex>
           </Tooltip>
+
+          <Separator orientation="vertical" size="1" />
+
+          {/* 上下文占用：最近一轮输入 token / 模型窗口。两者都来自 /api/harness/budget，
+              超过 90% 变红——压缩阈值就在这个数字附近。 */}
+          {budget && budget.window ? (
+            <Tooltip content={`最近一轮输入 ${budget.last_input?.toLocaleString?.() ?? budget.last_input} tokens · 窗口 ${budget.window.toLocaleString()} tokens · 压缩阈值按窗口比例`}>
+              <Flex align="center" gap="2">
+                <Text size="1" color="gray">上下文</Text>
+                <Text size="1" weight="medium" color={pctColor(budget.pct)}>{Math.round(budget.pct || 0)}%</Text>
+                <Box style={{ width: 46, height: 4, borderRadius: 99, background: "var(--gray-a4)", overflow: "hidden" }}>
+                  <Box style={{ width: Math.min(100, Math.round(budget.pct || 0)) + "%", height: "100%",
+                                background: pctColor(budget.pct) === "red" ? "var(--red-9)"
+                                          : pctColor(budget.pct) === "amber" ? "var(--amber-9)" : "var(--accent-9)" }} />
+                </Box>
+                <Text size="1" color="gray">{fmtTokens(budget.last_input)} / {fmtTokens(budget.window)}</Text>
+              </Flex>
+            </Tooltip>
+          ) : null}
 
           <Separator orientation="vertical" size="1" />
 
@@ -236,3 +308,18 @@ function describeThinking(p) {
   if (t) return { label: t, color: t === "enabled" || t === "on" ? "amber" : "gray" };
   return { label: "默认", color: "gray" };
 }
+
+const EFFORT_LABEL = {
+  minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大",
+};
+
+// token 数显示：1234 → 1.2K，1_200_000 → 1.2M。
+const fmtTokens = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
+  if (v >= 1000) return (v / 1000).toFixed(1) + "K";
+  return String(v);
+};
+
+// 上下文占用配色：90% 以上是压缩阈值附近，必须一眼看到。
+const pctColor = (p) => (Number(p) >= 90 ? "red" : Number(p) >= 70 ? "amber" : "gray");

@@ -582,6 +582,33 @@ func (s *Server) chatUnavailableReason() string {
 // providerForProfile returns a cached provider+cfg for a profile id, so every agent
 // bound/pinned to the same profile shares one provider instance (one rate limiter).
 // ok=false when the profile is missing/invalid → caller falls back to the global pair.
+// tunedProvider builds a provider for one profile with a **task-level** thinking
+// override applied. It is deliberately kept out of provByProfile: that cache is
+// keyed by profile id alone, so a task-specific effort stored there would leak into
+// every other task using the same profile.
+func (s *Server) tunedProvider(id int64, thinkingType, effort string) (llm.Provider, agent.Config, bool) {
+	cfg, ok := s.loadProfileConfig(id)
+	if !ok {
+		return nil, agent.Config{}, false
+	}
+	if thinkingType != "" {
+		cfg.ThinkingType = thinkingType
+	}
+	if effort != "" {
+		cfg.ReasoningEffort = effort
+	}
+	prov, err := cfg.NewProvider()
+	if err != nil {
+		log.Printf("[engine] build tuned provider for LLM profile %d failed: %v", id, err)
+		return nil, agent.Config{}, false
+	}
+	if p, _ := s.m.pg.ProfileByID(id); p != nil {
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
+		prov = bindSideProvider(prov, cfg, id, p.Name)
+	}
+	return prov, cfg, true
+}
+
 func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool) {
 	s.provCacheMu.Lock()
 	if e := s.provByProfile[id]; e != nil {
@@ -1695,6 +1722,9 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LLMProfileIDs      []int64 `json:"llm_profile_ids"`
 		ActiveLLMProfileID *int64  `json:"active_llm_profile_id"`
+		// 任务级思考深度；省略 = 不变。空串 = 重新跟随所选模型配置。
+		ThinkingType    *string `json:"thinking_type"`
+		ReasoningEffort *string `json:"reasoning_effort"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
@@ -1708,10 +1738,39 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	if req.ActiveLLMProfileID != nil {
 		active = *req.ActiveLLMProfileID
 	}
-	reopened, err := s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active)
-	if err != nil {
-		writeErr(w, 400, err.Error())
-		return
+	// 只改思考深度时不要把链清空：没传 llm_profile_ids 就当作"链不变"。
+	var reopened int64
+	if req.LLMProfileIDs != nil || req.ActiveLLMProfileID != nil {
+		var err error
+		reopened, err = s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	// 任务级思考深度：与链切换相互独立，谁没传就沿用库里的现值。
+	taskNum, _ := strconv.ParseInt(t.ID, 10, 64)
+	thinking, effort := "", ""
+	if pt, perr := s.m.pg.GetTask(taskNum); perr == nil && pt != nil {
+		thinking, effort = pt.ThinkingType, pt.ReasoningEffort
+	}
+	if req.ThinkingType != nil {
+		thinking = strings.TrimSpace(*req.ThinkingType)
+	}
+	if req.ReasoningEffort != nil {
+		effort = strings.TrimSpace(*req.ReasoningEffort)
+	}
+	if req.ThinkingType != nil || req.ReasoningEffort != nil {
+		if err := s.m.pg.SetTaskLLMTuning(taskNum, thinking, effort); err != nil {
+			writeErr(w, 400, "保存思考深度失败："+err.Error())
+			return
+		}
+		// 内存副本同步，列表/输入框立刻能读到；下一次 LLM 调用读的是库，两边同源。
+		s.m.mu.Lock()
+		if task := s.m.tasks[t.ID]; task != nil {
+			task.ThinkingType, task.ReasoningEffort = thinking, effort
+		}
+		s.m.mu.Unlock()
 	}
 	// Profile edits affect only subsequent LLM calls. Existing in-flight calls
 	// retain their provider. Concurrency reconciliation treats ActiveLLMCalls as a
@@ -1724,6 +1783,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		"id": t.ID, "llm_profile_ids": llmState.ProfileIDs,
 		"active_llm_profile_id": llmState.ActiveID,
 		"llm_failover_state":    llmState.FailoverState, "reopened_intents": reopened,
+		"thinking_type": thinking, "reasoning_effort": effort,
 	}
 	if !sameOptionalID(before.ActiveID, llmState.ActiveID) {
 		event := s.emitManualTaskLLMSwitch(t, before.ActiveID, llmState.ActiveID)

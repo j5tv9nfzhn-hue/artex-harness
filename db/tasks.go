@@ -43,6 +43,11 @@ type Task struct {
 	// ProjectDir, when non-empty, is the task's working directory (an existing path).
 	// Empty = <data>/tasks/<id>.
 	ProjectDir  string     `json:"project_dir,omitempty"`
+	// ThinkingType / ReasoningEffort 是**任务级**的思考覆盖：空串 = 跟随 profile。
+	// 为什么单独存：同一个模型常要按场景调深度（对话用 low、跑任务用 high），
+	// 只改 profile 会把同一模型的所有会话一起改掉。
+	ThinkingType    string `json:"thinking_type,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。
@@ -371,11 +376,11 @@ func insertTaskLLMProfiles(tx *sql.Tx, taskID int64, profileIDs []int64) error {
 
 const taskCols = `id, COALESCE(name,''), category_id,
 COALESCE((SELECT category.name FROM task_categories category WHERE category.id=tasks.category_id),''),
-description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), first_run_at, deadline_at, COALESCE(harness_mode,false), COALESCE(project_dir,'')`
+description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), first_run_at, deadline_at, COALESCE(harness_mode,false), COALESCE(project_dir,''), COALESCE(thinking_type,''), COALESCE(reasoning_effort,'')`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt, &t.HarnessMode, &t.ProjectDir); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt, &t.HarnessMode, &t.ProjectDir, &t.ThinkingType, &t.ReasoningEffort); err != nil {
 		return nil, err
 	}
 	t.Pinned = t.PinnedAt != nil
@@ -517,6 +522,15 @@ UPDATE tasks
 // terminal, so a completed↔timeout race resolves to the first writer (won=true).
 // Returns won=false (no error) when another terminal status already stuck — the
 // caller then leaves it alone. Non-terminal transitions / re-run still use SetStatus.
+// SetTaskLLMTuning persists a task's thinking override. Empty strings clear it,
+// which restores "follow the selected profile" for that task.
+func (d *DB) SetTaskLLMTuning(id int64, thinkingType, effort string) error {
+	_, err := d.Exec(`UPDATE tasks
+   SET thinking_type=$2, reasoning_effort=$3, revision=revision+1, updated_at=now()
+ WHERE id=$1`, id, thinkingType, effort)
+	return err
+}
+
 func (d *DB) SetTerminalStatusGuarded(id int64, status string) (won bool, err error) {
 	res, err := d.Exec(`
 UPDATE tasks

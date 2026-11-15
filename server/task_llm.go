@@ -113,6 +113,24 @@ type taskLLMStreamHooks struct {
 // 返回的 profile id 只有走任务链时才非零 —— streamTaskLLM 以此判断额度错误是否
 // 应该推进任务的故障转移状态（绑定/全局路径不改任务链状态，沿用既有语义）。
 func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
+	sel, err := r.currentBase()
+	if err != nil || sel.provider == nil {
+		return sel, err
+	}
+	// 任务级思考深度覆盖：只影响这一次选择，不动 profile，也不污染 profile 缓存。
+	// 读库而不是内存副本：覆盖值是低频写的，一次主键查询换掉整条同步路径。
+	if num, perr := parseTaskID(r.taskID); perr == nil && sel.profileID != 0 {
+		if pt, gerr := r.s.m.pg.GetTask(num); gerr == nil && pt != nil &&
+			(pt.ThinkingType != "" || pt.ReasoningEffort != "") {
+			if prov, cfg, ok := r.s.tunedProvider(sel.profileID, pt.ThinkingType, pt.ReasoningEffort); ok {
+				sel.provider, sel.retry = prov, cfg.Retry
+			}
+		}
+	}
+	return sel, nil
+}
+
+func (r *taskLLMRuntime) currentBase() (taskLLMSelection, error) {
 	taskNum, err := parseTaskID(r.taskID)
 	if err != nil {
 		return taskLLMSelection{}, err
@@ -651,6 +669,8 @@ func (s *Server) syncTaskLLMState(pt *db.Task) {
 	s.m.mu.Lock()
 	if task := s.m.tasks[id]; task != nil {
 		task.setLLMState(pt.LLMProfileID, pt.ActiveLLMProfileID, pt.LLMProfileIDs, pt.LLMChainRevision, pt.LLMFailoverState, pt.LLMFailoverReason)
+		// 思考深度也跟着刷新：输入框旁的显示和下一次调用用的是同一份值。
+		task.ThinkingType, task.ReasoningEffort = pt.ThinkingType, pt.ReasoningEffort
 	}
 	s.m.mu.Unlock()
 }

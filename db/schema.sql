@@ -1438,3 +1438,10 @@ CREATE INDEX IF NOT EXISTS idx_tasks_harness_mode ON tasks(harness_mode) WHERE d
 -- 都以它为根。空 = 沿用 <data>/tasks/<taskID>（每任务独立目录）。
 -- 互斥（同一目录同时只允许一个 harness 任务）由服务端登记表保证，不在库里做约束。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_dir TEXT NOT NULL DEFAULT '';
+
+-- 任务级思考深度覆盖（输入框旁「思考深度」）。空串 = 跟随所选模型配置，所以旧任务
+-- 的行为一点不变；只有显式选过深度的任务才会改到每次 LLM 调用的参数。
+-- 单独存而不改 profile：同一个模型常要按场景调深度（对话 low、跑任务 high），
+-- 改 profile 会把该模型下所有会话一起改掉。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS thinking_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reasoning_effort TEXT NOT NULL DEFAULT '';

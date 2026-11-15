@@ -284,7 +284,8 @@ export default function App() {
               回到底部 ↓
             </motion.button>
           ) : null}
-          <Composer taskId={taskId} live={live} budget={budget} onSent={() => setRetryNonce((n) => n + 1)} />
+          <Composer taskId={taskId} live={live} budget={budget} task={cur}
+                    onSent={() => setRetryNonce((n) => n + 1)} onTuned={loadTasks} />
         </div>
 
         {subOpen ? <Subagents taskId={taskId} live={live} onClose={() => setSubOpen(false)} /> : null}
