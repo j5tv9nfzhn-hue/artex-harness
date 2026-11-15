@@ -682,3 +682,27 @@ func DatabaseName(dsn string) string {
 	}
 	return ""
 }
+
+// execConner is the one method ResetTestSchema needs; *sql.DB and *sql.Conn both
+// satisfy it, so a suite can pass whichever handle it opened.
+type execConner interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// ResetTestSchema drops and recreates the public schema so a destructive test suite
+// starts from exactly the state a brand-new install has.
+//
+// Callers MUST already hold the cross-package advisory lock (the schemas are shared
+// by every package's suite). Without this the suites were only green on a fresh
+// database: a second run collided with rows the first one left behind
+// ("duplicate key ... llm_profiles_name_key", "... traffic_evidence_snapshots_pkey"),
+// which makes "go test" useless as a gate — the result depended on history.
+func ResetTestSchema(ctx context.Context, conn execConner) error {
+	if _, err := conn.ExecContext(ctx, `DROP SCHEMA IF EXISTS public CASCADE`); err != nil {
+		return fmt.Errorf("reset test schema (drop): %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA public`); err != nil {
+		return fmt.Errorf("reset test schema (create): %w", err)
+	}
+	return nil
+}

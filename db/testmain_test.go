@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -26,6 +27,12 @@ func TestMain(m *testing.M) {
 	defer conn.Close()
 	if _, err := conn.Exec(`SELECT pg_advisory_lock(7337741002)`); err != nil {
 		os.Exit(m.Run())
+	}
+	// 每个包在持锁后重建 schema：破坏性用例必须自带干净起点，否则第二次运行会
+	// 撞上一次留下的唯一约束，go test 就变成了"看历史"而不是"看代码"。
+	if err := ResetTestSchema(context.Background(), conn); err != nil {
+		os.Stderr.WriteString("[test] reset schema failed: " + err.Error() + "\n")
+		os.Exit(1)
 	}
 	defer conn.Exec(`SELECT pg_advisory_unlock(7337741002)`) //nolint:errcheck
 	// 破坏性用例必须显式指名一个测试库：这些 suite 会 TRUNCATE 真实表，

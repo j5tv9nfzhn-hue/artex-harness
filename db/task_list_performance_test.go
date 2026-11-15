@@ -111,7 +111,10 @@ VALUES ($1,'goal','{}','met'), ($1,'goal','{}','open')`, task.ExplorationID); er
 	if metrics.LastActivity != latestAt.Unix() {
 		t.Fatalf("last activity=%d, want %d", metrics.LastActivity, latestAt.Unix())
 	}
-	if metrics.Goals.Total != 2 || metrics.Goals.Met != 1 {
+	// 3 = the two goals inserted above + the root goal every task gets at creation
+	// (db.CreateTaskWithOptions writes the user's objective as a goal node, so a task
+	// is never born with an empty goal frontier). Met stays 1: only the 'met' row.
+	if metrics.Goals.Total != 3 || metrics.Goals.Met != 1 {
 		t.Fatalf("unexpected goal metrics: %+v", metrics.Goals)
 	}
 }
