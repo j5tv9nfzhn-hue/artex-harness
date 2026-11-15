@@ -17,7 +17,7 @@ help: ## 列出所有可用目标
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 web: ## 构建控制台（产物 server/console-app，被 go:embed 打进二进制）
-	cd web && bun install --frozen-lockfile && bun run build
+	cd web && npm ci --no-audit --no-fund && npm run build
 
 build: ## 只编译后端（使用仓库里已有的 embedded 控制台产物）
 	go build -o $(BIN) $(PKG)

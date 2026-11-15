@@ -21,7 +21,7 @@ on:
     paths:
       - "go.sum"
       - "go.mod"
-      - "web/bun.lock"
+      - "web/package-lock.json"
       - ".github/workflows/cache-warm.yml"
 
 permissions:
@@ -104,17 +104,17 @@ jobs:
             echo "- key: \`$KEY\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # 前端依赖只在 ubuntu 上预热。包管理器是 bun（web/bun.lock）；npm 那套随上游 Next
-  # 前端一起下线了，留着只会让 warm 任务永远 miss/失败。
-  warm-bun:
-    name: warm / bun ubuntu-latest
+  # 前端依赖只在 ubuntu 上预热（构建前端的那台 runner 就是 ubuntu）
+  warm-npm:
+    name: warm / npm ubuntu-latest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: "22"
+          cache: ""
 
       - name: 计算缓存周期
         id: paths
@@ -124,22 +124,22 @@ jobs:
         id: restore
         uses: actions/cache/restore@v4
         with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-${{ runner.arch }}-artex-bun-${{ hashFiles('web/bun.lock') }}-w${{ steps.paths.outputs.week }}
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-artex-npm-${{ hashFiles('web/package-lock.json') }}-w${{ steps.paths.outputs.week }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-artex-bun-${{ hashFiles('web/bun.lock') }}-
-            ${{ runner.os }}-${{ runner.arch }}-artex-bun-
+            ${{ runner.os }}-${{ runner.arch }}-artex-npm-${{ hashFiles('web/package-lock.json') }}-
+            ${{ runner.os }}-${{ runner.arch }}-artex-npm-
 
       - name: 预热 bun 缓存
         if: steps.restore.outputs.cache-hit != 'true'
         working-directory: web
-        run: bun install --frozen-lockfile
+        run: npm ci --no-audit --no-fund
 
       - name: 保存缓存
         if: steps.restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/.bun/install/cache
+          path: ~/.npm
           key: ${{ steps.restore.outputs.cache-primary-key }}
 
       - name: 预热结果
@@ -148,7 +148,7 @@ jobs:
           KEY: ${{ steps.restore.outputs.cache-primary-key }}
         run: |
           {
-            echo "### cache-warm / bun"
+            echo "### cache-warm / npm"
             echo ""
             echo "- cache-hit: \`${HIT:-false}\`"
             echo "- key: \`$KEY\`"

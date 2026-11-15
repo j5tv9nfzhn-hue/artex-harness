@@ -7,9 +7,8 @@
 | 依赖 | 版本/说明 |
 |---|---|
 | Go | 见 `go.mod`（`go 1.2x`），`go build ./...` 必须干净 |
-| bun | 只在需要构建控制台时用（`web/`） |
+| Node.js | 22+（只在构建控制台时需要，`web/` 用 npm） |
 | PostgreSQL | 14+；`ARTEX_PG_DSN` 指向它。启动时自动应用 `db/schema.sql` |
-| Node | 不需要 —— 前端用 bun |
 
 启动：
 
@@ -21,7 +20,7 @@ make run                      # 前端用仓库里已构建的产物
 改控制台后：
 
 ```bash
-make web && make build        # 重新构建前端 → 打进二进制
+make web && make build        # 重新构建前端 → 打进二进制（npm ci + vite build）
 ```
 
 ## 日常命令
