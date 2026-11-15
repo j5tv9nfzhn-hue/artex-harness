@@ -1,3 +1,4 @@
+import { authedFetch } from "./lib/auth.js";
 import { useEffect, useState } from "react";
 import {
   Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator,
@@ -18,7 +19,7 @@ const authHeaders = () => {
   return t ? { Authorization: "Bearer " + t } : {};
 };
 const jfetch = (p, o = {}) =>
-  fetch(p, { credentials: "include", ...o, headers: { ...authHeaders(), ...(o.body ? { "Content-Type": "application/json" } : {}) } })
+  authedFetch(p, { credentials: "include", ...o, headers: { ...authHeaders(), ...(o.body ? { "Content-Type": "application/json" } : {}) } })
     .then(async (r) => { if (!r.ok) throw new Error((await r.text()).slice(0, 180)); return r.headers.get("content-type")?.includes("json") ? r.json() : null; });
 
 const SECTIONS = [

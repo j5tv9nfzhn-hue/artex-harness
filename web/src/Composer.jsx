@@ -1,3 +1,4 @@
+import { authedFetch } from "./lib/auth.js";
 import { useEffect, useRef, useState } from "react";
 import { Badge, Box, Flex, IconButton, Select, Separator, Text, TextArea, Tooltip } from "@radix-ui/themes";
 import { ArrowUp, Gauge, Lock, SendHorizontal, Sparkles } from "lucide-react";
@@ -32,7 +33,7 @@ export default function Composer({ taskId, live, budget, onSent }) {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/llm/profiles", { headers: authHeaders(), credentials: "include" });
+        const r = await authedFetch("/api/llm/profiles", { headers: authHeaders(), credentials: "include" });
         if (!r.ok) return;
         const d = await r.json();
         const list = Array.isArray(d) ? d : (d.profiles || []);
@@ -84,7 +85,7 @@ export default function Composer({ taskId, live, budget, onSent }) {
     (async () => {
       for (const path of [`/api/harness/files/${encodeURIComponent(taskId)}`, `/api/tasks/${encodeURIComponent(taskId)}/files`]) {
         try {
-          const r = await fetch(path, { headers: authHeaders(), credentials: "include" });
+          const r = await authedFetch(path, { headers: authHeaders(), credentials: "include" });
           if (!r.ok) continue;
           const d = await r.json();
           const nodes = d.nodes || d.files || (Array.isArray(d) ? d : []);
@@ -110,7 +111,7 @@ export default function Composer({ taskId, live, budget, onSent }) {
     setProfileId(id);
     if (!taskId) return;
     try {
-      const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
+      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
         method: "PUT", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ llm_profile_ids: [Number(id)] }),
@@ -125,7 +126,7 @@ export default function Composer({ taskId, live, budget, onSent }) {
     if (!msg || !taskId) return;
     setBusy(true); setErr("");
     try {
-      const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/say`, {
+      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/say`, {
         method: "POST", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg }),

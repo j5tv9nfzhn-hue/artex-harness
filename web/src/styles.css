@@ -98,3 +98,20 @@ html, body, #root { height: 100%; margin: 0; }
 .set-nav:hover { background: var(--gray-a3); color: var(--gray-12); }
 .set-nav.active { background: var(--accent-a4); color: var(--gray-12); font-weight:550; }
 @media (max-width: 900px) { .settings-app { grid-template-columns: 1fr; } }
+
+/* ── 子代理侧栏（三栏布局的第三列）─────────────────────────────────────
+ * 只在面板挂载时把网格撑成三列；收起时回到两列，主区不变形。 */
+.subpanel { border-left: 1px solid var(--gray-a5); display: flex; flex-direction: column;
+  min-height: 0; min-width: 0; background: var(--color-panel-solid); }
+.app:has(.subpanel) { grid-template-columns: 264px minmax(0,1fr) 340px; }
+.app:has(.rail.collapsed):has(.subpanel) { grid-template-columns: 56px minmax(0,1fr) 340px; }
+@media (max-width: 1200px) { .app:has(.subpanel) { grid-template-columns: 264px minmax(0,1fr) 300px; } }
+@media (max-width: 900px) {
+  .app:has(.subpanel) { grid-template-columns: 1fr; }
+  .subpanel { display: none; } /* 窄屏不硬塞第三列，信息仍在事件流里 */
+}
+
+/* 旋转图标（加载中 / 重连中） */
+@keyframes artex-spin { to { transform: rotate(360deg); } }
+.spin { animation: artex-spin 0.9s linear infinite; }
+

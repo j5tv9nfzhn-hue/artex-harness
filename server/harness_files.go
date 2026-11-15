@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/harness/diff"
@@ -379,15 +380,13 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]delegationRow, 0, 8)
-	pending := map[int64]int{} // activity id → index in out
 	for _, a := range acts {
 		if a.Tool != "Agent" {
 			continue
 		}
 		if a.Kind == "tool_use" {
 			at, prompt := parseAgentSummary(a.Summary)
-			out = append(out, delegationRow{ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running"})
-			pending[a.ID] = len(out) - 1
+			out = append(out, delegationRow{ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running", StartedAt: a.CreatedAt})
 			continue
 		}
 		// tool_result follows the tool_use; attach to the most recent running one
@@ -398,14 +397,26 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 					out[i].State = "error"
 				}
 				out[i].Result = a.Summary
+				if !out[i].StartedAt.IsZero() && !a.CreatedAt.IsZero() {
+					out[i].DurationMS = a.CreatedAt.Sub(out[i].StartedAt).Milliseconds()
+				}
 				break
 			}
+		}
+	}
+	rows := dedupeDelegations(out)
+	// A still-running delegation reports elapsed time so far; the sidebar can show a
+	// live clock without inventing a start time on the client.
+	now := time.Now()
+	for i := range rows {
+		if rows[i].State == "running" && !rows[i].StartedAt.IsZero() {
+			rows[i].DurationMS = now.Sub(rows[i].StartedAt).Milliseconds()
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":        t.ID,
 		"harness":     t.HarnessMode,
-		"delegations": dedupeDelegations(out),
+		"delegations": rows,
 		"note":        "HARNESS 没有 worker 池：这里列出 agent 自己派出的子代理（Agent 工具）及其结果。",
 	})
 }
@@ -458,6 +469,14 @@ func dedupeDelegations(in []delegationRow) []delegationRow {
 			if out[i].State == "running" && d.State != "running" {
 				out[i].State, out[i].Result = d.State, d.Result
 			}
+			// Two rows describe one delegation; the exchange starts at the earlier
+			// timestamp and lasts as long as the longer of the two observations.
+			if !d.StartedAt.IsZero() && (out[i].StartedAt.IsZero() || d.StartedAt.Before(out[i].StartedAt)) {
+				out[i].StartedAt = d.StartedAt
+			}
+			if d.DurationMS > out[i].DurationMS {
+				out[i].DurationMS = d.DurationMS
+			}
 			continue
 		}
 		idx[k] = len(out)
@@ -481,4 +500,8 @@ type delegationRow struct {
 	Prompt     string `json:"prompt"`
 	State      string `json:"state"` // running | done | error
 	Result     string `json:"result,omitempty"`
+	// StartedAt / DurationMS let the sidebar show how long a delegation has been
+	// running without the client having to reconstruct timestamps from the stream.
+	StartedAt  time.Time `json:"started_at"`
+	DurationMS int64     `json:"duration_ms"`
 }
