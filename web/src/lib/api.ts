@@ -56,6 +56,7 @@ import type {
   InterceptRule,
   JudgeConfig,
   JudgeUsage,
+  LLMModelDetail,
   LLMPoolStatus,
   LLMProfile,
   LLMRecordDetail,
@@ -66,6 +67,7 @@ import type {
   MCPServer,
   MCPTool,
   MissingSkill,
+  ModelCatalogEntry,
   ModelTokenStat,
   NotificationChannel,
   NotificationDelivery,
@@ -989,13 +991,15 @@ export const api = {
   llmRetryPolicy: () => get<LLMRetryPolicy>("/llm/retry-policy"),
   saveLLMRetryPolicy: (p: LLMRetryPolicy) => post<LLMRetryPolicy>("/llm/retry-policy", p),
   fetchLLMModels: (provider: string, base_url: string, api_key: string, proxy = "", profile_id?: number) =>
-    post<{ ok: boolean; error?: string; models?: string[] }>("/llm/models", {
+    post<{ ok: boolean; error?: string; models?: string[]; details?: LLMModelDetail[]; endpoint?: string }>("/llm/models", {
       provider,
       base_url,
       api_key,
       proxy,
       profile_id,
     }),
+  // 公开目录：按模型 id 前缀登记已知的上下文 / 思考档位，只用于填空。
+  modelCatalog: (q = "") => get<{ entries: ModelCatalogEntry[]; count: number }>(`/llm/model-catalog${q ? `?q=${encodeURIComponent(q)}` : ""}`),
 
   // ---- agents ----
   agents: () => get<{ agents: Agent[] }>("/agents").then((r) => arr(r.agents)),

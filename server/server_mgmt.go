@@ -2084,10 +2084,19 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 			lastErr = fmt.Sprintf("API 返回 %d: %s", resp.StatusCode, string(body[:min(len(body), 512)]))
 			continue
 		}
-		// Both OpenAI and Anthropic return {"data": [{"id": "..."},...]}.
+		// Both OpenAI and Anthropic return {"data": [{"id": "..."},...]}. Aggregators
+		// (OpenRouter et al.) additionally report capacity per model; when they do,
+		// that number beats anything the catalog knows.
 		var parsed struct {
 			Data []struct {
-				ID string `json:"id"`
+				ID             string `json:"id"`
+				DisplayName    string `json:"display_name"`
+				Name           string `json:"name"`
+				ContextLength  int    `json:"context_length"`
+				ContextWindow  int    `json:"context_window"`
+				MaxInputTokens int    `json:"max_input_tokens"`
+				MaxTokens      int    `json:"max_tokens"`
+				MaxOutput      int    `json:"max_output_tokens"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(body, &parsed); err != nil {
@@ -2095,13 +2104,42 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		models := make([]string, 0, len(parsed.Data))
-		for _, m := range parsed.Data {
-			if m.ID != "" {
-				models = append(models, m.ID)
+		details := make([]map[string]any, 0, len(parsed.Data))
+		firstPos := func(vals ...int) int {
+			for _, v := range vals {
+				if v > 0 {
+					return v
+				}
 			}
+			return 0
+		}
+		for _, m := range parsed.Data {
+			if m.ID == "" {
+				continue
+			}
+			models = append(models, m.ID)
+			// Catalog first, endpoint second: every catalog field stays a fallback.
+			d := catalogSuggestion(m.ID)
+			if c := firstPos(m.ContextLength, m.ContextWindow, m.MaxInputTokens); c > 0 {
+				d["context_window_k"] = (c + 1023) / 1024
+				d["context_source"] = "endpoint"
+			} else if _, ok := d["context_window_k"]; ok {
+				d["context_source"] = "catalog"
+			} else {
+				d["context_source"] = "unknown"
+			}
+			if o := firstPos(m.MaxOutput, m.MaxTokens); o > 0 {
+				d["max_output_k"] = (o + 1023) / 1024
+			}
+			if lbl := m.DisplayName; lbl != "" {
+				d["label"] = lbl
+			} else if lbl := m.Name; lbl != "" {
+				d["label"] = lbl
+			}
+			details = append(details, d)
 		}
 		if len(models) > 0 {
-			writeJSON(w, 200, map[string]any{"ok": true, "models": models})
+			writeJSON(w, 200, map[string]any{"ok": true, "models": models, "details": details, "endpoint": c.url})
 			return
 		}
 		emptyOK = true // 200 but no model ids — keep trying other candidates
@@ -2114,6 +2152,23 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		lastErr = "未获取到模型列表"
 	}
 	writeJSON(w, 200, map[string]any{"ok": false, "error": lastErr})
+}
+
+// pgModelCatalog 返回公开目录里登记的全部模型家族，供前端在没有密钥时也能
+// 给出建议（例如用户手动输入 "claude-sonnet-4-20250514" 时自动补上下文）。
+func (s *Server) pgModelCatalog(w http.ResponseWriter, r *http.Request) {
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	out := make([]ModelCatalogEntry, 0, len(modelCatalogTable))
+	for _, e := range modelCatalogTable {
+		if q != "" && !strings.Contains(e.Prefix, q) && !strings.Contains(strings.ToLower(e.Label), q) {
+			continue
+		}
+		out = append(out, e)
+	}
+	if out == nil {
+		out = []ModelCatalogEntry{}
+	}
+	writeJSON(w, 200, map[string]any{"entries": out, "count": len(out)})
 }
 
 // --- prompt template helpers (Go text/template + catalog 白名单) ---

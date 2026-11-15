@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import {
-  Badge, Box, Button, Card, Code, Flex, Heading, IconButton, ScrollArea, Separator,
+  Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator,
   Dialog, Select, Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
-import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, Shield, Sparkles, Terminal, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
 
 /* 设置：与 DSH 相同的形态——打开后【左侧栏变成设置导航】，主区显示该分区的表单。
  * 不是弹窗、不是上下堆叠卡片、不是弹窗内的 tab。
@@ -246,9 +246,20 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
       </div>
 
       <ProviderDialog open={addProvider} onClose={() => setAddProvider(false)}
-        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("已添加供应商"); setAddProvider(false); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
+        onSave={async (b) => { try {
+          for (const m of b.models) {
+            await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, name: m.model, format: b.format, base_url: b.base_url, proxy: b.proxy, api_key: b.api_key }) });
+          }
+          toast?.(b.models.length > 1 ? `已添加供应商与 ${b.models.length} 个模型` : "已添加供应商");
+          setAddProvider(false); reloadProfiles();
+        } catch (e) { toast?.(e.message, true); } }} />
       <ProviderDialog open={!!addModelFor} seed={addModelFor} onClose={() => setAddModelFor(null)}
-        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("已添加模型"); setAddModelFor(null); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
+        onSave={async (b) => { try {
+          for (const m of b.models) {
+            await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, name: m.model, format: addModelFor.format, base_url: addModelFor.base_url, proxy: addModelFor.proxy, api_key: "" }) });
+          }
+          toast?.(`已添加 ${b.models.length} 个模型`); setAddModelFor(null); reloadProfiles();
+        } catch (e) { toast?.(e.message, true); } }} />
       <EditProviderDialog pv={editProvider} onClose={() => setEditProvider(null)}
         onSave={async (patch) => { try {
           for (const m of editProvider.models) await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, api_key: patch.api_key || "", base_url: patch.base_url, proxy: patch.proxy }) });
@@ -288,14 +299,67 @@ function ProviderDialog({ open, seed, onClose, onSave }) {
   const [baseURL, setBaseURL] = useState("");
   const [apiKey, setAPIKey] = useState("");
   const [proxy, setProxy] = useState("");
-  const [model, setModel] = useState("");
-  const [ctx, setCtx] = useState("");
-  useEffect(() => { if (!open) return; setFormat(seed?.format || "openai"); setBaseURL(seed?.base_url || ""); setProxy(seed?.proxy || ""); setAPIKey(""); setModel(""); setCtx(""); }, [open, seed]);
+  const [manual, setManual] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [probe, setProbe] = useState(null);   // {ok,error,endpoint,count}
+  const [list, setList] = useState(null);     // LLMModelDetail[] | null
+  const [picked, setPicked] = useState({});   // model -> detail
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setFormat(seed?.format || "openai"); setBaseURL(seed?.base_url || "");
+    setProxy(seed?.proxy || ""); setAPIKey("");
+    setManual(""); setProbe(null); setList(null); setPicked({}); setQ("");
+  }, [open, seed]);
+
+  // 真去问供应商要模型列表；端点自己报的容量优先，缺的由公开目录补。
+  const discover = async () => {
+    setBusy(true); setProbe(null);
+    try {
+      const r = await jfetch("/api/llm/models", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: format, base_url: baseURL, api_key: apiKey, proxy,
+          profile_id: seed?.id ? Number(seed.id) : undefined,
+        }),
+      });
+      if (!r?.ok) { setProbe({ ok: false, error: r?.error || "未获取到模型列表" }); setList(null); return; }
+      const byId = new Map((r.details || []).map((d) => [d.model, d]));
+      const rows = (r.models || []).map((id) => byId.get(id) || { model: id, context_source: "unknown" });
+      setList(rows);
+      setProbe({ ok: true, endpoint: r.endpoint, count: rows.length });
+      setPicked(Object.fromEntries(rows.map((d) => [d.model, d])));
+    } catch (e) { setProbe({ ok: false, error: e.message }); setList(null); }
+    finally { setBusy(false); }
+  };
+
+  const toggle = (d) => setPicked((p) => { const n = { ...p }; if (n[d.model]) delete n[d.model]; else n[d.model] = d; return n; });
+  const chosen = Object.values(picked);
+  const shown = (list || []).filter((d) => !q.trim() || d.model.toLowerCase().includes(q.trim().toLowerCase()));
+  const ctxLabel = (d) => (d.context_window_k ? `${d.context_window_k}K` : "未知");
+  const ctxColor = (d) => (d.context_source === "endpoint" ? "green" : d.context_window_k ? "blue" : "gray");
+
+  const submit = () => {
+    const rows = chosen.length ? chosen : (manual.trim() ? [{ model: manual.trim(), context_source: "unknown" }] : []);
+    if (!rows.length) return;
+    onSave({
+      name: rows[0].model, format, base_url: baseURL, proxy, api_key: apiKey,
+      models: rows.map((d) => ({
+        model: d.model,
+        context_window_k: d.context_window_k || 0,
+        thinking_type: d.thinking_type || "",
+        reasoning_effort: d.reasoning_effort || "",
+      })),
+    });
+  };
+
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Content maxWidth="520px">
+      <Dialog.Content maxWidth="760px">
         <Dialog.Title size="4">{isNew ? "添加供应商" : "添加模型"}</Dialog.Title>
-        <Dialog.Description size="1" color="gray">{isNew ? "供应商 = 端点与凭据；模型挂在其下。" : `端点沿用 ${seed?.base_url || "默认端点"}，只需填模型。`}</Dialog.Description>
+        <Dialog.Description size="1" color="gray">
+          {isNew ? "供应商 = 端点与凭据。填好后点「获取可用模型」，勾选要用的模型即可——上下文与思考档位会按公开目录自动带出。" : `端点沿用 ${seed?.base_url || "默认端点"}，密钥沿用已保存的那把。`}
+        </Dialog.Description>
         <Flex direction="column" gap="3" mt="3">
           {isNew ? (<>
             <Field label="协议">
@@ -312,14 +376,56 @@ function ProviderDialog({ open, seed, onClose, onSave }) {
             <Field label="API Key"><TextField.Root type="password" value={apiKey} onChange={(e) => setAPIKey(e.target.value)} placeholder="sk-…" /></Field>
             <Field label="出站代理（可选）"><TextField.Root value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="http://127.0.0.1:3128" /></Field>
           </>) : null}
-          <Flex gap="3">
-            <Field label="模型名"><TextField.Root value={model} onChange={(e) => setModel(e.target.value)} placeholder="例如 MiniMax-M3.1-Flash" /></Field>
-            <Field label="上下文 K"><TextField.Root value={ctx} onChange={(e) => setCtx(e.target.value)} placeholder="128" /></Field>
+
+          <Flex align="center" gap="3">
+            <Button size="2" variant="soft" onClick={discover} disabled={busy || !baseURL || (isNew && !apiKey)}>
+              <RefreshCw size={13} className={busy ? "spin" : ""} /> {busy ? "正在获取…" : "获取可用模型"}
+            </Button>
+            <Text size="1" color="gray">
+              {probe?.ok ? `端点返回 ${probe.count} 个模型` : probe?.error ? "" : "不填也能手动输入模型名"}
+            </Text>
           </Flex>
+          {probe?.error ? (
+            <Box p="2" style={{ border: "1px solid var(--red-7)", borderRadius: 8, background: "var(--red-2)" }}>
+              <Text size="1" color="red">获取失败：{probe.error}</Text>
+            </Box>
+          ) : null}
+
+          {list ? (
+            <Flex direction="column" gap="2">
+              <TextField.Root size="2" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索模型…" />
+              <ScrollArea style={{ maxHeight: 260 }}>
+                <Flex direction="column" gap="1" pr="2">
+                  {shown.map((d) => (
+                    <Flex key={d.model} align="center" gap="2" p="1" style={{ borderRadius: 6, background: picked[d.model] ? "var(--accent-a3)" : "transparent" }}>
+                      <Checkbox checked={!!picked[d.model]} onCheckedChange={() => toggle(d)} />
+                      <Code size="1" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{d.model}</Code>
+                      {d.thinking_type ? <Badge size="1" variant="soft" color="purple">思考</Badge> : null}
+                      <Tooltip content={d.context_source === "endpoint" ? "端点上报" : d.context_source === "catalog" ? "公开目录" : "两边都不知道，需手填"}>
+                        <Badge size="1" variant="soft" color={ctxColor(d)}>{ctxLabel(d)}</Badge>
+                      </Tooltip>
+                    </Flex>
+                  ))}
+                  {!shown.length ? <Text size="1" color="gray">没有匹配的模型</Text> : null}
+                </Flex>
+              </ScrollArea>
+              {chosen.length ? (
+                <Flex align="center" gap="3">
+                  <Text size="1" color="gray">已选 {chosen.length} 个</Text>
+                  <Button size="1" variant="ghost" onClick={() => setPicked({})}>全不选</Button>
+                  <Button size="1" variant="ghost" onClick={() => setPicked(Object.fromEntries(shown.map((d) => [d.model, d])))}>全选当前 {shown.length}</Button>
+                </Flex>
+              ) : null}
+            </Flex>
+          ) : (
+            <Field label="模型名（手动）"><TextField.Root value={manual} onChange={(e) => setManual(e.target.value)} placeholder="例如 MiniMax-M3.1-Flash" /></Field>
+          )}
         </Flex>
         <Flex gap="3" mt="4" justify="end">
           <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
-          <Button onClick={() => onSave({ name: model || "default", format, base_url: baseURL, proxy, api_key: apiKey, model, context_window_k: Number(ctx) || 0 })}>保存</Button>
+          <Button onClick={submit} disabled={!chosen.length && !manual.trim()}>
+            {chosen.length > 1 ? `添加 ${chosen.length} 个模型` : "保存"}
+          </Button>
         </Flex>
       </Dialog.Content>
     </Dialog.Root>
@@ -356,17 +462,36 @@ function EditModelDialog({ model, onClose, onSave }) {
   const [effort, setEffort] = useState("");
   const [rps, setRps] = useState("");
   const [rpm, setRpm] = useState("");
+  const [src, setSrc] = useState("");
+  // 手输模型名时也能按公开目录回填：老配置补上下文，是最常见的诉求。
+  const fillFromCatalog = async () => {
+    try {
+      const r = await jfetch(`/api/llm/model-catalog?q=${encodeURIComponent(model?.model || "")}`);
+      const name = (model?.model || "").toLowerCase();
+      const hit = (r?.entries || []).find((e) => name === e.match || name.startsWith(e.match));
+      if (!hit) { setSrc("目录里没有这个模型，参数需手填"); return; }
+      if (hit.context_window_k) setCtx(String(hit.context_window_k));
+      if (hit.thinking_type) setThinking(hit.thinking_type);
+      if (hit.default_effort) setEffort(hit.default_effort);
+      setSrc(`已按 ${hit.match} 填充（公开目录）`);
+    } catch (e) { setSrc("填充失败：" + e.message); }
+  };
   useEffect(() => {
     if (!model) return;
     setCtx(model.context_window_k ? String(model.context_window_k) : "");
     setThinking(model.thinking_type || ""); setEffort(model.reasoning_effort || "");
     setRps(model.rate_per_second ? String(model.rate_per_second) : "");
     setRpm(model.rate_per_minute ? String(model.rate_per_minute) : "");
+    setSrc("");
   }, [model]);
   return (
     <Dialog.Root open={!!model} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Content maxWidth="520px">
-        <Dialog.Title size="4">编辑模型 {model?.model}</Dialog.Title>
+        <Flex align="center" gap="3">
+          <Dialog.Title size="4" style={{ flex: 1 }}>编辑模型 {model?.model}</Dialog.Title>
+          <Button size="1" variant="soft" onClick={fillFromCatalog}><Wand2 size={12} /> 按目录填充</Button>
+        </Flex>
+        {src ? <Text size="1" color="gray" as="p" mt="1">{src}</Text> : null}
         <Flex direction="column" gap="3" mt="3">
           <Flex gap="3">
             <Field label="上下文 K"><TextField.Root value={ctx} onChange={(e) => setCtx(e.target.value)} /></Field>

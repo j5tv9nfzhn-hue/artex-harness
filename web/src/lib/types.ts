@@ -1111,6 +1111,35 @@ export interface LLMProfile {
   retry?: LLMRetryOverride;
 }
 
+// 一次模型发现里单个模型的可填参数。context_source 说明上下文这个数字打哪来：
+// "endpoint" = 供应商 /models 自己报的，最可信；"catalog" = 公开目录按前缀匹配；
+// "unknown" = 两边都不知道，界面必须显示未知、让用户手填。
+export interface LLMModelDetail {
+  model: string;
+  label?: string;
+  matched?: string;
+  known?: boolean;
+  context_window_k?: number;
+  max_output_k?: number;
+  thinking_type?: string;
+  reasoning_efforts?: string[];
+  reasoning_effort?: string;
+  vision?: boolean;
+  context_source?: "endpoint" | "catalog" | "unknown";
+}
+
+// 公开目录的一个条目（GET /api/llm/model-catalog）。
+export interface ModelCatalogEntry {
+  match: string;
+  label?: string;
+  context_window_k?: number;
+  max_output_k?: number;
+  thinking_type?: string;
+  reasoning_efforts?: string[];
+  default_effort?: string;
+  vision?: boolean;
+}
+
 // ---- LLM 重试策略 ----
 // 一层重试的两个旋钮。两者都是「0 = 未配置」：
 //   attempts    0=用默认次数 | -1=关闭该层重试 | >0=重试次数
