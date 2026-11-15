@@ -68,3 +68,14 @@ html, body, #root { height: 100%; margin: 0; }
 .rail-foot { background: var(--color-panel-solid); }
 .notif-dot { position: absolute; top: -6px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
   border-radius: 99px; background: var(--red-9); color: #fff; font-size: 9px; line-height: 14px; text-align: center; }
+
+/* 侧栏折叠：只留图标列（:has 让父级 grid 跟着子元素状态变） */
+.app:has(.rail.collapsed) { grid-template-columns: 56px minmax(0,1fr); }
+.rail.collapsed .group-head,
+.rail.collapsed .row .row-title,
+.rail.collapsed .row .row-tail,
+.rail.collapsed h1,
+.rail.collapsed .rail-sub,
+.rail.collapsed .rail-foot-text { display: none; }
+.rail.collapsed .row { justify-content: center; padding: 0; }
+.rail.collapsed .rail-foot { justify-content: center; }

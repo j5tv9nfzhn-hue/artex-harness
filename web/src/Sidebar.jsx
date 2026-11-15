@@ -1,15 +1,20 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Avatar, Badge, Box, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, Tooltip,
+  Avatar, Badge, Box, Card, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
 } from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, Search, Settings } from "lucide-react";
+import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Settings, ShieldAlert } from "lucide-react";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
  * 组内行高固定 30px，113 条也只渲染可见的那十几行（@tanstack/react-virtual）。
  * 分组用 date-fns 判断（今天/昨天/本周/更早），文案由 date-fns 的 zhCN 提供。 */
+
+function authHeaders() {
+  let t = ""; try { t = localStorage.getItem("artex.harness.token") || ""; } catch {}
+  return t ? { Authorization: "Bearer " + t } : {};
+}
 
 const ROW_H = 30;
 const HEAD_H = 26;
@@ -29,7 +34,42 @@ const statusColor = (s) =>
 export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("artex.rail") === "collapsed"; } catch { return false; } });
+  const [pending, setPending] = useState([]);
+  const [notif, setNotif] = useState(false);
+  const [renaming, setRenaming] = useState(null);
+  const [newName, setNewName] = useState("");
+  useEffect(() => { try { localStorage.setItem("artex.rail", collapsed ? "collapsed" : "open"); } catch {} }, [collapsed]);
   const scrollRef = useRef(null);
+  const loadPending = useCallback(async () => {
+    try {
+      const r = await fetch("/api/intercept/pending", { credentials: "include", headers: authHeaders() });
+      if (r.ok) { const d = await r.json(); setPending(Array.isArray(d) ? d : (d.items || d.pending || [])); }
+    } catch { /* 通知不是关键路径 */ }
+  }, []);
+  useEffect(() => { loadPending(); const id = setInterval(loadPending, 15000); return () => clearInterval(id); }, [loadPending]);
+
+  async function decide(id, decision) {
+    try {
+      const r = await fetch(`/api/intercept/pending/${id}/decide`, {
+        method: "POST", credentials: "include",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      toast?.(decision === "allow" ? "已允许" : "已拒绝");
+      loadPending();
+    } catch (e) { toast?.(e.message, true); }
+  }
+
+  async function patchTask(id, body) {
+    const r = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
+      method: "PATCH", credentials: "include",
+      headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+    onReload?.();
+  }
   const running = tasks.filter((t) => t.status === "running").length;
   const notifCount = tasks.filter((t) => t.status === "running" || t.status === "failed").length;
 
@@ -56,10 +96,15 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
   });
 
   return (
-    <aside className="rail">
+    <aside className={"rail" + (collapsed ? " collapsed" : "")}>
       <Flex align="center" gap="2" px="3" pt="3" pb="2">
         <Heading size="3" weight="medium">artex · harness</Heading>
         <Box style={{ marginLeft: "auto" }}>
+          <Tooltip content={collapsed ? "展开侧栏" : "收起侧栏"}>
+            <IconButton size="1" variant="ghost" color="gray" aria-label="收起侧栏" onClick={() => setCollapsed((v) => !v)}>
+              {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+            </IconButton>
+          </Tooltip>
           <Tooltip content="命令面板 ⌘K">
             <IconButton size="1" variant="ghost" color="gray" aria-label="命令面板" onClick={onPalette}>
               <CommandIcon size={14} />
@@ -124,6 +169,22 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                         <DropdownMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
                           <Copy size={12} /> 复制 ID #{t.id}
                         </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                          <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
+                          <Pencil size={12} /> 重命名
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item color="red"
+                          onSelect={async () => {
+                            try {
+                              const r = await fetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
+                              if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+                              toast?.("已归档 #" + t.id); onReload?.();
+                            } catch (e) { toast?.(e.message, true); }
+                          }}>
+                          <Archive size={12} /> 归档
+                        </DropdownMenu.Item>
                         <DropdownMenu.Separator />
                         <DropdownMenu.Item color="gray" disabled>
                           {t.status} · {t.created_at ? formatDistanceToNowStrict(new Date(t.created_at), { addSuffix: true, locale: zhCN }) : "—"}
@@ -155,10 +216,10 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
         <Box style={{ marginLeft: "auto" }}>
           <Flex gap="1" align="center">
             <Tooltip content={notifCount ? `${notifCount} 个会话需要注意（运行中或失败）` : "没有需要处理的会话"}>
-              <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => onFilter?.("attention")}>
+              <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
                 <Box style={{ position: "relative", display: "inline-flex" }}>
                   <Bell size={14} />
-                  {notifCount ? <span className="notif-dot">{notifCount > 9 ? "9+" : notifCount}</span> : null}
+                  {(pending.length + notifCount) ? <span className="notif-dot">{(pending.length + notifCount) > 9 ? "9+" : (pending.length + notifCount)}</span> : null}
                 </Box>
               </IconButton>
             </Tooltip>
@@ -192,6 +253,48 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
           </Flex>
         </Box>
       </Flex>
+
+      <Dialog.Root open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
+        <Dialog.Content maxWidth="420px">
+          <Dialog.Title size="4">重命名会话</Dialog.Title>
+          <RTextField.Root value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="例如：内网 8899 存活侦察" mt="3" />
+          <Flex gap="3" mt="4" justify="end">
+            <Dialog.Close><button className="ghost-btn">取消</button></Dialog.Close>
+            <IconButton variant="solid" onClick={async () => {
+              try { await patchTask(renaming.id, { name: newName.trim() }); setRenaming(null); toast?.("已重命名"); }
+              catch (e) { toast?.(e.message, true); }
+            }}>保存</IconButton>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
+
+      <Dialog.Root open={notif} onOpenChange={setNotif}>
+        <Dialog.Content maxWidth="520px">
+          <Dialog.Title size="4">需要你处理</Dialog.Title>
+          <Dialog.Description size="1" color="gray">
+            平台审批门挂起的动作；不处理会一直等着。
+          </Dialog.Description>
+          <Flex direction="column" gap="2" mt="3">
+            {!pending.length ? <Text size="1" color="gray">当前没有待审批动作。</Text> : null}
+            {pending.map((p) => (
+              <Card key={p.id} size="1">
+                <Flex direction="column" gap="1">
+                  <Flex align="center" gap="2">
+                    <ShieldAlert size={13} color="var(--amber-9)" />
+                    <Text size="1" weight="medium">{p.tool_name || p.tool || "工具调用"}</Text>
+                    <Text size="1" color="gray">#{p.id}</Text>
+                  </Flex>
+                  {p.reason ? <Text size="1" color="gray">{p.reason}</Text> : null}
+                  <Flex gap="2" justify="end">
+                    <IconButton size="1" variant="soft" color="red" onClick={() => decide(p.id, "deny")}>拒绝</IconButton>
+                    <IconButton size="1" variant="solid" onClick={() => decide(p.id, "allow")}>允许</IconButton>
+                  </Flex>
+                </Flex>
+              </Card>
+            ))}
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
 
       <Dialog.Root open={about} onOpenChange={setAbout}>
         <Dialog.Content maxWidth="420px">

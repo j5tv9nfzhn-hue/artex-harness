@@ -53,16 +53,16 @@ export default function App() {
   const stick = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const d = await api("/api/tasks");
+  const loadTasks = useCallback(async () => {
+    try {
+      const d = await api("/api/tasks");
         const list = Array.isArray(d) ? d : (d.tasks || d.items || []);
         setTasks(list);
-        if (list.length) setTaskId(String(list[0].id));
-      } catch (e) { setErr("加载任务失败：" + e.message); }
-    })();
-  }, []);
+      if (list.length && !taskId) setTaskId(String(list[0].id));
+    } catch (e) { setErr("加载任务失败：" + e.message); }
+  }, [taskId]);
+
+  useEffect(() => { loadTasks(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!taskId) return;
@@ -166,7 +166,7 @@ export default function App() {
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
-                 toast={toast} onFilter={() => setPalette(true)} />
+                 toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks} />
 
         <div className="main">
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
