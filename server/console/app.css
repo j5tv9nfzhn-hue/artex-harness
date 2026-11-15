@@ -480,3 +480,110 @@ button.sm{ padding: 3px 8px; font-size: 12px; }
 /* 右侧状态栏：给内容留出可读宽度，避免"还没有派出子代理…"被挤成三行 */
 .dock{ min-width: 340px; }
 @media (max-width: 1180px){ .dock{ min-width: 280px; } }
+
+/* ============================================================================
+   结构层：响应式 · 事件流语义 · 命令面板 · 骨架
+   ----------------------------------------------------------------------------
+   到此为止的样式都假设"屏幕够宽"。真实使用里它会开在 1280 的笔记本上、也会被
+   拖到半屏：三栏必须能在窄屏收敛为单栏 + 抽屉，而不是把中栏挤成一条缝。
+   ========================================================================== */
+
+/* ── 事件流：让每种条目有自己的形状，扫一眼就知道是什么 ─────────────────── */
+.turn-head{
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0 2px; margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.turn-head .rev{
+  font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.turn-items{ display: flex; flex-direction: column; gap: 6px; padding: 4px 0 2px 0; }
+
+.item-badge{
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  font-family: var(--mono);
+  padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--ink-2); background: var(--paper-2);
+}
+.item-badge.text{ border-color: #cfd8cf; color: var(--ok); background: #f2f7f3; }
+.item-badge.thinking{ border-color: var(--line); color: var(--ink-3); font-style: italic; }
+.item-badge.tool_use{ border-color: #d9cbbe; color: var(--accent); background: var(--accent-dim); }
+.item-badge.tool_result{ border-color: #ccd3dd; color: #3f5a7a; background: #f3f6fa; }
+.item-badge.lifecycle{ border-color: var(--line); color: var(--ink-2); background: var(--paper-3); }
+.item-badge.usage{ border-color: var(--line); color: var(--ink-3); }
+.item-badge.result{ border-color: #cfd8cf; color: var(--ok); background: #f2f7f3; }
+.item-badge.compact{ border-color: #d8c9b4; color: var(--warn); background: #fbf6ec; }
+
+.item-body{ white-space: pre-wrap; word-break: break-word; }
+.item-body.err{ color: var(--bad); }
+.item-body code{ background: var(--paper-3); padding: 0 3px; border-radius: 3px; }
+
+/* ── 骨架：列表加载时给形状，而不是空白 ─────────────────────────────────── */
+.skel-row{
+  height: 34px; margin: 6px 8px; border-radius: var(--radius-s);
+  background: linear-gradient(90deg, var(--paper-3) 25%, var(--paper-2) 37%, var(--paper-3) 63%);
+  background-size: 400% 100%;
+  animation: artex-shimmer 1.4s ease infinite;
+}
+@keyframes artex-shimmer{ 0%{ background-position: 100% 0 } 100%{ background-position: 0 0 } }
+
+/* ── 命令面板：Ctrl/⌘+K ─────────────────────────────────────────────────── */
+.cmdk{
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh;
+  background: rgba(20,18,16,.34); backdrop-filter: blur(2px);
+}
+.cmdk-box{
+  width: min(560px, 92vw); background: var(--paper-2);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-3); overflow: hidden;
+}
+.cmdk-input{
+  width: 100%; border: 0; border-bottom: 1px solid var(--line-soft);
+  background: transparent; color: var(--ink);
+  padding: 12px 14px; font-size: 14px; outline: none;
+}
+.cmdk-list{ max-height: 46vh; overflow: auto; margin: 0; padding: 6px; list-style: none; }
+.cmdk-item{
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px; border-radius: var(--radius-s); cursor: pointer;
+}
+.cmdk-item .k{ font-family: var(--mono); font-size: 11px; color: var(--ink-3); min-width: 54px; }
+.cmdk-item[aria-selected="true"]{ background: var(--accent-dim); color: var(--ink); }
+.cmdk-item .hint{ margin-left: auto; font-size: 11px; color: var(--ink-3); }
+.cmdk-foot{
+  display: flex; gap: 12px; padding: 7px 12px;
+  border-top: 1px solid var(--line-soft); font-size: 11px; color: var(--ink-3);
+}
+
+/* ── 窄屏：三栏 → 单栏 + 抽屉 ───────────────────────────────────────────── */
+@media (max-width: 1180px){
+  .dock{ min-width: 300px; }
+}
+@media (max-width: 980px){
+  .app{ grid-template-columns: 240px 1fr; }
+  .dock{
+    position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 92vw);
+    z-index: 60; transform: translateX(100%);
+    transition: transform var(--dur) ease;
+    box-shadow: var(--shadow-3);
+  }
+  .dock.open{ transform: translateX(0); }
+  .dock-toggle{ display: inline-flex; }
+}
+@media (max-width: 720px){
+  .app{ grid-template-columns: 1fr; }
+  .rail{
+    position: fixed; left: 0; top: 0; bottom: 0; width: min(320px, 88vw);
+    z-index: 61; transform: translateX(-100%);
+    transition: transform var(--dur) ease; box-shadow: var(--shadow-3);
+  }
+  .rail.open{ transform: translateX(0); }
+  .topbar{ flex-wrap: wrap; gap: 6px; }
+  .topbar-actions{ width: 100%; justify-content: flex-end; }
+  .stream{ padding: 12px; }
+}
+@media (min-width: 981px){ .dock-toggle{ display: none; } }

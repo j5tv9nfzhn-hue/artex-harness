@@ -870,3 +870,159 @@ function sparkline(values, w, h) {
 
 // escapeHtmlLite is esc() for text that is already composed locally (no markup).
 function escapeHtmlLite(t) { return esc(t); }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   控制台外壳：命令面板 · 骨架屏 · 无障碍
+   ----------------------------------------------------------------------------
+   这一层不碰业务逻辑，只补"专业工具默认该有"的几件事：
+   - ⌘/Ctrl+K 命令面板：任务跳转、切换视图、切换右栏、刷新、终端抽屉。四栏界面
+     里最贵的是"找到那件事"的成本，键盘一步到位比记忆按钮位置便宜。
+   - 骨架屏：首次加载任务列表时给形状，而不是让人盯着空白判断"是不是坏了"。
+   - 事件流 aria-live：新事件会被读屏播报，而不是只有看得见的人知道在跑。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function consoleActions() {
+  const acts = [];
+  const tabNames = { run: "Run", plan: "Plan", replay: "Replay", eval: "Eval", platform: "平台" };
+  Object.entries(tabNames).forEach(([k, label]) => {
+    acts.push({ key: "视图", label: "切换到 " + label, run: () => switchTab(k) });
+  });
+  const docks = { status: "状态", files: "文件", diff: "DIFF", budget: "预算", browser: "浏览器", act: "干预" };
+  Object.entries(docks).forEach(([k, label]) => {
+    acts.push({
+      key: "右栏", label: "打开 " + label,
+      run: () => { S.dockTab = k; if (typeof renderDockTabs === "function") renderDockTabs(); if (typeof refreshDock === "function") refreshDock(); },
+    });
+  });
+  acts.push({ key: "动作", label: "刷新任务列表", run: () => loadTasks() });
+  acts.push({ key: "动作", label: "打开 / 关闭终端抽屉", run: () => toggleDrawer() });
+  (S.tasks || []).slice(0, 40).forEach((t) => {
+    acts.push({
+      key: "任务",
+      label: (t.goal || t.description || t.id || "").slice(0, 70),
+      hint: (t.status || "") + " · " + (t.id || ""),
+      run: () => selectTask(t.id),
+    });
+  });
+  return acts;
+}
+
+let cmdkState = null;
+
+function closeCmdk() {
+  const el = document.getElementById("cmdk");
+  if (el) el.remove();
+  cmdkState = null;
+}
+
+function openCmdk() {
+  if (cmdkState) return closeCmdk();
+  const wrap = document.createElement("div");
+  wrap.id = "cmdk";
+  wrap.className = "cmdk";
+  wrap.setAttribute("role", "dialog");
+  wrap.setAttribute("aria-modal", "true");
+  wrap.setAttribute("aria-label", "命令面板");
+  wrap.innerHTML = `
+    <div class="cmdk-box">
+      <input id="cmdk-input" class="cmdk-input" placeholder="搜索任务、视图、动作…（↑↓ 选择，Enter 执行，Esc 关闭）"
+             autocomplete="off" spellcheck="false" />
+      <ul id="cmdk-list" class="cmdk-list" role="listbox"></ul>
+      <div class="cmdk-foot"><span>⌘/Ctrl+K 打开</span><span>Esc 关闭</span><span id="cmdk-count"></span></div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const input = wrap.querySelector("#cmdk-input");
+  const list = wrap.querySelector("#cmdk-list");
+  const all = consoleActions();
+  let view = all.slice(0, 12);
+  let sel = 0;
+
+  function paint() {
+    list.innerHTML = view.map((a, i) => `
+      <li class="cmdk-item" role="option" data-i="${i}" aria-selected="${i === sel}">
+        <span class="k">${esc(a.key)}</span>
+        <span>${esc(a.label)}</span>
+        ${a.hint ? `<span class="hint">${esc(a.hint)}</span>` : ""}
+      </li>`).join("") || `<li class="cmdk-item"><span>没有匹配项</span></li>`;
+    const c = document.getElementById("cmdk-count");
+    if (c) c.textContent = view.length + " 项";
+  }
+
+  function filter(q) {
+    const needle = q.trim().toLowerCase();
+    view = (needle
+      ? all.filter((a) => (a.label + " " + a.key + " " + (a.hint || "")).toLowerCase().includes(needle))
+      : all).slice(0, 40);
+    sel = 0;
+    paint();
+  }
+
+  function choose(i) {
+    const a = view[i];
+    if (!a) return;
+    closeCmdk();
+    try { a.run(); } catch (e) { toast(e.message || String(e), true); }
+  }
+
+  input.addEventListener("input", () => filter(input.value));
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); closeCmdk(); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); sel = Math.min(sel + 1, view.length - 1); paint(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); sel = Math.max(sel - 1, 0); paint(); }
+    else if (ev.key === "Enter") { ev.preventDefault(); choose(sel); }
+  });
+  wrap.addEventListener("click", (ev) => {
+    if (ev.target === wrap) return closeCmdk();
+    const li = ev.target.closest(".cmdk-item");
+    if (li && li.dataset.i !== undefined) choose(Number(li.dataset.i));
+  });
+
+  paint();
+  input.focus();
+  cmdkState = { filter };
+}
+
+document.addEventListener("keydown", (ev) => {
+  const mod = ev.metaKey || ev.ctrlKey;
+  if (mod && (ev.key === "k" || ev.key === "K" || ev.key === "p" || ev.key === "P")) {
+    ev.preventDefault();
+    openCmdk();
+  } else if (ev.key === "Escape" && cmdkState) {
+    ev.preventDefault();
+    closeCmdk();
+  }
+});
+
+/* 事件流的读屏播报：新条目会被念出来，而不是只有盯屏幕的人知道在跑 */
+(function ariaLiveStream() {
+  const stream = document.getElementById("stream");
+  if (stream && !stream.getAttribute("aria-live")) {
+    stream.setAttribute("aria-live", "polite");
+    stream.setAttribute("aria-relevant", "additions");
+  }
+})();
+
+/* 骨架屏：只在首次加载时出现，刷新时不闪 */
+(function skeletonOnFirstLoad() {
+  const list = document.getElementById("task-list");
+  if (!list) return;
+  if (!Array.isArray(S.tasks) || S.tasks.length === 0) {
+    list.innerHTML = Array.from({ length: 5 }, () => `<li class="skel-row"></li>`).join("");
+  }
+})();
+
+/* 窄屏：左栏与右栏变成抽屉，用浮动按钮开关 */
+(function narrowSwitchers() {
+  if (document.getElementById("btn-dock-toggle")) return;
+  const bar = document.querySelector(".topbar-actions");
+  if (!bar) return;
+  const mk = (id, label, title, target) => {
+    const b = document.createElement("button");
+    b.id = id; b.className = "sm dock-toggle"; b.textContent = label; b.title = title;
+    b.addEventListener("click", () => document.querySelector(target)?.classList.toggle("open"));
+    bar.appendChild(b);
+  };
+  mk("btn-dock-toggle", "面板", "切换右栏（窄屏抽屉）", ".dock");
+  mk("btn-rail-toggle", "任务", "切换任务栏（窄屏抽屉）", ".rail");
+})();
