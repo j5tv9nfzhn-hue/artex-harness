@@ -5,7 +5,6 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import SettingsDialog from "./Settings.jsx";
 import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Settings, ShieldAlert } from "lucide-react";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
@@ -35,7 +34,6 @@ const statusColor = (s) =>
 export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("artex.rail") === "collapsed"; } catch { return false; } });
   const [pending, setPending] = useState([]);
   const [notif, setNotif] = useState(false);
@@ -316,7 +314,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
                 <Info size={12} /> 关于
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => setSettingsOpen(true)}>
+              <DropdownMenu.Item onSelect={() => onOpenSettings?.()}>
                 <Settings size={12} /> 设置
               </DropdownMenu.Item>
             </DropdownMenu.Content>
@@ -363,10 +361,6 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
           </Box>
         </Flex>
       )}
-
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen}
-                      appearance={appearance} onAppearance={onAppearance}
-                      version={version} toast={toast} />
 
       <Dialog.Root open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
         <Dialog.Content maxWidth="420px">
