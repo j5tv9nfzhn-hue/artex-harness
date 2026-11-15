@@ -11,8 +11,10 @@ import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw
  *   右侧 = 选中分区的表单
  */
 
+// 与 lib/api.ts 保持同一个键：早先这里读的是 "artex.harness.token"，
+// 与 api 层的 "artex_token" 不是一回事，设置页的请求因此不带鉴权头。
 const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex.harness.token") || ""; } catch {}
+  let t = ""; try { t = localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch {}
   return t ? { Authorization: "Bearer " + t } : {};
 };
 const jfetch = (p, o = {}) =>
