@@ -118,3 +118,9 @@ html, body, #root { height: 100%; margin: 0; }
 /* 对话里用户自己说的话：右对齐气泡，和 agent 的正文区分开 */
 .user-row { display: flex; justify-content: flex-end; padding: 2px 0; }
 
+/* 思考块：和正文视觉上分开（灰、缩进、左边线），否则推理和回答糊成一片，
+   看起来就像"话没说完"。折叠态只留一行。 */
+.md.thinking { color: var(--gray-10); font-size: 12.5px; line-height: 1.6;
+  border-left: 2px solid var(--gray-a6); padding-left: 10px; margin-left: 2px;
+  max-height: 168px; overflow: auto; }
+

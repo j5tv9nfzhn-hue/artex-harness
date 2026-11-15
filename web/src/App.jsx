@@ -637,7 +637,7 @@ function applyEvent(rows, ev) {
   const key = (n) => rows.length + "-" + n;
   switch (ev.type) {
     case "STEP_STARTED": return [...rows, { type: "turn", key: key("t"), label: ev.stepName || "turn" }];
-    case "TEXT_MESSAGE_START": return [...rows, { type: "msg", key: key("m"), role: "assistant", text: "", msgId: ev.messageId }];
+    case "TEXT_MESSAGE_START": return [...rows, { type: "msg", key: key("m"), role: ev.role || "assistant", text: "", msgId: ev.messageId }];
     case "TEXT_MESSAGE_CONTENT": {
       const i = findLast(rows, (r) => r.type === "msg" && r.msgId === ev.messageId);
       if (i < 0) return [...rows, { type: "msg", key: key("m"), role: "assistant", text: ev.delta || "", msgId: ev.messageId }];
@@ -667,21 +667,23 @@ function findLast(arr, pred) { for (let i = arr.length - 1; i >= 0; i--) if (pre
 function applyActivity(rows, a) {
   const key = "a" + a.seq;
   const callId = a.tool_use_id || key;
+  // detail 才是正文；summary 只是 firstLine(…,200/400) 的索引行。
+  const body = a.detail && String(a.detail).trim() ? a.detail : (a.summary || "");
   switch (a.kind) {
-    case "text": return [...rows, { type: "msg", key, role: "assistant", text: a.summary || "" }];
+    case "text": return [...rows, { type: "msg", key, role: "assistant", text: body }];
     // 对话里助手的最终回复是 kind=result（不是 text）；漏了它，界面上就只剩用户自己说的话。
-    case "result": return [...rows, { type: "msg", key, role: "assistant", text: a.summary || "" }];
+    case "result": return [...rows, { type: "msg", key, role: "assistant", text: body }];
     // 对话里用户自己的话也是一条 activity（kind=user），不渲染就等于自己的输入消失了。
-    case "user": return [...rows, { type: "msg", key, role: "user", text: a.summary || "" }];
-    case "thinking": return [...rows, { type: "msg", key, role: "thinking", text: a.summary || "" }];
-    case "tool_use": return [...rows, { type: "tool", key, callId, name: a.tool || "", args: a.summary || "", done: false }];
+    case "user": return [...rows, { type: "msg", key, role: "user", text: body }];
+    case "thinking": return [...rows, { type: "msg", key, role: "thinking", text: body }];
+    case "tool_use": return [...rows, { type: "tool", key, callId, name: a.tool || "", args: body, done: false }];
     case "tool_result": {
       const i = findLast(rows, (r) => r.type === "tool" && r.callId === callId);
       if (i < 0) {
-        return [...rows, { type: "tool", key, callId, name: "", args: "", done: true, result: a.summary || "", isError: !!a.is_error }];
+        return [...rows, { type: "tool", key, callId, name: "", args: "", done: true, result: body, isError: !!a.is_error }];
       }
       const next = rows.slice();
-      next[i] = { ...next[i], done: true, result: a.summary || "", isError: !!a.is_error };
+      next[i] = { ...next[i], done: true, result: body, isError: !!a.is_error };
       return next;
     }
     default: return rows;

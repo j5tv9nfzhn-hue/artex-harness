@@ -78,18 +78,28 @@ type aguiEvent struct {
 func aguiFromActivity(a db.Activity, threadID, runID string, turnSeq int) []aguiEvent {
 	msgID := fmt.Sprintf("m%d", a.ID)
 	callID := fmt.Sprintf("t%d", a.ID)
+	// Summary 是 firstLine(s,200)，只够做索引；正文在 Detail。
+	body := func() string {
+		if strings.TrimSpace(a.Detail) != "" {
+			return a.Detail
+		}
+		return a.Summary
+	}
 	switch a.Kind {
 	case "text":
 		return []aguiEvent{
 			{Type: "TEXT_MESSAGE_START", ThreadD: threadID, RunID: runID, MsgID: msgID, Role: "assistant", Seq: a.ID},
-			{Type: "TEXT_MESSAGE_CONTENT", ThreadD: threadID, RunID: runID, MsgID: msgID, Delta: a.Summary, Seq: a.ID},
+			{Type: "TEXT_MESSAGE_CONTENT", ThreadD: threadID, RunID: runID, MsgID: msgID, Delta: body(), Seq: a.ID},
 			{Type: "TEXT_MESSAGE_END", ThreadD: threadID, RunID: runID, MsgID: msgID, Seq: a.ID},
 		}
 	case "thinking":
-		return []aguiEvent{{
-			Type: "TEXT_MESSAGE_CONTENT", ThreadD: threadID, RunID: runID,
-			MsgID: msgID, Delta: a.Summary, Seq: a.ID,
-		}}
+		// 思考块以前只发 CONTENT、没有 START：客户端无法知道这是思考，只能当普通正文
+		// 渲染，于是整段推理和一问一答混在一起，看起来就像"话说不完整"。
+		return []aguiEvent{
+			{Type: "TEXT_MESSAGE_START", ThreadD: threadID, RunID: runID, MsgID: msgID, Role: "thinking", Seq: a.ID},
+			{Type: "TEXT_MESSAGE_CONTENT", ThreadD: threadID, RunID: runID, MsgID: msgID, Delta: body(), Seq: a.ID},
+			{Type: "TEXT_MESSAGE_END", ThreadD: threadID, RunID: runID, MsgID: msgID, Seq: a.ID},
+		}
 	case "tool_use":
 		return []aguiEvent{
 			{Type: "TOOL_CALL_START", ThreadD: threadID, RunID: runID, MsgID: msgID, CallID: callID, Name: a.Tool, Seq: a.ID},
@@ -220,9 +230,10 @@ func (s *Server) aguiAgent(w http.ResponseWriter, r *http.Request) {
 				if !open {
 					openStep()
 				}
-				// ActivityList omits Detail (it is json:"-" and lazy-loaded), but a tool
-				// call without its arguments renders as an empty card upstream.
-				if a.Kind == "tool_use" && strings.TrimSpace(a.Detail) == "" {
+				// ActivityList omits Detail (it is json:"-" and lazy-loaded), but the UI needs
+				// the FULL text: the recorded Summary is only the first line, capped at 200
+				// runes. Without this every assistant message arrives cut in half.
+				if (a.Kind == "tool_use" || a.Kind == "text" || a.Kind == "thinking") && strings.TrimSpace(a.Detail) == "" {
 					if d, derr := t.Store.ActivityDetail(a.ID); derr == nil {
 						a.Detail = d
 					}

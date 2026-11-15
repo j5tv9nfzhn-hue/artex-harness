@@ -323,6 +323,7 @@ func (s *Server) pgConversationMessages(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, 500, err.Error())
 			return
 		}
+		fillConvDetails(pg, c.ID, items)
 		writeJSON(w, 200, map[string]any{"items": activityDTOs(items), "cursor": cursor, "running": running, "hasMore": false})
 		return
 	}
@@ -336,11 +337,28 @@ func (s *Server) pgConversationMessages(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 500, err.Error())
 		return
 	}
+	fillConvDetails(pg, c.ID, items)
 	cursor := before
 	if n := len(items); n > 0 {
 		cursor = items[n-1].ID
 	}
 	writeJSON(w, 200, map[string]any{"items": activityDTOs(items), "cursor": cursor, "running": running, "hasMore": hasMore})
+}
+
+// fillConvDetails 给列表行补上正文。
+//
+// 列表查询只返回 Summary，而 Summary 是 firstLine(s, 400/200)——只有第一行且被截断。
+// 聊天界面若只拿 Summary，每条回复都像是说了半句话；Detail 才是完整文本。
+// 单个会话一页最多 200 条，正文体量可接受；真超大时仍可用 /messages/{seq} 单独取。
+func fillConvDetails(pg *db.DB, convID int64, items []db.Activity) {
+	for i := range items {
+		switch items[i].Kind {
+		case "text", "thinking", "result":
+			if d, err := pg.ConvActivityDetail(convID, items[i].ID); err == nil && strings.TrimSpace(d) != "" {
+				items[i].Detail = d
+			}
+		}
+	}
 }
 
 // pgConversationMsgDetail lazily returns one step's full detail blob.
