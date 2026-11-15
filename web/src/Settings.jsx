@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Badge, Box, Button, Card, Code, Dialog, Flex, IconButton, Select, Separator, Tabs,
+  Badge, Box, Button, Card, Code, Dialog, Flex, IconButton, Select, Separator,
   Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
 import { Check, Cpu, FileText, Palette, Pencil, Plug, Plus, Sparkles, Trash2 } from "lucide-react";
@@ -84,17 +84,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
         <Dialog.Description size="1" color="gray">artex-harness {version ? "v" + version : ""}</Dialog.Description>
         {err ? <Box mt="2"><Text size="1" color="red">{err}</Text></Box> : null}
 
-        <Tabs.Root defaultValue="models" mt="3">
-          <Tabs.List>
-            <Tabs.Trigger value="models"><Cpu size={13} /> 供应商与模型</Tabs.Trigger>
-            <Tabs.Trigger value="mcp"><Plug size={13} /> MCP</Tabs.Trigger>
-            <Tabs.Trigger value="skills"><Sparkles size={13} /> 技能</Tabs.Trigger>
-            <Tabs.Trigger value="logs"><FileText size={13} /> 会话日志</Tabs.Trigger>
-            <Tabs.Trigger value="look"><Palette size={13} /> 外观</Tabs.Trigger>
-          </Tabs.List>
-
-          <Box pt="3" style={{ height: 460, overflow: "auto", minWidth: 0 }}>
-            <Tabs.Content value="models">
+        <Box mt="3" style={{ height: 520, overflow: "auto", paddingRight: 4 }}>
+          <Flex direction="column" gap="4">
+            <Section title="供应商与模型" icon={<Cpu size={14}/>}>
               <Flex direction="column" gap="3">
                 {providers.map((pv) => (
                   <Card key={pv.key} size="1">
@@ -167,9 +159,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                   <Plus size={13} /> 添加供应商
                 </Button>
               </Flex>
-            </Tabs.Content>
+            </Section>
 
-            <Tabs.Content value="mcp">
+            <Section title="MCP 服务" icon={<Plug size={14}/>}>
               <Flex direction="column" gap="2">
                 {mcps.map((m) => (
                   <Flex key={m.id || m.name} align="center" gap="2">
@@ -180,16 +172,16 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                 ))}
                 {!mcps.length ? <Text size="1" color="gray">没有配置 MCP 服务</Text> : null}
               </Flex>
-            </Tabs.Content>
+            </Section>
 
-            <Tabs.Content value="skills">
+            <Section title="技能" icon={<Sparkles size={14}/>}>
               <Flex wrap="wrap" gap="2">
                 {skills.map((s) => <Badge key={s.name || s} size="1" variant="soft">{s.name || s}</Badge>)}
                 {!skills.length ? <Text size="1" color="gray">没有可用技能</Text> : null}
               </Flex>
-            </Tabs.Content>
+            </Section>
 
-            <Tabs.Content value="logs">
+            <Section title="会话日志" icon={<FileText size={14}/>}>
               <Flex direction="column" gap="2">
                 <Flex justify="between" align="center">
                   <Text size="1" color="gray">最近的模型调用记录（GET /api/llm/records）</Text>
@@ -217,9 +209,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                   </Table.Body>
                 </Table.Root>
               </Flex>
-            </Tabs.Content>
+            </Section>
 
-            <Tabs.Content value="look">
+            <Section title="外观" icon={<Palette size={14}/>}>
               <Flex align="center" gap="2">
                 <Text size="2">主题</Text>
                 <Select.Root value={appearance} onValueChange={onAppearance}>
@@ -231,9 +223,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                   </Select.Content>
                 </Select.Root>
               </Flex>
-            </Tabs.Content>
-          </Box>
-        </Tabs.Root>
+            </Section>
+          </Flex>
+        </Box>
 
         <EditModelDialog model={editing} onClose={() => setEditing(null)}
           onSave={async (body) => { await save(body); setEditing(null); }} />
@@ -476,3 +468,18 @@ function EditProviderDialog({ pv, onClose, onSave }) {
     </Dialog.Root>
   );
 }
+
+/* 设置分区：DSH 的形态是「页面 + 卡片」（plugins.item 上一张 ShellCard），
+ * 不是对话框里的 tab。这里保持一致：一个可滚动页，每区一张卡片。 */
+const Section = ({ title, icon, children }) => (
+  <Card size="1">
+    <Flex direction="column" gap="2">
+      <Flex align="center" gap="2">
+        {icon}
+        <Text size="2" weight="medium">{title}</Text>
+      </Flex>
+      <Separator size="4" />
+      {children}
+    </Flex>
+  </Card>
+);
