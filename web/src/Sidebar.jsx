@@ -5,6 +5,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
+import SettingsDialog from "./Settings.jsx";
 import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Settings, ShieldAlert } from "lucide-react";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
@@ -31,9 +32,10 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast }) {
+export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("artex.rail") === "collapsed"; } catch { return false; } });
   const [pending, setPending] = useState([]);
   const [notif, setNotif] = useState(false);
@@ -256,7 +258,7 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
             </IconButton>
           </Tooltip>
 
-          {/* 收起态只有两个入口：通知与头像。其余（展开/关于/完整控制台）进头像菜单，
+          {/* 收起态只有两个入口：通知与头像。其余（展开 / 设置 / 关于）进头像菜单，
               这样矮窗口里也不会溢出。 */}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
@@ -273,8 +275,8 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                 <Info size={12} /> 关于
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item asChild>
-                <a href="/console/" target="_blank" rel="noreferrer">完整控制台（MCP / 技能 / 平台）</a>
+              <DropdownMenu.Item onSelect={() => setSettingsOpen(true)}>
+                <Settings size={12} /> 设置
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
@@ -299,9 +301,10 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                 </IconButton>
               </Tooltip>
               <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                  <IconButton size="1" variant="ghost" color="gray" aria-label="设置"><Settings size={14} /></IconButton>
-                </DropdownMenu.Trigger>
+                <IconButton size="1" variant="ghost" color="gray" aria-label="设置" onClick={() => setSettingsOpen(true)}>
+                  <Settings size={14} />
+                </IconButton>
+                <DropdownMenu.Trigger style={{ display: "none" }}><span /></DropdownMenu.Trigger>
                 <DropdownMenu.Content size="1" align="end">
                   <DropdownMenu.Label>模型</DropdownMenu.Label>
                   {profiles.slice(0, 6).map((pr) => (
@@ -309,10 +312,7 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                       {pr.name || pr.model}{pr.is_default ? " · 当前" : ""}
                     </DropdownMenu.Item>
                   ))}
-                  <DropdownMenu.Separator />
-                  <DropdownMenu.Item asChild>
-                    <a href="/console/" target="_blank" rel="noreferrer">完整控制台（MCP / 技能 / 平台）</a>
-                  </DropdownMenu.Item>
+
                 </DropdownMenu.Content>
               </DropdownMenu.Root>
               <Tooltip content="关于">
@@ -322,6 +322,10 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
           </Box>
         </Flex>
       )}
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen}
+                      appearance={appearance} onAppearance={onAppearance}
+                      version={version} toast={toast} />
 
       <Dialog.Root open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
         <Dialog.Content maxWidth="420px">

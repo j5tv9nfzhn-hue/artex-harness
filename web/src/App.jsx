@@ -13,6 +13,7 @@ import "highlight.js/styles/github.css";
 import { Copy, Pause, Play, Plus } from "lucide-react";
 import Sidebar from "./Sidebar.jsx";
 import Composer from "./Composer.jsx";
+import Settings from "./Settings.jsx";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
@@ -47,6 +48,8 @@ export default function App() {
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
   const [version, setVersion] = useState("");
+  const [appearance, setAppearance] = useState(() => { try { return localStorage.getItem("artex.appearance") || "inherit"; } catch { return "inherit"; } });
+  const changeAppearance = (v) => { setAppearance(v); try { localStorage.setItem("artex.appearance", v); } catch {} };
   const [profiles, setProfiles] = useState([]);
   const abort = useRef(null);
   const scroller = useRef(null);
@@ -161,12 +164,13 @@ export default function App() {
   const series = (budget && budget.series) || [];
 
   return (
-    <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large">
+    <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
-                 toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks} />
+                 toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
+                 appearance={appearance} onAppearance={changeAppearance} />
 
         <div className="main">
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
