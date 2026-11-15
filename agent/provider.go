@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,7 +133,30 @@ func compactionConfig(windowTokens int) *compaction.Config {
 	if windowTokens <= 0 {
 		windowTokens = defaultWindowK * 1000
 	}
-	return &compaction.Config{ContextWindow: windowTokens}
+	cfg := &compaction.Config{ContextWindow: windowTokens}
+	// 默认 0.7 摘要 / 0.5 清工具结果（见 compaction.Config 的说明）。留环境变量是为了
+	// 现场调参：不同目标、不同扫描器输出的 token 台阶差很多，改常量要重编译。
+	if v := envRatio("HARNESS_COMPACT_AUTO_RATIO"); v > 0 {
+		cfg.AutoRatio = v
+	}
+	if v := envRatio("HARNESS_COMPACT_MICRO_RATIO"); v > 0 {
+		cfg.MicroRatio = v
+	}
+	return cfg
+}
+
+// envRatio reads a 0<r<1 ratio from the environment; anything else is "unset".
+func envRatio(name string) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v >= 1 {
+		log.Printf("[compaction] 忽略非法比例 %s=%q（应在 0~1 之间）", name, raw)
+		return 0
+	}
+	return v
 }
 
 // FromEnv resolves the LLM provider config:

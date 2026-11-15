@@ -239,7 +239,7 @@ REMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> 
 // (including the DETAILED_ANALYSIS_INSTRUCTION_BASE it interpolates and the source
 // trailing spaces on the "All user messages:" and "...in your response. " lines).
 const baseCompactPrompt = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
-This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
+This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing the engagement without losing context.
 
 Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:
 
@@ -268,6 +268,14 @@ Your summary should include the following sections:
 8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
                        If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
+
+This run is a security engagement, not general software development. Whatever else the summary contains, it MUST also state, as separate labelled sections:
+
+S. 目标与范围 — the in-scope targets and the out-of-scope ones. Anything already ruled out of scope stays out; never "rediscover" it as a target.
+T. 已确认的事实与证据 — each confirmed conclusion with the exact command that proved it plus the output file / graph node that holds the proof. Keep the handle, do not paste raw output.
+U. 已排除与已失败的路 — EVERY approach already tried that did not work: blocked by WAF, auth rejected, port filtered, payload rejected, rate limited. This section is MANDATORY. Dropping it makes the next turn re-explore a dead end, which re-triggers alarms and account lockouts — in an engagement that is a real operational risk, not just wasted tokens.
+V. 凭据与会话 — credentials, tokens, sessions obtained, where they came from, and what they unlock.
+W. 下一步假设 — the open questions worth testing next, in priority order.
 
 Here's an example of how your output should be structured:
 

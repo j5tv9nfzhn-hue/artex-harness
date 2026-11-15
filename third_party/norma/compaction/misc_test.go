@@ -49,8 +49,8 @@ func TestDefaultsApplied(t *testing.T) {
 	if c.effectiveWindow() != 192000 { // 200000 - 8000
 		t.Fatalf("effectiveWindow=%d, want 192000 (defaulted window/output)", c.effectiveWindow())
 	}
-	if c.autoThreshold() != 179000 {
-		t.Fatalf("autoThreshold=%d, want 179000", c.autoThreshold())
+	if c.autoThreshold() != 192000*7/10 {
+		t.Fatalf("autoThreshold=%d, want %d", c.autoThreshold(), 192000*7/10)
 	}
 	// KeepRecent defaulted to 8: summarizing 10 messages preserves the last 8.
 	var msgs []llm.Message

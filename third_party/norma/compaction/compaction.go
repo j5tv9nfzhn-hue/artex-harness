@@ -50,6 +50,17 @@ type Config struct {
 	// "a compaction happened" is observed rather than inferred from token deltas —
 	// the two are not the same thing when a new turn also resets the count.
 	OnCompact func(kind string, preTokens int)
+	// AutoRatio / MicroRatio express the two gates as fractions of the EFFECTIVE
+	// window instead of "window minus a fixed buffer".
+	//
+	// Why ratios: a fixed 13K buffer is 40% of a 32K window and 1.3% of a 1M one, so
+	// the same code triggered at wildly different points. The harness here runs
+	// pentest work, where tool output arrives in bursts and the durable knowledge
+	// (assets/facts/findings) already lives in the graph rather than in the
+	// transcript — so compacting early costs little and running out of window
+	// mid-exploit costs a lot. Defaults: auto 0.7, micro 0.5.
+	AutoRatio  float64
+	MicroRatio float64
 }
 
 func (c *Config) defaults() {
@@ -61,6 +72,12 @@ func (c *Config) defaults() {
 	}
 	if c.KeepRecent == 0 {
 		c.KeepRecent = 8
+	}
+	if c.AutoRatio <= 0 || c.AutoRatio >= 1 {
+		c.AutoRatio = 0.7
+	}
+	if c.MicroRatio <= 0 || c.MicroRatio >= c.AutoRatio {
+		c.MicroRatio = 0.5
 	}
 }
 
@@ -149,8 +166,33 @@ func (c *Compactor) notify(kind string, preTokens int) {
 	}
 }
 
-func (c *Compactor) autoThreshold() int  { return c.effectiveWindow() - c.buffer() }
-func (c *Compactor) microThreshold() int { return c.effectiveWindow() * 6 / 10 }
+// autoThreshold is the summarization gate: AutoRatio of the live window, but never
+// past (window − buffer). The buffer stays as the backstop for a caller that lifts
+// the ratio close to 1; it is no longer the primary knob.
+func (c *Compactor) autoThreshold() int {
+	ew := c.effectiveWindow()
+	ratio := c.cfg.AutoRatio
+	if ratio <= 0 || ratio >= 1 {
+		ratio = 0.7
+	}
+	byRatio := int(float64(ew) * ratio)
+	if cap := ew - c.buffer(); byRatio > cap {
+		return cap
+	}
+	return byRatio
+}
+
+// microThreshold clears stale tool results long before summarizing. In pentest runs
+// most tokens are scanner output whose full text already sits on disk, so this tier
+// is where a long run should be absorbed — reaching the summarizer at all should be
+// the exception, not the routine.
+func (c *Compactor) microThreshold() int {
+	ratio := c.cfg.MicroRatio
+	if ratio <= 0 || ratio >= 1 {
+		ratio = 0.5
+	}
+	return int(float64(c.effectiveWindow()) * ratio)
+}
 
 // maxTurnGrowth == claude-code estimateMaxTurnGrowth: min(maxOutput,20000)+15000.
 func (c *Compactor) maxTurnGrowth() int { return c.reservedForSummary() + toolResultGrowthGuess }

@@ -207,16 +207,26 @@ func TestThresholdMath(t *testing.T) {
 	if c.effectiveWindow() != 200000-8000 {
 		t.Fatalf("effectiveWindow=%d, want 192000", c.effectiveWindow())
 	}
-	if c.buffer() != 13000 {
-		t.Fatalf("buffer=%d", c.buffer())
+	// 两个门现在是**比例**，不是"窗口减固定 buffer"：固定 13K 对 32K 窗口是 40%、
+	// 对 1M 是 1.3%，同一份代码在不同模型上触发点差了三十倍。
+	if c.autoThreshold() != 192000*7/10 {
+		t.Fatalf("autoThreshold=%d, want %d (0.7 × effective window)", c.autoThreshold(), 192000*7/10)
 	}
-	if c.autoThreshold() != 192000-13000 {
-		t.Fatalf("autoThreshold=%d, want 179000", c.autoThreshold())
+	if c.microThreshold() != 192000*5/10 {
+		t.Fatalf("microThreshold=%d, want %d (0.5 × effective window)", c.microThreshold(), 192000*5/10)
+	}
+	// 缓冲仍在，但只作为"比例接近 1 时"的兜底。
+	tight := New(Config{ContextWindow: 200000, MaxOutputTokens: 8000, AutoRatio: 0.999}, nil)
+	if tight.autoThreshold() != 192000-13000 {
+		t.Fatalf("cap: autoThreshold=%d, want %d (window − buffer)", tight.autoThreshold(), 192000-13000)
 	}
 	// Large window → larger buffer.
 	big := New(Config{ContextWindow: 1000000, MaxOutputTokens: 32000}, nil)
 	if big.buffer() != 50000 || big.reservedForSummary() != 20000 {
 		t.Fatalf("big: buffer=%d reserved=%d", big.buffer(), big.reservedForSummary())
+	}
+	if big.autoThreshold() != 980000*7/10 {
+		t.Fatalf("big: autoThreshold=%d, want %d", big.autoThreshold(), 980000*7/10)
 	}
 }
 
