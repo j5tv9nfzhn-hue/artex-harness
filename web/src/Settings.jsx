@@ -353,6 +353,8 @@ function EditModelDialog({ model, onClose, onSave }) {
   const [effort, setEffort] = useState("");
   const [rps, setRps] = useState("");
   const [rpm, setRpm] = useState("");
+  // 重试策略：对应 db.RetryOverride{connect,empty,stream} × RetryRule{attempts,interval_ms}
+  const [retry, setRetry] = useState({ connect: { attempts: "", interval_ms: "" }, empty: { attempts: "", interval_ms: "" }, stream: { attempts: "", interval_ms: "" } });
 
   useEffect(() => {
     if (!model) return;
@@ -362,7 +364,16 @@ function EditModelDialog({ model, onClose, onSave }) {
     setEffort(model.reasoning_effort || "");
     setRps(model.rate_per_second ? String(model.rate_per_second) : "");
     setRpm(model.rate_per_minute ? String(model.rate_per_minute) : "");
+    const r = model.retry || {};
+    setRetry({
+      connect: { attempts: r.connect?.attempts ? String(r.connect.attempts) : "", interval_ms: r.connect?.interval_ms ? String(r.connect.interval_ms) : "" },
+      empty: { attempts: r.empty?.attempts ? String(r.empty.attempts) : "", interval_ms: r.empty?.interval_ms ? String(r.empty.interval_ms) : "" },
+      stream: { attempts: r.stream?.attempts ? String(r.stream.attempts) : "", interval_ms: r.stream?.interval_ms ? String(r.stream.interval_ms) : "" },
+    });
   }, [model]);
+
+  const setRule = (kind, field, v) =>
+    setRetry((prev) => ({ ...prev, [kind]: { ...prev[kind], [field]: v } }));
 
   return (
     <Dialog.Root open={!!model} onOpenChange={(o) => !o && onClose()}>
@@ -400,6 +411,27 @@ function EditModelDialog({ model, onClose, onSave }) {
             </Field>
           </Flex>
         </Flex>
+
+        <Box mt="4">
+          <Text size="1" color="gray" as="div" mb="2">重试策略（留空 = 用平台默认阶梯）</Text>
+          <Table.Root size="1" variant="surface">
+            <Table.Header><Table.Row>
+              <Table.ColumnHeaderCell>类型</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>尝试次数</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>间隔 (ms)</Table.ColumnHeaderCell>
+            </Table.Row></Table.Header>
+            <Table.Body>
+              {[["connect", "连接失败"], ["empty", "空响应"], ["stream", "流中断"]].map(([kind, label]) => (
+                <Table.Row key={kind} align="center">
+                  <Table.Cell><Text size="1">{label}</Text></Table.Cell>
+                  <Table.Cell><TextField.Root size="1" value={retry[kind].attempts} placeholder="默认" onChange={(e) => setRule(kind, "attempts", e.target.value)} style={{ width: 90 }} /></Table.Cell>
+                  <Table.Cell><TextField.Root size="1" value={retry[kind].interval_ms} placeholder="默认" onChange={(e) => setRule(kind, "interval_ms", e.target.value)} style={{ width: 110 }} /></Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table.Root>
+        </Box>
+
         <Flex gap="3" mt="4" justify="end">
           <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
           <Button onClick={() => onSave({
@@ -407,6 +439,11 @@ function EditModelDialog({ model, onClose, onSave }) {
             model: modelName, context_window_k: Number(ctx) || 0,
             thinking_type: thinking, reasoning_effort: effort,
             rate_per_second: Number(rps) || 0, rate_per_minute: Number(rpm) || 0,
+            retry: {
+              connect: { attempts: Number(retry.connect.attempts) || 0, interval_ms: Number(retry.connect.interval_ms) || 0 },
+              empty: { attempts: Number(retry.empty.attempts) || 0, interval_ms: Number(retry.empty.interval_ms) || 0 },
+              stream: { attempts: Number(retry.stream.attempts) || 0, interval_ms: Number(retry.stream.interval_ms) || 0 },
+            },
           })}>保存</Button>
         </Flex>
       </Dialog.Content>
