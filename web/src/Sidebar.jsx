@@ -245,19 +245,39 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
 
       <Separator size="4" />
       {collapsed ? (
-        <Flex direction="column" align="center" gap="2" py="3" className="rail-foot">
+        <Flex direction="column" align="center" gap="2" py="3" className="rail-foot"
+              style={{ flexShrink: 0, borderTop: "1px solid var(--gray-a5)" }}>
           <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"} side="right">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
+            <IconButton size="2" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
               <Box style={{ position: "relative", display: "inline-flex" }}>
-                <Bell size={14} />
+                <Bell size={16} />
                 {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
               </Box>
             </IconButton>
           </Tooltip>
-          <Tooltip content="关于" side="right">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}><Info size={14} /></IconButton>
-          </Tooltip>
-          <Avatar size="1" fallback="A" radius="full" color="tomato" />
+
+          {/* 收起态只有两个入口：通知与头像。其余（展开/关于/完整控制台）进头像菜单，
+              这样矮窗口里也不会溢出。 */}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <button className="avatar-btn" aria-label="账户与菜单">
+                <Avatar size="2" fallback="A" radius="full" color="tomato" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content size="1" side="right" align="start">
+              <DropdownMenu.Label>artex-harness {version ? "v" + version : ""}</DropdownMenu.Label>
+              <DropdownMenu.Item onSelect={() => setCollapsed(false)}>
+                <PanelLeftOpen size={12} /> 展开侧栏
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => setAbout(true)}>
+                <Info size={12} /> 关于
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item asChild>
+                <a href="/console/" target="_blank" rel="noreferrer">完整控制台（MCP / 技能 / 平台）</a>
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </Flex>
       ) : (
         <Flex align="center" gap="2" px="3" py="2" className="rail-foot">

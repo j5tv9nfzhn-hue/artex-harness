@@ -72,7 +72,12 @@ html, body, #root { height: 100%; margin: 0; }
 /* 侧栏折叠：只留图标列（:has 让父级 grid 跟着子元素状态变） */
 .app:has(.rail.collapsed) { grid-template-columns: 56px minmax(0,1fr); }
 /* 收起态由组件条件渲染负责，这里只管尺寸与居中 */
-.rail.collapsed .row { justify-content: center; padding: 0; gap: 0; margin: 0 8px; }
+.rail.collapsed .row { justify-content: center; padding: 0; gap: 0; margin: 0 6px; border-radius: 8px; }
+.rail.collapsed .row:hover { background: var(--gray-a4); }
+.rail.collapsed .row.active { background: var(--accent-a4); }
+.rail.collapsed .dot { width: 8px; height: 8px; }
+.avatar-btn { background: none; border: 0; padding: 2px; cursor: pointer; border-radius: 999px; line-height: 0; }
+.avatar-btn:hover { background: var(--gray-a4); }
 .rail.collapsed .group-head { display: none; }
 .rail.collapsed .rail-foot { border-top: 0; }
 
