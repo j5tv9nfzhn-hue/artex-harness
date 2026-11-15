@@ -270,6 +270,11 @@ export default function App() {
     return () => { dead = true; clearTimeout(timer); };
   }, [convId]);
 
+  // HARNESS 的产品面只有两类对象：自由对话（conversation）与 HARNESS 运行
+  // （task 且 harness_mode=true）。旧 ARTeX 控制台的 planner/worker 任务单列一组，
+  // 不能混进主列表——否则整个界面看起来就是一个任务控制台。
+  const harnessRuns = useMemo(() => tasks.filter((t) => t.harness_mode), [tasks]);
+  const legacyRuns = useMemo(() => tasks.filter((t) => !t.harness_mode), [tasks]);
   const cur = useMemo(() => tasks.find((t) => String(t.id) === String(taskId)), [tasks, taskId]);
   const series = (budget && budget.series) || [];
 
@@ -282,7 +287,7 @@ export default function App() {
       <NewTaskDialog open={newOpen} onOpenChange={setNewOpen}
                      onCreated={(t) => { setTasks((prev) => [t, ...prev]); setTaskId(String(t.id)); }} />
       <div className="app">
-        <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
+        <Sidebar tasks={harnessRuns} legacy={legacyRuns} taskId={taskId} onPick={setTaskId}
                  convs={convs} convId={convId} onPickConv={pickConversation}
                  onNew={newConversation}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
@@ -375,7 +380,7 @@ export default function App() {
         </Flex>
 
         {palette ? (
-          <Palette tasks={tasks} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
+          <Palette tasks={harnessRuns} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
                    onNew={newConversation} onNewTask={() => setNewOpen(true)} onClose={() => setPalette(false)} />
         ) : null}
       </div>
@@ -473,11 +478,11 @@ function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
                   <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N · 不设目标</Text></Box>
                 </Flex>
               </Command.Item>
-              <Command.Item value="新建任务 目标 goal 渗透 授权" onSelect={() => { onClose(); onNewTask?.(); }}>
+              <Command.Item value="新建运行 长任务 渗透 目标 goal" onSelect={() => { onClose(); onNewTask?.(); }}>
                 <Flex align="center" gap="2" style={{ width: "100%" }}>
                   <SquareTerminal size={13} />
-                  <Text size="2">新建任务（目标驱动）</Text>
-                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">需要目标</Text></Box>
+                  <Text size="2">新建运行（带目标）</Text>
+                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">长任务 / 渗透</Text></Box>
                 </Flex>
               </Command.Item>
             </Command.Group>

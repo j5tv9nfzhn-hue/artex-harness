@@ -32,7 +32,7 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
+export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -87,8 +87,14 @@ export default function Sidebar({ tasks, taskId, convs = [], convId, onPickConv,
       out.push({ kind: "head", key: "h-" + k, label: k, count: list.length });
       for (const t of list) out.push({ kind: "row", key: "t-" + t.id, task: t });
     }
+    // 旧 ARTeX 控制台的 planner/worker 任务（harness_mode=false）不是 HARNESS 的东西，
+    // 单独成组放在最后，避免主列表看起来像"任务控制台"。
+    if (legacy.length) {
+      out.push({ kind: "head", key: "h-legacy", label: "ARTeX 控制台任务", count: legacy.length });
+      for (const t of legacy) out.push({ kind: "row", key: "l-" + t.id, task: t });
+    }
     return out;
-  }, [tasks]);
+  }, [tasks, legacy]);
 
   const virt = useVirtualizer({
     count: flat.length,
@@ -161,7 +167,7 @@ export default function Sidebar({ tasks, taskId, convs = [], convId, onPickConv,
       ) : null}
 
       <Flex align="center" gap="2" px="3" pb="2" style={collapsed ? { display: "none" } : undefined}>
-        <Text size="1" color="gray">{tasks.length} 个会话</Text>
+        <Text size="1" color="gray">{tasks.length} 个 HARNESS 会话</Text>
         <Box style={{ marginLeft: "auto" }}>
           <Tooltip content="⌘K 搜索">
             <IconButton size="1" variant="ghost" color="gray" aria-label="搜索" onClick={onPalette}>
