@@ -59,8 +59,13 @@ function toast(msg, bad = false) {
   el.textContent = msg;
   el.className = "toast" + (bad ? " bad" : "");
   el.hidden = false;
+  // 入场/离场各走一次过渡：直接 hidden 会让提示"啪"地出现，像是渲染错误。
+  requestAnimationFrame(() => el.classList.add("show"));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3600);
+  toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => { el.hidden = true; }, 180);
+  }, 3600);
 }
 
 /* ── auth ─────────────────────────────────────────────────────────────── */
