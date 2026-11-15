@@ -97,23 +97,33 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
 
   return (
     <aside className={"rail" + (collapsed ? " collapsed" : "")}>
-      <Flex align="center" gap="2" px="3" pt="3" pb="2">
-        <Heading size="3" weight="medium">artex · harness</Heading>
-        <Box style={{ marginLeft: "auto" }}>
-          <Tooltip content={collapsed ? "展开侧栏" : "收起侧栏"}>
-            <IconButton size="1" variant="ghost" color="gray" aria-label="收起侧栏" onClick={() => setCollapsed((v) => !v)}>
-              {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+      {collapsed ? (
+        <Flex align="center" justify="center" py="3">
+          <Tooltip content="展开侧栏" side="right">
+            <IconButton size="1" variant="ghost" color="gray" aria-label="展开侧栏" onClick={() => setCollapsed(false)}>
+              <PanelLeftOpen size={15} />
             </IconButton>
           </Tooltip>
-          <Tooltip content="命令面板 ⌘K">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="命令面板" onClick={onPalette}>
-              <CommandIcon size={14} />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Flex>
+        </Flex>
+      ) : (
+        <Flex align="center" gap="2" px="3" pt="3" pb="2">
+          <Heading size="3" weight="medium">artex · harness</Heading>
+          <Box style={{ marginLeft: "auto" }}>
+            <Tooltip content="收起侧栏">
+              <IconButton size="1" variant="ghost" color="gray" aria-label="收起侧栏" onClick={() => setCollapsed(true)}>
+                <PanelLeftClose size={14} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip content="命令面板 ⌘K">
+              <IconButton size="1" variant="ghost" color="gray" aria-label="命令面板" onClick={onPalette}>
+                <CommandIcon size={14} />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Flex>
+      )}
 
-      <Flex align="center" gap="2" px="3" pb="2">
+      <Flex align="center" gap="2" px="3" pb="2" style={collapsed ? { display: "none" } : undefined}>
         <Text size="1" color="gray">{tasks.length} 个会话</Text>
         <Box style={{ marginLeft: "auto" }}>
           <Tooltip content="⌘K 搜索">
@@ -148,16 +158,20 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                 <ContextMenu.Trigger>
               <div style={style}
                    className={"row" + (active ? " active" : "")}
+                   title={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
+                   aria-label={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
                    onMouseEnter={() => setHover(t.id)}
                    onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
                    onClick={() => onPick(String(t.id))}
                    role="button" tabIndex={0}
                    onKeyDown={(e) => { if (e.key === "Enter") onPick(String(t.id)); }}>
                 <span className="dot" style={{ background: statusColor(t.status) }} />
+                {collapsed ? null : (
                 <Text size="2" className="row-title">
                   {t.name || t.goal || t.description || "task " + t.id}
                 </Text>
-                <span className="row-tail">
+                )}
+                {collapsed ? null : (<span className="row-tail">
                   {isHover || active ? (
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger>
@@ -198,7 +212,7 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                       {t.created_at ? formatDistanceToNowStrict(new Date(t.created_at), { locale: zhCN }) : ""}
                     </Text>
                   )}
-                </span>
+                </span>)}
               </div>
                 </ContextMenu.Trigger>
                 <ContextMenu.Content size="1">
@@ -230,55 +244,64 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
       </div>
 
       <Separator size="4" />
-      <Flex align="center" gap="2" px="3" py="2" className="rail-foot">
-        <Avatar size="1" fallback="A" radius="full" color="tomato" />
-        <Box style={{ minWidth: 0 }}>
-          <Text size="1" weight="medium" style={{ display: "block", lineHeight: 1.2 }}>ARTEX</Text>
-          <Text size="1" color="gray" truncate style={{ display: "block", fontSize: 10 }}>
-            {version ? "v" + version : "版本未知"}
-          </Text>
-        </Box>
-
-        <Box style={{ marginLeft: "auto" }}>
-          <Flex gap="1" align="center">
-            <Tooltip content={notifCount ? `${notifCount} 个会话需要注意（运行中或失败）` : "没有需要处理的会话"}>
-              <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
-                <Box style={{ position: "relative", display: "inline-flex" }}>
-                  <Bell size={14} />
-                  {(pending.length + notifCount) ? <span className="notif-dot">{(pending.length + notifCount) > 9 ? "9+" : (pending.length + notifCount)}</span> : null}
-                </Box>
-              </IconButton>
-            </Tooltip>
-
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <IconButton size="1" variant="ghost" color="gray" aria-label="设置"><Settings size={14} /></IconButton>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content size="1" align="end">
-                <DropdownMenu.Label>模型</DropdownMenu.Label>
-                {profiles.slice(0, 6).map((p) => (
-                  <DropdownMenu.Item key={p.id} onSelect={() => toast?.("模型切换在右侧面板的输入框下方")}>
-                    {p.name || p.model}{p.is_default ? " · 当前" : ""}
+      {collapsed ? (
+        <Flex direction="column" align="center" gap="2" py="3" className="rail-foot">
+          <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"} side="right">
+            <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
+              <Box style={{ position: "relative", display: "inline-flex" }}>
+                <Bell size={14} />
+                {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
+              </Box>
+            </IconButton>
+          </Tooltip>
+          <Tooltip content="关于" side="right">
+            <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}><Info size={14} /></IconButton>
+          </Tooltip>
+          <Avatar size="1" fallback="A" radius="full" color="tomato" />
+        </Flex>
+      ) : (
+        <Flex align="center" gap="2" px="3" py="2" className="rail-foot">
+          <Avatar size="1" fallback="A" radius="full" color="tomato" />
+          <Box style={{ minWidth: 0 }}>
+            <Text size="1" weight="medium" style={{ display: "block", lineHeight: 1.2 }}>ARTEX</Text>
+            <Text size="1" color="gray" truncate style={{ display: "block", fontSize: 10 }}>
+              {version ? "v" + version : "版本未知"}
+            </Text>
+          </Box>
+          <Box style={{ marginLeft: "auto" }}>
+            <Flex gap="1" align="center">
+              <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"}>
+                <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
+                  <Box style={{ position: "relative", display: "inline-flex" }}>
+                    <Bell size={14} />
+                    {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
+                  </Box>
+                </IconButton>
+              </Tooltip>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  <IconButton size="1" variant="ghost" color="gray" aria-label="设置"><Settings size={14} /></IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content size="1" align="end">
+                  <DropdownMenu.Label>模型</DropdownMenu.Label>
+                  {profiles.slice(0, 6).map((pr) => (
+                    <DropdownMenu.Item key={pr.id} onSelect={() => toast?.("模型切换在输入框下方")}>
+                      {pr.name || pr.model}{pr.is_default ? " · 当前" : ""}
+                    </DropdownMenu.Item>
+                  ))}
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item asChild>
+                    <a href="/console/" target="_blank" rel="noreferrer">完整控制台（MCP / 技能 / 平台）</a>
                   </DropdownMenu.Item>
-                ))}
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item asChild>
-                  <a href="/console/" target="_blank" rel="noreferrer">打开完整控制台（旧版：MCP / 技能 / 平台设置）</a>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item asChild>
-                  <a href="/api/health" target="_blank" rel="noreferrer">服务健康</a>
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-
-            <Tooltip content="关于">
-              <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}>
-                <Info size={14} />
-              </IconButton>
-            </Tooltip>
-          </Flex>
-        </Box>
-      </Flex>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+              <Tooltip content="关于">
+                <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}><Info size={14} /></IconButton>
+              </Tooltip>
+            </Flex>
+          </Box>
+        </Flex>
+      )}
 
       <Dialog.Root open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
         <Dialog.Content maxWidth="420px">
