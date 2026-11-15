@@ -69,23 +69,26 @@
 | 文件树 / DIFF / 预算 / 委派 / 浏览器状态 | `GET /api/harness/{files,diff,budget,workers,browser}` |
 | 离线自证 | `go run ./eval/cmd/harness-smoke` |
 
-## 控制台（默认界面）
+## 控制台（唯一界面）
 
-`http://localhost:8787/` → 302 → `/console/`。零构建、同源、无条件内嵌进单二进制
-（目标机不需要 Node）。
+`http://localhost:8787/` → 302 → `/app/`。
 
-三栏工作区（设计依据见 [docs/design/DESIGN.md](docs/design/DESIGN.md)）：
+React 19 + Vite 构建，产物用 `go:embed` 打进二进制（目标机不需要 Node / bun）。
+源码在 `web/`，改完 `make web && make build` 重新打包。
 
-- **左：会话列表** — 按状态分组，每项带运行中 worker / 目标进度 / high 漏洞数；
-- **中：一次运行** — 轮次时间线（每轮带 `rev`、步数、错误、令牌；工具调用与输出配对）
-  + 常驻 composer（中断 / 纠偏 / 审批模式 / worker / 令牌）；
-- **右：检查器** — 上下文（目标进度、令牌构成、运行状态、漏洞分档）/ 证据 / 能力 / 策略。
+- **左：会话** — 「对话」（无目标，发第一条消息才开跑）与「HARNESS 运行」（有目标）
+  分区列出，互不混淆；`新建对话` 不弹目标框
+- **中：一次运行** — 轮次时间线（思考 / 正文 / 工具调用与结果配对），长列表虚拟化，
+  断线自动续传（`since` 游标）
+- **辅助面板：** 子代理（进行中 / 已完成 / 失败 + 明细）、上下文占用、预算曲线、
+  设置（供应商与模型 / MCP / 技能 / 权限 / 日志 / 运行环境 / 外观）
 
-主标签：**轨迹 · 计划 · 回放 · 评测**。所有控件调的都是已存在的确定性 API
-（`/api/harness/*`、`/intents/{iid}/steer`、`/intercept/judge`）。
+数据只走三条：`/api/tasks`、`/api/agui/agent`（SSE，支持 `since` 续传 + 心跳）、
+`/api/conversations/{id}/messages`（对话增量轮询）。
 
-上游 Next.js 界面保留在 `/legacy/`（需 `-tags embedui` 构建），作为回退通道。
-静态演示（无需后端）：[`docs/demo/harness-console.html`](docs/demo/harness-console.html)。
+> 上游 ARTEX 随源码带进来的两套前端（vanilla 控制台 `/console/`、Next.js 静态导出
+> `/legacy/`）**已移除**：HARNESS 只需要 ARTEX 的后端 Go 代码，界面是自己的 `web/`。
+> 旧链接一律 302 到 `/app/`。
 
 ## 架构一览
 
@@ -137,7 +140,7 @@ cp config.example.json config.json     # 填 database.*
 # 3) 编译并启动（不带前端；首次启动自动建表）
 CGO_ENABLED=0 go build -o artex ./cmd/artex
 ./start.sh            # 守护脚本：程序退出按退出码决定是否重拉（换装协议依赖它）
-# → http://localhost:8787  （302 到控制台 /console/；首次进入设置管理密码，用户名固定 ARTEX）
+# → http://localhost:8787  （302 到 /app/；首次进入设置管理密码，用户名固定 ARTEX）
 ```
 
 `start.sh` / `start.bat` 是**守护 + 换装**入口，请用它而不是直接跑 `./artex`。参数透传：

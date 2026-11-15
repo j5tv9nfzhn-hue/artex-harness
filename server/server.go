@@ -1040,26 +1040,20 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
-	// harness 控制台（S2）：零构建静态应用，无条件内嵌 → 裸机单二进制自带 UI。
-	// 挂在 root 而不是 mux 上：mux 只被挂到 /api/，挂在上面会 404。
-	// 与上游前端一样公开（壳里没有数据，所有数据都走 /api 的 JWT 校验）。
-	root.Handle("GET /console/", s.consoleHandler())
-	// 轻量 React 控制台（web/ 产物）：与 /console/ 并存，便于对比替换
+	// 唯一的一等界面：/app/（web/ 产物，go:embed 进二进制）。
+	//
+	// 上游 ARTEX 随源码带进来的两套前端已经下线：
+	//   /console/  零构建 vanilla 控制台（server/console/）
+	//   /legacy/   Next.js 静态导出（仅在 -tags embedui 下才有内容）
+	// HARNESS 只要 ARTEX 的后端 Go 代码，前端是自己的 web/。旧书签统一 302 到 /app/。
 	root.Handle("GET /app/", s.consoleAppHandler())
-	root.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/console/", http.StatusFound)
-	})
-	// S5：控制台成为唯一的一等界面。
-	//   /         → 302 /console/   （入口换掉，书签与文档都以控制台为准）
-	//   /legacy/  → 上游 Next.js 静态导出（保留一次发布周期，可直接回退；
-	//               它不含任何上游没有的能力，删除它不会丢数据）
-	// 之所以保留 /legacy 而不是直接删：在没有实机验证过控制台能覆盖全部日常操作前，
-	// 把唯一的回退通道删掉属于不可逆操作。退场条件见 docs/04-ROADMAP.md S5。
-	root.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/console/", http.StatusFound)
-	})
-	root.Handle("GET /legacy/", http.StripPrefix("/legacy", s.webuiHandler()))
-	root.Handle("/", s.webuiHandler())
+	redirectToApp := func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/app/", http.StatusFound)
+	}
+	root.HandleFunc("GET /{$}", redirectToApp)
+	root.HandleFunc("GET /console", redirectToApp)
+	root.HandleFunc("GET /console/", redirectToApp)
+	root.HandleFunc("GET /legacy/", redirectToApp)
 	return root
 }
 
