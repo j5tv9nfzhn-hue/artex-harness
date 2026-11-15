@@ -27,6 +27,10 @@ type taskAgentBundle struct {
 	pl             *agent.Planner
 	wk             *agent.Worker
 	main           *agent.MainAgent
+	// harnessRuntime + hx drive HARNESS mode: ONE conversational agent per task.
+	// ARTEX's planner/worker are never used on this path (docs/07).
+	harnessRuntime *taskLLMRuntime
+	hx             *agent.HarnessAgent
 }
 
 type llmAuditProfile struct {
@@ -595,9 +599,23 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	main.SetWebSearch(s.webSearchFor("mainagent"))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
+	// HARNESS runtime (docs/07): a single conversational agent. Built here so it
+	// shares the task's LLM chain resolution, transcript store and proxy exactly
+	// like the other runners — but it never touches planner/worker.
+	harnessRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "harness"}
+	hx := agent.NewHarnessAgent(harnessRuntime, "task-router", s.m.dir, tx, harnessRuntime.CompactionWindow(), s.agentMaxTurns("harness"))
+	hx.SetFindingRecorder(s.evidenceStore())
+	hx.SetCompactionWindowResolver(harnessRuntime.CompactionWindow)
+	hx.SetNonStreaming(harnessRuntime.nonStreaming)
+	hx.SetMaxTokens(harnessRuntime.maxTokens)
+	hx.SetNoaEnabled(s.m.NoaCompactionEnabled)
+	hx.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	hx.SetWebSearch(s.webSearchFor("harness"))
+
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,
 		mainRuntime: mainRuntime, pl: pl, wk: wk, main: main,
+		harnessRuntime: harnessRuntime, hx: hx,
 	}
 	s.taskAgents[t.ID] = bundle
 	return bundle

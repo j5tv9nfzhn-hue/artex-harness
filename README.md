@@ -42,6 +42,20 @@
 构建与测试：`go build ./...` 通过；`go test ./harness/... ./agent/ ./config/ ./guard/ ./llmpool/`
 通过（`agent` 侧仅有一个**上游既有**失败用例，见 S1 文档）。
 
+## 运行模式：HARNESS（一个任务一个 agent）
+
+新任务默认走 **HARNESS 运行模式**：一个可对话的 agent 自己判断、自己执行，需要并行时自己派子代理。
+**HARNESS 不使用 ARTEX 的「规划者 / 执行者」角色**——没有意图队列、没有执行者池、不做目标分解
+（见 [docs/07](docs/07-HARNESS-RUNTIME.md)，ADR-0004）。历史任务仍按原管线运行，可用
+`PUT /api/tasks/{id}/harness-mode {"harness_mode":true}` 逐个切换，下一轮生效。
+
+| 能力 | 端点 |
+|---|---|
+| 就绪自检 | `GET /api/harness/ready` |
+| 对话续跑 | `POST /api/tasks/{id}/say` |
+| 文件树 / DIFF / 预算 / 委派 / 浏览器状态 | `GET /api/harness/{files,diff,budget,workers,browser}` |
+| 离线自证 | `go run ./eval/cmd/harness-smoke` |
+
 ## 控制台（默认界面）
 
 `http://localhost:8787/` → 302 → `/console/`。零构建、同源、无条件内嵌进单二进制

@@ -172,6 +172,12 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		defer s.cfgMu.Unlock()
 		return s.llmOn
 	})
+	// HARNESS runtime resolver: harness-mode tasks run ONE conversational agent.
+	// Returning ok=false leaves the task idle (never silently falling back to the
+	// planner/worker pipeline).
+	s.engine.SetHarnessResolver(func(t *Task) (*agent.HarnessAgent, bool) {
+		return s.harnessAgentFor(t)
+	})
 	// Wire DB-stored prompt templates into the agents (新版方案 §3.3 / §5a). With no
 	// override row, agents keep their built-in defaults — behavior is unchanged.
 	if m.pg != nil {
@@ -221,6 +227,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedHarnessBindings()    // HARNESS: harness agent 行 + 图谱工具绑定（幂等）
+		s.ensureBrowserEnabled()   // HARNESS: 让 browser(Playwright) MCP 真正可用（可关）
 		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
@@ -804,6 +812,17 @@ func (s *Server) Handler() http.Handler {
 	// 能力注册表与证据完整性（S4）：只读视图，不做强制（决策 5）。
 	mux.HandleFunc("GET /api/harness/capabilities", s.harnessCapabilities)
 	mux.HandleFunc("GET /api/harness/evidence-integrity", s.harnessEvidenceIntegrity)
+
+	// HARNESS 运行模式（docs/07）：一个任务一个会话 agent。
+	mux.HandleFunc("GET /api/harness/ready", s.harnessReady)
+	mux.HandleFunc("POST /api/tasks/{id}/say", s.harnessSay)
+	mux.HandleFunc("PUT /api/tasks/{id}/harness-mode", s.harnessMode)
+	// 三栏工作区（P1）：文件树 / DIFF / 预算 / 委派
+	mux.HandleFunc("GET /api/harness/files/{id}", s.harnessFiles)
+	mux.HandleFunc("GET /api/harness/diff/{id}", s.harnessDiff)
+	mux.HandleFunc("GET /api/harness/budget/{id}", s.harnessBudget)
+	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)
+	mux.HandleFunc("GET /api/harness/browser", s.harnessBrowserStatus)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
@@ -1092,7 +1111,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
-		dto := taskDTO(t, s.resolvedTaskStatus(t))
+		dto := taskDTOWithLLM(t, s.resolvedTaskStatus(t), s.engine.Ready())
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
 		metric := metrics[t.ExpID]
 		dto.Tokens = tokenTotalDTO(metric.Tokens)
@@ -1506,6 +1525,8 @@ type createTaskReq struct {
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // 资产覆盖度功能;省略/null=默认开(true)。false=关闭覆盖度计算/展示/自动累积范围+隐藏 add_task_scope/list_untested_assets。company 关联不受影响。
 	// InterceptRules 任务级资产拦截/允许规则(创建时录入,存 task_intercept_rules,不进全局表)。
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+	// HarnessMode 显式覆盖运行模式；nil = 用设置项 harness_runtime（默认 true）。
+	HarnessMode *bool `json:"harness_mode,omitempty"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1552,6 +1573,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.CompanyIDs = companyIDs
+	// HARNESS runtime is the default for new tasks (docs/07). Existing tasks keep
+	// whatever they were created with, so an upgrade never changes behaviour.
+	harnessMode := req.HarnessMode
+	if harnessMode == nil {
+		on := s.harnessRuntimeOn()
+		harnessMode = &on
+	}
 	interceptRules, err := buildTaskInterceptRules(req.InterceptRules)
 	if err != nil {
 		writeErr(w, 400, "任务级拦截规则无效："+err.Error())
@@ -1563,6 +1591,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
 		CoverageEnabled: req.CoverageEnabled,
 		InterceptRules:  interceptRules,
+		HarnessMode:     harnessMode,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
@@ -1580,7 +1609,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。
 	// launchTask 内部异步,不阻塞 UI —— 目标分解在后台可见地进行。
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
-	writeJSON(w, 201, taskDTO(t, s.resolvedTaskStatus(t)))
+	writeJSON(w, 201, taskDTOWithLLM(t, s.resolvedTaskStatus(t), s.engine.Ready()))
 }
 
 func (s *Server) validateTaskProfileIDs(ids []int64) error {
@@ -1780,7 +1809,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "task not found")
 		return
 	}
-	dto := taskDTO(t, s.resolvedTaskStatus(t))
+	dto := taskDTOWithLLM(t, s.resolvedTaskStatus(t), s.engine.Ready())
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
 	writeJSON(w, 200, dto)
@@ -3339,21 +3368,21 @@ func (s *Server) settingsPayload() map[string]any {
 		concLimit = defaultConcurrencyLimit // 关闭时也回显一个合理默认值给 UI
 	}
 	return map[string]any{
-		"traffic_capture":          s.m.TrafficEnabled(),
-		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
-		"llm_record":               s.m.LLMRecordEnabled(),
-		"web_search_enabled":       on,
-		"web_search_backend":       backend,
-		"brave_key_set":            strings.TrimSpace(braveKey) != "",
-		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
-		"web_search_proxy":         proxy,                       // 独立出口代理(http/https/socks5)，空=直连
-		"global_proxy":             s.m.GlobalProxy(),           // 全局出口代理(http/https/socks5)，所有目标流量走它，空=直连
-		"python_interpreter":       strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
+		"traffic_capture":       s.m.TrafficEnabled(),
+		"agent_traffic_binding": s.m.pg.GetBool(settingAgentTrafficBinding, false),
+		"llm_record":            s.m.LLMRecordEnabled(),
+		"web_search_enabled":    on,
+		"web_search_backend":    backend,
+		"brave_key_set":         strings.TrimSpace(braveKey) != "",
+		"tavily_key_set":        strings.TrimSpace(tavilyKey) != "",
+		"web_search_proxy":      proxy,                       // 独立出口代理(http/https/socks5)，空=直连
+		"global_proxy":          s.m.GlobalProxy(),           // 全局出口代理(http/https/socks5)，所有目标流量走它，空=直连
+		"python_interpreter":    strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
 		// 工具调用层的 shell 解析结果（Windows 上是否真的用上 Git Bash、降级到哪档）。
-		"git_bash": s.shellStatus(),
-		"workers":                  s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
-		"task_concurrency_enabled": concOn,                      // 任务并发上限开关(默认关)
-		"task_concurrency_limit":   concLimit,                   // 同时运行任务上限(开启后默认5)
+		"git_bash":                 s.shellStatus(),
+		"workers":                  s.m.Workers(), // 并发工作 agent 数(默认3)；对之后启动的任务生效
+		"task_concurrency_enabled": concOn,        // 任务并发上限开关(默认关)
+		"task_concurrency_limit":   concLimit,     // 同时运行任务上限(开启后默认5)
 		// LLM 轮询(故障转移)。默认关；开启后走全局激活配置的 agent 在当前配置不可用时
 		// 自动切到下一个配置。bind_fallback 仅在轮询开启时有意义(默认关)。
 		"llm_pool_enabled":       s.m.LLMPoolEnabled(),
@@ -3426,7 +3455,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// Git Bash 路径（Windows 裸机的 POSIX shell）。null=不改，""=清空回自动探测。
 		// 保存即生效：执行层每条命令重新解析，不需要重启或重建 agent。
 		GitBashPath *string `json:"git_bash_path"`
-		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
+		Workers     *int    `json:"workers"` // 并发工作 agent 数(>0)；对之后启动的任务生效
 		// 任务并发上限:同时「运行中」的任务数上限。关闭=不限;开启后新建任务超限则排队,有空位自动启动。
 		ConcurrencyEnabled *bool `json:"task_concurrency_enabled"`
 		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`

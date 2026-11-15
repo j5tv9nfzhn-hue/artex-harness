@@ -149,6 +149,10 @@ type Engine struct {
 	// (for example an exhausted failover chain) — there is no global-pair fallback.
 	resolve              func(t *Task) (*agent.Planner, *agent.Worker)
 	resolveAuthoritative bool
+	// harnessResolve returns the task's HARNESS runtime (one conversational agent).
+	// nil = harness tasks stay idle rather than silently falling back to the
+	// legacy pipeline.
+	harnessResolve func(t *Task) (*agent.HarnessAgent, bool)
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness func() bool
@@ -766,6 +770,17 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	if _, loaded := e.started.LoadOrStore(t.ID, true); loaded {
 		e.deleteMu.RUnlock()
 		t.Notify() // already running — just nudge a planning round
+		return
+	}
+	// HARNESS mode: exactly ONE goroutine — the conversational agent. No planner
+	// loop, no worker pool, no frontier. Registered with count=1 so the delete
+	// barrier waits for this single routine.
+	if t.HarnessMode {
+		rt := e.registerTaskRoutines(ctx, t.ID, 1)
+		e.deleteMu.RUnlock()
+		e.touch(t.ID)
+		runTaskRoutine(rt, func(loopCtx context.Context) { e.harnessLoop(loopCtx, t) })
+		e.startDeadlineCoordinator(ctx, t)
 		return
 	}
 	rt := e.registerTaskRoutines(ctx, t.ID, 1+workers)

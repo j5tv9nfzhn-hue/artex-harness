@@ -2022,3 +2022,19 @@ func (s *ExplorationStore) ActivityByIDsForTerminalIntents(ids []int64) ([]Activ
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, name, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
 	return s.db.AddFinding(taskID, nodeID, vulnclass, name, severity, summary, evidence, worker, assetIDs)
 }
+
+// LastUsageInputTokens returns the input-token count of the most recent usage
+// bearing activity row — the best available estimate of how full the agent's
+// context window currently is.
+//
+// Why this and not a running sum: a conversation is compacted, so summing every
+// turn's input tokens overstates the live context by a wide margin. The newest
+// turn is the number that answers "am I about to blow the window?".
+func (s *ExplorationStore) LastUsageInputTokens() int {
+	var n int
+	_ = s.q().QueryRow(`
+SELECT COALESCE(input_tokens, 0) FROM activity
+WHERE exploration_id = $1 AND input_tokens IS NOT NULL
+ORDER BY id DESC LIMIT 1`, s.expID).Scan(&n)
+	return n
+}

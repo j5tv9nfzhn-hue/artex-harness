@@ -30,7 +30,9 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 		return
 	}
 	s.seed(t, seedText)
-	if seedFirstIntent {
+	// HARNESS: no seed intent. An intent is the planner's unit of work; the single
+	// harness agent needs none (docs/07).
+	if seedFirstIntent && !t.HarnessMode {
 		s.seedFirstIntent(t)
 	}
 	s.engine.decInflight(t.ID)
@@ -42,6 +44,17 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 func (s *Server) startTaskEngine(t *Task) {
 	ctx := s.engine.execContextFor(s.ctx, t.ID)
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
+		return
+	}
+	if t.HarnessMode {
+		// HARNESS: the agent receives the goal verbatim and decides for itself.
+		// No goal decomposition, no round-0 marker, no planner at all (docs/07).
+		// The workspace is snapshotted first so the console can show a diff of what
+		// the agent changes (no VCS required on the target machine).
+		if id, err := strconv.ParseInt(t.ID, 10, 64); err == nil {
+			s.ensureBaseline(id)
+		}
+		s.engine.Run(s.ctx, t)
 		return
 	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",

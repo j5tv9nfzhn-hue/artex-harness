@@ -154,10 +154,10 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
-		PermissionMode: permission.ModeBypass,
-		WorkingDir:     mainDir, // 本任务工作目录 <workDir>/tasks/<taskID>
-		ToolOutputDir:  cmdOutDir(mainDir),
-		MaxTurns:       m.maxTurns, // 0 = unlimited (configurable in agent management)
+		PermissionMode:  permission.ModeBypass,
+		WorkingDir:      mainDir, // 本任务工作目录 <workDir>/tasks/<taskID>
+		ToolOutputDir:   cmdOutDir(mainDir),
+		MaxTurns:        m.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 命中预算(步数)→ SDK 跑收尾:向用户输出一句进展总结。Prompt 与收尾轮数可后台编辑(默认 10 轮)。
 		Settlement: wrapupSettlement("mainagent", nil),
 	}

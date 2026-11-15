@@ -34,6 +34,9 @@ const (
 	TurnPlanner = "planner"
 	TurnWork    = "work"
 	TurnSystem  = "system"
+	// TurnHarness is one harness conversation turn (HARNESS runtime: one agent per
+	// task, no planner/worker pipeline).
+	TurnHarness = "harness"
 )
 
 // Truncate revision summaries so a chatty agent cannot bloat the table.

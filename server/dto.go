@@ -55,12 +55,16 @@ type TaskDTO struct {
 	LLMProfileID       *int64             `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
 	LLMProfileIDs      []int64            `json:"llm_profile_ids"`
 	ActiveLLMProfileID *int64             `json:"active_llm_profile_id,omitempty"`
-	LLMFailoverState   string             `json:"llm_failover_state"`
-	LLMFailoverReason  string             `json:"llm_failover_reason,omitempty"`
-	SourceTaskIDs      []string           `json:"source_task_ids"`
-	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
-	CompanyIDs         []int64            `json:"company_ids"`
-	CoverageEnabled    bool               `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
+	HarnessMode        bool               `json:"harness_mode"` // true = HARNESS 会话 agent 驱动（无 planner/worker）
+	// LLMReady=false 表示当前没有可用模型：任务会被创建但在引擎就绪前不会推进。
+	// 之前这种情况完全静默（看起来像"卡住"），现在控制台可以直接提示。
+	LLMReady          bool     `json:"llm_ready"`
+	LLMFailoverState  string   `json:"llm_failover_state"`
+	LLMFailoverReason string   `json:"llm_failover_reason,omitempty"`
+	SourceTaskIDs     []string `json:"source_task_ids"`
+	ArchiveBlockedBy  string   `json:"archive_blocked_by_task_id,omitempty"`
+	CompanyIDs        []int64  `json:"company_ids"`
+	CoverageEnabled   bool     `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
 }
 
 // FindingSeverityDTO 是任务列表里按严重度分档的漏洞计数（严重/高/中/低）。
@@ -102,6 +106,11 @@ func tokenTotalDTO(u db.TokenUsage) TokenTotalDTO {
 }
 
 func taskDTO(t *Task, status string) TaskDTO {
+	return taskDTOWithLLM(t, status, true)
+}
+
+// taskDTOWithLLM lets the caller state whether a model is configured.
+func taskDTOWithLLM(t *Task, status string, llmReady bool) TaskDTO {
 	lifecycle := t.lifecycleSnapshot()
 	llmState := t.llmStateSnapshot()
 	sourceIDs := make([]string, 0, len(lifecycle.SourceTaskIDs))
@@ -134,6 +143,8 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		HarnessMode:        t.HarnessMode,
+		LLMReady:           llmReady,
 	}
 }
 

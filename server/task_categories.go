@@ -163,7 +163,7 @@ func (s *Server) updateTaskCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task, _ := s.m.Task(taskID)
-	writeJSON(w, http.StatusOK, taskDTO(task, s.resolvedTaskStatus(task)))
+	writeJSON(w, http.StatusOK, taskDTOWithLLM(task, s.resolvedTaskStatus(task), s.engine.Ready()))
 }
 
 // batchCategoryItem reports one requested task. Unlike batch pause/resume there

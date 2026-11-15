@@ -149,10 +149,10 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		Tools:           tools,
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
-		PermissionMode: permission.ModeBypass,
-		WorkingDir:     sessionWorkDir,
-		MaxTurns:       maxTurns,
-		MaxDuration:    maxDuration,
+		PermissionMode:  permission.ModeBypass,
+		WorkingDir:      sessionWorkDir,
+		MaxTurns:        maxTurns,
+		MaxDuration:     maxDuration,
 		// large tool output spills to cmd-output/ under the session dir.
 		// 截断上限用 SDK 默认(tool.Capture 的 30000 字符)。
 		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),

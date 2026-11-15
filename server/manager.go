@@ -55,16 +55,25 @@ type Task struct {
 	CompanyIDs         []int64 `json:"company_ids,omitempty"`
 	Status             string  `json:"status"` // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
-	TimeoutSeconds       int                    `json:"timeout_seconds"`
-	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"` // planner 心跳触发间隔(秒)
-	CoverageEnabled      bool                   `json:"coverage_enabled"`       // 资产覆盖度功能开关(创建时定,默认开)
-	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
-	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
-	Store                *pgdb.ExplorationStore `json:"-"`
-	Guard                *guard.Guard           `json:"-"`
-	notify               chan struct{}
-	lifecycleMu          sync.RWMutex
-	llmMu                sync.RWMutex
+	TimeoutSeconds       int  `json:"timeout_seconds"`
+	PlanHeartbeatSeconds int  `json:"plan_heartbeat_seconds"` // planner 心跳触发间隔(秒)
+	CoverageEnabled      bool `json:"coverage_enabled"`       // 资产覆盖度功能开关(创建时定,默认开)
+	// HarnessMode selects the execution engine. true = ONE conversational agent
+	// (harness/runtime: model decides what to do, may delegate to subagents);
+	// false = the legacy ARTEX planner/worker pipeline, kept only for existing
+	// tasks. HARNESS never creates planner/worker roles (see docs/07).
+	HarnessMode bool                   `json:"harness_mode"`
+	FirstRunAt  int64                  `json:"first_run_at,omitempty"`
+	DeadlineAt  int64                  `json:"deadline_at,omitempty"`
+	Store       *pgdb.ExplorationStore `json:"-"`
+	Guard       *guard.Guard           `json:"-"`
+	notify      chan struct{}
+	// harnessIn carries human messages for the HARNESS runtime (one conversation
+	// per task). Lazily created so tasks that never use it cost nothing.
+	harnessOnce sync.Once
+	harnessIn   chan string
+	lifecycleMu sync.RWMutex
+	llmMu       sync.RWMutex
 
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
@@ -844,8 +853,8 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
-		CoverageEnabled: pt.CoverageEnabled,
-		FirstRunAt:      unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
+		CoverageEnabled: pt.CoverageEnabled, HarnessMode: pt.HarnessMode,
+		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
@@ -1858,3 +1867,30 @@ func (t *Task) drainTriggers() []agent.TriggerEvent {
 	t.pendingTriggers = nil
 	return ev
 }
+
+// ── HARNESS conversation inbox ────────────────────────────────────────────
+
+const harnessInboxDepth = 8
+
+func (t *Task) inbox() chan string {
+	t.harnessOnce.Do(func() { t.harnessIn = make(chan string, harnessInboxDepth) })
+	return t.harnessIn
+}
+
+// HarnessInbox is the receive side used by the runtime loop.
+func (t *Task) HarnessInbox() <-chan string { return t.inbox() }
+
+// PushHarnessMessage queues a human message. Returns false when the buffer is
+// full (the previous turn is still producing), so the caller can report it
+// instead of silently dropping the message.
+func (t *Task) PushHarnessMessage(msg string) bool {
+	select {
+	case t.inbox() <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasPendingHarnessMessage reports whether another human message is waiting.
+func (t *Task) HasPendingHarnessMessage() bool { return len(t.inbox()) > 0 }

@@ -1427,3 +1427,9 @@ CREATE TABLE IF NOT EXISTS harness_turn_items (
 );
 CREATE INDEX IF NOT EXISTS idx_harness_turn_items_rev ON harness_turn_items(task_id, revision);
 CREATE INDEX IF NOT EXISTS idx_harness_turn_items_act ON harness_turn_items(activity_id);
+
+-- harness 运行模式（HARNESS 侧）：true = 由单一的会话 agent 驱动（harness/runtime），
+-- false = 沿用 ARTEX 既有的 planner/worker 管线（仅为历史任务保留，HARNESS 不再新增）。
+-- 默认 false 是为了让既有任务在升级后**行为不变**；新任务由创建参数显式置 true。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS harness_mode BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_tasks_harness_mode ON tasks(harness_mode) WHERE deleted_at IS NULL;

@@ -95,7 +95,27 @@
 > 上游复核第 2 条（HTTP client 超时 / 429 无界读）与第 3 条（CORS 缺 PATCH/Authorization）
 > 已在复制基线 `df64cf83` 之前的提交 `b482105` 中修复，本仓库无需再改。
 
-### 3.4 `README.md` / `CHANGELOG.md` / `docs/` 重排
+### 3.4 HARNESS 运行模式（新增路径，不改动既有管线）
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `db/schema.sql` | `tasks.harness_mode`（默认 **false**） | 新列，历史任务行为不变 |
+| `db/tasks.go` | taskCols/scan/opts/INSERT/`SetTaskHarnessMode` | 透传 |
+| `server/goals.go` | harness 模式**跳过**目标分解与第 0 轮标记、跳过种子意图 | 分支 |
+| `server/engine.go` | `Run()` 按 `HarnessMode` 分支：起 1 个会话 goroutine（不是 1+N） | 分支 |
+| `server/task_llm.go` | `taskAgentBundle` 增 `harnessRuntime` / `hx` | 增量 |
+| `server/manager.go` | `Task.HarnessMode` + 会话收件箱（惰性 channel） | 增量 |
+| `server/dto.go` | `TaskDTO.harness_mode` / `llm_ready` | 增量 |
+| `server/server.go` | 新增 `/api/harness/*` 与 `/api/tasks/{id}/{say,harness-mode}` 路由 | 增量 |
+
+新增：`agent/harness.go`、`agent/harness_prompt.go`、`server/harness_loop.go`、
+`server/harness_wiring.go`、`server/harness_files.go`、`server/harness_browser.go`、
+`harness/diff/`、`eval/cmd/harness-smoke/`。
+
+**未改动**：规划者/执行者的既有实现与行为（仅由 `harness_mode` 决定是否启动），
+以及全部提示词、内置拦截规则、默认策略。
+
+### 3.5 `README.md` / `CHANGELOG.md` / `docs/` 重排
 
 上游 `README.md` 是一份完整的项目说明（安装、更新、架构、免责）；本仓库需要自己的 README
 来解释"harness 而非工具集"的定位。故：上游 README 原文保留为 `README-ARTEX.md`，本仓库新增
