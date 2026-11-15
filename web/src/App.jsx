@@ -6,6 +6,11 @@ import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Command } from "cmdk";
+import { Toaster, toast } from "sonner";
+import { Dialog, TextArea, TextField as RTextField, Switch } from "@radix-ui/themes";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github.css";
+import { Copy, Pause, Play, Plus } from "lucide-react";
 import Sidebar from "./Sidebar.jsx";
 import Composer from "./Composer.jsx";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
@@ -112,11 +117,25 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  async function control(action) {
+    if (!taskId) return toast.error("先选择一个会话");
+    try {
+      const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/control`, {
+        method: "POST", credentials: "include",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      toast.success(action === "pause" ? "已暂停" : "已恢复");
+    } catch (e) { toast.error(e.message); }
+  }
+
   const cur = useMemo(() => tasks.find((t) => String(t.id) === String(taskId)), [tasks, taskId]);
   const series = (budget && budget.series) || [];
 
   return (
     <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large">
+      <Toaster position="bottom-center" richColors closeButton />
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId} onPalette={() => setPalette(true)} />
 
@@ -128,6 +147,13 @@ export default function App() {
             </Text>
             <Box style={{ marginLeft: "auto" }}>
               <Flex gap="2" align="center">
+                <NewTaskDialog onCreated={(t) => setTasks((prev) => [t, ...prev])} />
+                <Tooltip content="暂停任务（含正在跑的轮次）">
+                  <IconButton size="1" variant="ghost" aria-label="暂停" onClick={() => control("pause")}><Pause size={13} /></IconButton>
+                </Tooltip>
+                <Tooltip content="恢复任务">
+                  <IconButton size="1" variant="ghost" aria-label="恢复" onClick={() => control("resume")}><Play size={13} /></IconButton>
+                </Tooltip>
                 {budget ? <BudgetSpark data={series} pct={budget.pct} /> : null}
                 <StatusBadge status={cur && cur.status} />
                 <Badge size="1" variant="outline" color="gray">AG-UI</Badge>
@@ -212,7 +238,9 @@ function Row({ row }) {
   return (
     <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}>
       <Box className={"md " + (row.role === "thinking" ? "thinking" : "")}>
-        <Markdown remarkPlugins={[remarkGfm]}>{row.text || ""}</Markdown>
+        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: CodeBlock }}>
+          {row.text || ""}
+        </Markdown>
       </Box>
     </motion.div>
   );
@@ -265,6 +293,79 @@ function BudgetSpark({ data, pct }) {
         </ResponsiveContainer>
       </Box>
     </Tooltip>
+  );
+}
+
+function CodeBlock({ children }) {
+  const ref = useRef(null);
+  return (
+    <div style={{ position: "relative" }}>
+      <IconButton size="1" variant="ghost" color="gray" aria-label="复制代码"
+                  style={{ position: "absolute", top: 6, right: 6 }}
+                  onClick={() => {
+                    const t = ref.current?.innerText || "";
+                    navigator.clipboard?.writeText(t).then(() => toast.success("已复制"), () => toast.error("复制失败"));
+                  }}>
+        <Copy size={12} />
+      </IconButton>
+      <pre ref={ref}>{children}</pre>
+    </div>
+  );
+}
+
+function NewTaskDialog({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState("");
+  const [desc, setDesc] = useState("");
+  const [harness, setHarness] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  async function create() {
+    if (!goal.trim()) return toast.error("目标不能为空");
+    setBusy(true);
+    try {
+      const r = await fetch("/api/tasks", {
+        method: "POST", credentials: "include",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: goal.trim(), description: desc.trim(), harness_mode: harness }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      const t = await r.json();
+      toast.success("任务已创建 #" + t.id);
+      setOpen(false); setGoal(""); setDesc("");
+      onCreated?.(t);
+    } catch (e) { toast.error("创建失败：" + e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger>
+        <IconButton size="1" variant="soft" aria-label="新建任务"><Plus size={13} /></IconButton>
+      </Dialog.Trigger>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">新建任务</Dialog.Title>
+        <Dialog.Description size="1" color="gray">目标决定 agent 做什么；创建后会自动生成一个短标题。</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Box>
+            <Text size="1" color="gray" as="div" mb="1">目标</Text>
+            <TextArea placeholder="例如：只读侦察 127.0.0.1:8899 的 /api/health 与 /console/，报告状态码"
+                      value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} />
+          </Box>
+          <Box>
+            <Text size="1" color="gray" as="div" mb="1">描述（可选）</Text>
+            <RTextField.Root placeholder="补充背景、范围或约束" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </Box>
+          <Flex align="center" gap="2">
+            <Switch checked={harness} onCheckedChange={setHarness} />
+            <Text size="1" color="gray">HARNESS 会话模式（单 agent 对话式）</Text>
+          </Flex>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><button className="ghost-btn">取消</button></Dialog.Close>
+          <IconButton variant="solid" disabled={busy} onClick={create}>{busy ? "创建中…" : "创建"}</IconButton>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
