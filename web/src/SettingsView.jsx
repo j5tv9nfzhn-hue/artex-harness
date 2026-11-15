@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   Badge, Box, Button, Card, Code, Flex, Heading, IconButton, ScrollArea, Separator,
-  Dialog, Table, Text, TextField, Tooltip,
+  Dialog, Select, Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
-import { ArrowLeft, Check, Cpu, FileText, Palette, Plug, Shield, Sparkles, Terminal, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, Shield, Sparkles, Terminal, Trash2 } from "lucide-react";
 
 /* 设置：与 DSH 相同的形态——打开后【左侧栏变成设置导航】，主区显示该分区的表单。
  * 不是弹窗、不是上下堆叠卡片、不是弹窗内的 tab。
@@ -37,6 +37,10 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
   const [rules, setRules] = useState([]);
   const [logs, setLogs] = useState([]);
   const [err, setErr] = useState("");
+  const [addProvider, setAddProvider] = useState(false);   // 新增供应商
+  const [addModelFor, setAddModelFor] = useState(null);     // 给某供应商加模型
+  const [editProvider, setEditProvider] = useState(null);   // 编辑供应商端点
+  const [editModel, setEditModel] = useState(null);         // 编辑模型参数
 
   useEffect(() => {
     jfetch("/api/llm/profiles").then((d) => setProfiles(Array.isArray(d) ? d : d.profiles || [])).catch((e) => setErr(e.message));
@@ -47,6 +51,10 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
   useEffect(() => {
     if (section === "logs" && !logs.length) jfetch("/api/llm/records").then((d) => setLogs(Array.isArray(d) ? d : d.records || [])).catch(() => {});
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function reloadProfiles() {
+    try { const d = await jfetch("/api/llm/profiles"); setProfiles(Array.isArray(d) ? d : d.profiles || []); } catch (e) { setErr(e.message); }
+  }
 
   async function activate(id) {
     try { await jfetch("/api/llm/profiles/active", { method: "POST", body: JSON.stringify({ id: Number(id) }) });
@@ -112,6 +120,12 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                         <Code size="1">{pv.base_url || "默认端点"}</Code>
                         {pv.api_key_hint ? <Badge size="1" color="green" variant="soft">密钥 {pv.api_key_hint}</Badge> : <Badge size="1" color="red" variant="soft">缺少密钥</Badge>}
                         {pv.proxy ? <Badge size="1" color="gray" variant="soft">代理 {pv.proxy}</Badge> : null}
+                        <Box style={{ marginLeft: "auto" }}>
+                          <Flex gap="1">
+                            <Button size="1" variant="soft" color="gray" onClick={() => setEditProvider(pv)}><Pencil size={12} /> 端点</Button>
+                            <Button size="1" variant="soft" onClick={() => setAddModelFor(pv)}><Plus size={12} /> 模型</Button>
+                          </Flex>
+                        </Box>
                       </Flex>
                       <Separator size="4" />
                       <Table.Root size="1" variant="ghost">
@@ -130,6 +144,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                               <Table.Cell><Text size="1" color="gray">{[m.thinking_type, m.reasoning_effort].filter(Boolean).join(" / ") || "默认"}</Text></Table.Cell>
                               <Table.Cell><Text size="1" color="gray">{m.rate_per_second ? m.rate_per_second + "/s" : m.rate_per_minute ? m.rate_per_minute + "/min" : "不限"}</Text></Table.Cell>
                               <Table.Cell><Flex gap="1" justify="end">
+                                <IconButton size="1" variant="ghost" aria-label="编辑" onClick={() => setEditModel(m)}><Pencil size={12} /></IconButton>
                                 {m.is_default ? null : <IconButton size="1" variant="ghost" aria-label="设为默认" onClick={() => activate(m.id)}><Check size={12} /></IconButton>}
                                 <IconButton size="1" variant="ghost" color="red" aria-label="删除" onClick={() => remove(m)}><Trash2 size={12} /></IconButton>
                               </Flex></Table.Cell>
@@ -140,7 +155,8 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                     </Flex>
                   </Card>
                 ))}
-                {!providers.length ? <Text size="1" color="gray">还没有供应商。供应商与模型的新增/编辑沿用旧设置入口的接口（POST /api/llm/profiles）。</Text> : null}
+                <Button size="2" variant="soft" onClick={() => setAddProvider(true)}><Plus size={13} /> 添加供应商</Button>
+                {!providers.length ? <Text size="1" color="gray">还没有供应商。供应商 = 端点（协议 + Base URL + 密钥 + 代理），模型挂在其下。</Text> : null}
               </Flex>
             )}
 
@@ -228,6 +244,18 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
         </ScrollArea>
       </div>
       </div>
+
+      <ProviderDialog open={addProvider} onClose={() => setAddProvider(false)}
+        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("已添加供应商"); setAddProvider(false); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
+      <ProviderDialog open={!!addModelFor} seed={addModelFor} onClose={() => setAddModelFor(null)}
+        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("已添加模型"); setAddModelFor(null); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
+      <EditProviderDialog pv={editProvider} onClose={() => setEditProvider(null)}
+        onSave={async (patch) => { try {
+          for (const m of editProvider.models) await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, api_key: patch.api_key || "", base_url: patch.base_url, proxy: patch.proxy }) });
+          toast?.("供应商已更新"); setEditProvider(null); reloadProfiles();
+        } catch (e) { toast?.(e.message, true); } }} />
+      <EditModelDialog model={editModel} onClose={() => setEditModel(null)}
+        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("模型已更新"); setEditModel(null); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -252,3 +280,133 @@ function groupProviders(profiles) {
   }
   return [...map.values()];
 }
+
+/* 供应商表单：新增供应商（协议+端点+密钥+代理+首个模型）／给已有供应商加模型 */
+function ProviderDialog({ open, seed, onClose, onSave }) {
+  const isNew = !seed;
+  const [format, setFormat] = useState("openai");
+  const [baseURL, setBaseURL] = useState("");
+  const [apiKey, setAPIKey] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [model, setModel] = useState("");
+  const [ctx, setCtx] = useState("");
+  useEffect(() => { if (!open) return; setFormat(seed?.format || "openai"); setBaseURL(seed?.base_url || ""); setProxy(seed?.proxy || ""); setAPIKey(""); setModel(""); setCtx(""); }, [open, seed]);
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">{isNew ? "添加供应商" : "添加模型"}</Dialog.Title>
+        <Dialog.Description size="1" color="gray">{isNew ? "供应商 = 端点与凭据；模型挂在其下。" : `端点沿用 ${seed?.base_url || "默认端点"}，只需填模型。`}</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          {isNew ? (<>
+            <Field label="协议">
+              <Select.Root value={format} onValueChange={setFormat}>
+                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Content>
+                  <Select.Item value="openai">OpenAI 兼容</Select.Item>
+                  <Select.Item value="anthropic">Anthropic</Select.Item>
+                  <Select.Item value="openai-responses">OpenAI Responses</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+            <Field label="Base URL"><TextField.Root value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…/v1" /></Field>
+            <Field label="API Key"><TextField.Root type="password" value={apiKey} onChange={(e) => setAPIKey(e.target.value)} placeholder="sk-…" /></Field>
+            <Field label="出站代理（可选）"><TextField.Root value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="http://127.0.0.1:3128" /></Field>
+          </>) : null}
+          <Flex gap="3">
+            <Field label="模型名"><TextField.Root value={model} onChange={(e) => setModel(e.target.value)} placeholder="例如 MiniMax-M3.1-Flash" /></Field>
+            <Field label="上下文 K"><TextField.Root value={ctx} onChange={(e) => setCtx(e.target.value)} placeholder="128" /></Field>
+          </Flex>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={() => onSave({ name: model || "default", format, base_url: baseURL, proxy, api_key: apiKey, model, context_window_k: Number(ctx) || 0 })}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+function EditProviderDialog({ pv, onClose, onSave }) {
+  const [baseURL, setBaseURL] = useState("");
+  const [apiKey, setAPIKey] = useState("");
+  const [proxy, setProxy] = useState("");
+  useEffect(() => { if (pv) { setBaseURL(pv.base_url || ""); setProxy(pv.proxy || ""); setAPIKey(""); } }, [pv]);
+  return (
+    <Dialog.Root open={!!pv} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="480px">
+        <Dialog.Title size="4">编辑供应商端点</Dialog.Title>
+        <Dialog.Description size="1" color="gray">应用到此供应商下的 {pv?.models?.length || 0} 个模型；密钥留空保留原值。</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="Base URL"><TextField.Root value={baseURL} onChange={(e) => setBaseURL(e.target.value)} /></Field>
+          <Field label="API Key"><TextField.Root type="password" value={apiKey} onChange={(e) => setAPIKey(e.target.value)} placeholder="留空保留" /></Field>
+          <Field label="出站代理"><TextField.Root value={proxy} onChange={(e) => setProxy(e.target.value)} /></Field>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={() => onSave({ base_url: baseURL, api_key: apiKey, proxy })}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+function EditModelDialog({ model, onClose, onSave }) {
+  const [ctx, setCtx] = useState("");
+  const [thinking, setThinking] = useState("");
+  const [effort, setEffort] = useState("");
+  const [rps, setRps] = useState("");
+  const [rpm, setRpm] = useState("");
+  useEffect(() => {
+    if (!model) return;
+    setCtx(model.context_window_k ? String(model.context_window_k) : "");
+    setThinking(model.thinking_type || ""); setEffort(model.reasoning_effort || "");
+    setRps(model.rate_per_second ? String(model.rate_per_second) : "");
+    setRpm(model.rate_per_minute ? String(model.rate_per_minute) : "");
+  }, [model]);
+  return (
+    <Dialog.Root open={!!model} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">编辑模型 {model?.model}</Dialog.Title>
+        <Flex direction="column" gap="3" mt="3">
+          <Flex gap="3">
+            <Field label="上下文 K"><TextField.Root value={ctx} onChange={(e) => setCtx(e.target.value)} /></Field>
+            <Field label="每秒请求"><TextField.Root value={rps} onChange={(e) => setRps(e.target.value)} placeholder="不限" /></Field>
+            <Field label="每分钟请求"><TextField.Root value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder="不限" /></Field>
+          </Flex>
+          <Flex gap="3">
+            <Field label="思考开关">
+              <Select.Root value={thinking || "none"} onValueChange={(v) => setThinking(v === "none" ? "" : v)}>
+                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Content>
+                  <Select.Item value="none">不发送</Select.Item>
+                  <Select.Item value="enabled">开启</Select.Item>
+                  <Select.Item value="disabled">关闭</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+            <Field label="思考强度">
+              <Select.Root value={effort || "none"} onValueChange={(v) => setEffort(v === "none" ? "" : v)}>
+                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Content>
+                  <Select.Item value="none">不发送</Select.Item>
+                  {["low", "medium", "high", "xhigh", "max"].map((v) => <Select.Item key={v} value={v}>{v}</Select.Item>)}
+                </Select.Content>
+              </Select.Root>
+            </Field>
+          </Flex>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={() => onSave({ ...model, context_window_k: Number(ctx) || 0, thinking_type: thinking, reasoning_effort: effort, rate_per_second: Number(rps) || 0, rate_per_minute: Number(rpm) || 0 })}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+const Field = ({ label, children }) => (
+  <Box style={{ flex: 1, minWidth: 120 }}>
+    <Text size="1" color="gray" as="div" mb="1">{label}</Text>
+    {children}
+  </Box>
+);
