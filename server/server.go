@@ -1661,6 +1661,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。
 	// launchTask 内部异步,不阻塞 UI —— 目标分解在后台可见地进行。
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
+	// 会话标题：异步让模型起一个短标题，写进 tasks.name（详见 server/task_title.go）。
+	// 用 WithoutCancel：请求返回后仍要完成，别被 http 请求取消带走。
+	go s.ensureTaskTitle(context.WithoutCancel(r.Context()), t)
 	writeJSON(w, 201, taskDTOWithLLM(t, s.resolvedTaskStatus(t), s.engine.Ready()))
 }
 

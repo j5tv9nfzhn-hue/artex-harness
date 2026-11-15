@@ -692,3 +692,11 @@ func (d *DB) SetTaskProjectDir(id int64, dir string) error {
 	_, err := d.Exec(`UPDATE tasks SET project_dir=$2 WHERE id=$1`, id, strings.TrimSpace(dir))
 	return err
 }
+
+// SetTaskName stores a task's display name, but only while it is still empty so a
+// name the operator typed is never overwritten by a generated one.
+func (d *DB) SetTaskName(id int64, name string) error {
+	_, err := d.Exec(`UPDATE tasks SET name=$2
+WHERE id=$1 AND deleted_at IS NULL AND COALESCE(name,'')=''`, id, name)
+	return err
+}

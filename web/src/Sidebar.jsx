@@ -103,7 +103,7 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette }) {
                    onKeyDown={(e) => { if (e.key === "Enter") onPick(String(t.id)); }}>
                 <span className="dot" style={{ background: statusColor(t.status) }} />
                 <Text size="2" className="row-title">
-                  {t.goal || t.description || "task " + t.id}
+                  {t.name || t.goal || t.description || "task " + t.id}
                 </Text>
                 <span className="row-tail">
                   {isHover || active ? (
