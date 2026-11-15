@@ -155,6 +155,11 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Main-agent runs use a separate context from planner/workers. Cancel it, then
 	// wait until both execution domains have returned before removing transcripts.
 	s.cancelTaskChat(id, agent.AbortTaskDeleted)
+	// Stop the task-scoped loops (planner/worker/harness) before draining. A harness
+	// loop parks on its message queue after a turn, so a task that had simply finished
+	// kept a live goroutine and the drain hit its timeout: the task became impossible
+	// to delete ("任务仍有运行中的 Agent") even though nothing was running.
+	s.engine.StopTask(id)
 	drainCtx, cancelDrain := context.WithTimeout(r.Context(), taskDeleteDrainTimeout)
 	defer cancelDrain()
 	if err := s.waitTaskQuiescent(drainCtx, id); err != nil {

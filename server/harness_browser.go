@@ -283,7 +283,13 @@ func consoleErrors(acts []db.Activity, detail func(int64) (string, error), limit
 		if a.Kind != "tool_result" || detail == nil {
 			continue
 		}
-		if !strings.HasPrefix(a.Tool, "mcp__chrome-devtools__") || !strings.Contains(strings.ToLower(a.Tool), "console") {
+		// Either console reader counts: chrome-devtools' list_console_messages and
+		// Playwright's browser_console_messages carry the same information, and an
+		// agent picks whichever stack it was given. Restricting the panel to one of
+		// them meant "no errors" simply because the run used the other.
+		isDevtools := strings.HasPrefix(a.Tool, "mcp__chrome-devtools__")
+		isPlaywright := strings.HasPrefix(a.Tool, "mcp__browser__")
+		if (!isDevtools && !isPlaywright) || !strings.Contains(strings.ToLower(a.Tool), "console") {
 			continue
 		}
 		blob, err := detail(a.ID)
@@ -305,7 +311,7 @@ func consoleErrors(acts []db.Activity, detail func(int64) (string, error), limit
 				ID:    a.ID,
 				Level: normalizeConsoleLevel(m[1]),
 				Text:  truncateSummary(text, 300),
-				Tool:  strings.TrimPrefix(a.Tool, "mcp__chrome-devtools__"),
+				Tool:  strings.TrimPrefix(strings.TrimPrefix(a.Tool, "mcp__chrome-devtools__"), "mcp__browser__"),
 				At:    a.CreatedAt.Format("15:04:05"),
 			})
 			if len(out) >= limit {

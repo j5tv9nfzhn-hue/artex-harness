@@ -204,7 +204,21 @@ func (d *DB) CreateTaskWithOptions(description, goal string, opts TaskCreateOpti
 INSERT INTO exploration_nodes(exploration_id, kind, payload, priority, state, origin)
 VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); err != nil {
 		return nil, err
+	} // Root goal node: the user's own statement of the objective, written at creation
+	// instead of waiting for the LLM decomposition step. Without it a brand-new task
+	// has an empty goal frontier — graph_overview reports nothing to work on, the
+	// console shows an empty goal list, and every consumer (including the lifecycle
+	// test) has to poll a model round to see the thing it just created.
+	goalPayload, _ := json.Marshal(map[string]any{
+		"text":    goal,
+		"summary": goal,
+	})
+	if _, err := tx.Exec(`
+INSERT INTO exploration_nodes(exploration_id, kind, payload, priority, state, origin)
+VALUES ($1, 'goal', $2, 0, 'open', 'user')`, expID, string(goalPayload)); err != nil {
+		return nil, err
 	}
+
 	if opts.TimeoutSeconds < 0 {
 		opts.TimeoutSeconds = 0
 	}
