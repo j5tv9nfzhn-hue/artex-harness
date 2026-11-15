@@ -497,11 +497,24 @@ async function renderBrowserPanel() {
         ${b.f12_hint ? `<div class="dcard-res">${esc(b.f12_hint)}</div>` : ""}
       </div>
       ${(() => {
+        const errs = b.console_errors || [];
+        const unparsed = b.console_errors_unparsed || 0;
         const f12 = (b.recent || []).filter((r) => r.tool.startsWith("mcp__chrome-devtools__"));
-        if (!f12.length) return `<p class="dim xs">F12 动作：本任务还没有（启用后 agent 的 console/network 查询会出现在这里）。</p>`;
-        return `<div class="dcard"><div class="dcard-head"><span class="tag">F12 · 最近动作</span>
-          <span class="dim">${f12.length}</span></div>
-          <div class="dcard-res">${f12.map((r) => `${r.tool.replace("mcp__chrome-devtools__","")} · ${r.kind}\n${(r.summary || "").slice(0, 300)}`).join("\n\n")}</div></div>`;
+        const head = `<div class="dcard-head"><span class="tag">F12 · console 报错</span>
+          <span class="${errs.length ? "eval-fail" : "eval-pass"}">${errs.length ? errs.length + " 条" : "无"}</span></div>`;
+        const tail = f12.length
+          ? `<details style="margin-top:6px"><summary class="dim xs">最近 ${f12.length} 次 F12 动作</summary>
+             <div class="dcard-res">${f12.map((r) => `${esc(r.tool.replace("mcp__chrome-devtools__",""))} · ${esc(r.kind)}\n${esc((r.summary || "").slice(0, 300))}`).join("\n\n")}</div></details>`
+          : "";
+        if (!errs.length) {
+          const why = unparsed
+            ? `<div class="dcard-res eval-fail">${unparsed} 条 console 读取结果无法解析——不当作「无报错」</div>`
+            : `<div class="dcard-res dim">agent 还没读过 console（list_console_messages），或页面没有 warn/error。</div>`;
+          return `<div class="dcard">${head}${why}${tail}</div>`;
+        }
+        const rows = errs.map((e) => `<div class="dcard-res"><span class="${e.level === "error" ? "eval-fail" : "dim"}">${esc(e.level)}</span>
+          <span class="dim xs">${esc(e.at || "")} · ${esc(e.tool || "")}</span><br>${esc(e.text)}</div>`).join("");
+        return `<div class="dcard">${head}${rows}${unparsed ? `<div class="dim xs">另有 ${unparsed} 条无法解析</div>` : ""}${tail}</div>`;
       })()}
       ${recent || `<p class="dim xs">本任务还没有浏览器动作。</p>`}
       <p class="dim xs">说明：截图以缩略图形式挂在事件流每条浏览器动作旁（点击看大图）；存储按哈希去重、24h TTL、上限 2000 张。</p>`;

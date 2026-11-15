@@ -18,9 +18,11 @@ package server
 // the last browser tool activity instead of pretending to ping.
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
@@ -220,6 +222,9 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 				}
 				out["recent"] = items
 				out["task"] = t.ID
+				ces, unparsed := consoleErrors(acts, t.Store.ActivityDetail, 20)
+				out["console_errors"] = ces
+				out["console_errors_unparsed"] = unparsed
 			}
 		}
 	}
@@ -232,4 +237,106 @@ func truncateSummary(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// consoleError is one warn/error-level console message lifted out of the
+// chrome-devtools MCP output.
+type consoleError struct {
+	ID    int64  `json:"id"`
+	Level string `json:"level"`
+	Text  string `json:"text"`
+	Tool  string `json:"tool"`
+	At    string `json:"at,omitempty"`
+}
+
+var consoleLevelRe = regexp.MustCompile(`(?i)\[(error|warn|warning|fatal|critical)\]`)
+
+// consoleErrors extracts the warn/error lines from the agent's DevTools console
+// reads (docs/10 §3.2 — the F12 panel shows this list and nothing else).
+//
+// Deliberately line-based rather than schema-based: the chrome-devtools MCP server
+// prints a human-readable message list whose layout changes between releases, so a
+// strict parser would break on upgrade and, worse, would report "no errors" when it
+// had merely failed to parse. Lines without a level marker are ignored; blobs that
+// cannot even be turned into text are counted in `unparsed` so the panel can say so
+// instead of showing an empty list that looks clean.
+func consoleErrors(acts []db.Activity, detail func(int64) (string, error), limit int) ([]consoleError, int) {
+	if limit <= 0 {
+		limit = 20
+	}
+	out := make([]consoleError, 0, limit)
+	seen := make(map[string]bool, limit)
+	unparsed := 0
+	for i := len(acts) - 1; i >= 0 && len(out) < limit; i-- {
+		a := acts[i]
+		if a.Kind != "tool_result" || detail == nil {
+			continue
+		}
+		if !strings.HasPrefix(a.Tool, "mcp__chrome-devtools__") || !strings.Contains(strings.ToLower(a.Tool), "console") {
+			continue
+		}
+		blob, err := detail(a.ID)
+		if err != nil || strings.TrimSpace(blob) == "" {
+			unparsed++
+			continue
+		}
+		for _, line := range strings.Split(mcpText(blob), "\n") {
+			m := consoleLevelRe.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			text := strings.TrimSpace(line)
+			if seen[text] {
+				continue
+			}
+			seen[text] = true
+			out = append(out, consoleError{
+				ID:    a.ID,
+				Level: normalizeConsoleLevel(m[1]),
+				Text:  truncateSummary(text, 300),
+				Tool:  strings.TrimPrefix(a.Tool, "mcp__chrome-devtools__"),
+				At:    a.CreatedAt.Format("15:04:05"),
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, unparsed
+}
+
+func normalizeConsoleLevel(s string) string {
+	if strings.EqualFold(s, "warn") || strings.EqualFold(s, "warning") {
+		return "warn"
+	}
+	return "error" // error / fatal / critical
+}
+
+// mcpText unwraps the MCP tool result envelope ({"content":[{"type":"text",...}]})
+// to plain text; anything that is not that envelope is returned as-is.
+func mcpText(blob string) string {
+	t := strings.TrimSpace(blob)
+	if !strings.HasPrefix(t, "{") {
+		return blob
+	}
+	var env struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(t), &env); err != nil || len(env.Content) == 0 {
+		return blob
+	}
+	var b strings.Builder
+	for _, c := range env.Content {
+		if c.Text != "" {
+			b.WriteString(c.Text)
+			b.WriteString("\n")
+		}
+	}
+	if b.Len() == 0 {
+		return blob
+	}
+	return b.String()
 }
