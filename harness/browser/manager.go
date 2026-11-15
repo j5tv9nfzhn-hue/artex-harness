@@ -286,7 +286,19 @@ func (m *Manager) wrap(taskID int64, server string, inner actool.CoreTool) actoo
 			res, err := inner.Call(ctx, in, tc)
 			if err != nil {
 				m.MarkBroken(taskID, server, err)
-				return res, err
+				// Retry ONCE on a revived server. Without this the agent kept calling a
+				// tool bound to a dead pipe for the rest of the turn: one killed Chrome
+				// produced "write |1: file already closed" on every navigate/tabs/
+				// snapshot/close until the run ended (observed on task 214, ~15 wasted
+				// turns). A failed call has not happened, so a single retry is safe.
+				if revived, rerr := m.reviveTool(ctx, taskID, server, name); rerr == nil && revived != nil {
+					if res2, err2 := revived.Call(ctx, in, tc); err2 == nil {
+						res, err = res2, nil
+					}
+				}
+				if err != nil {
+					return res, err
+				}
 			}
 			m.touch(taskID)
 			// Screenshots are the one thing the SDK cannot carry (its content union has
@@ -303,6 +315,35 @@ func (m *Manager) wrap(taskID int64, server string, inner actool.CoreTool) actoo
 			return res, nil
 		},
 	})
+}
+
+// reviveTool restarts one broken server and returns the named tool from the fresh
+// connection, so a transport that died mid-turn can be replaced in place.
+//
+// Ensure() already rebuilds servers whose connection is gone; the gap was that the
+// agent held tool values bound to the OLD connection for the whole turn. This is the
+// lookup that turns "the pipe died" from a terminal condition into a hiccup.
+func (m *Manager) reviveTool(ctx context.Context, taskID int64, server, tool string) (actool.CoreTool, error) {
+	s, err := m.Ensure(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	conn := s.conns[server]
+	m.mu.Unlock()
+	if conn == nil {
+		return nil, fmt.Errorf("browser: %s 未能恢复连接", server)
+	}
+	tools, err := conn.Tools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tools {
+		if t.Name() == tool {
+			return t, nil
+		}
+	}
+	return nil, fmt.Errorf("browser: %s 恢复后没有工具 %s", server, tool)
 }
 
 // CaptureScreenshot grabs one PNG from the task's browser session and stores it

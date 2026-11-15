@@ -112,8 +112,13 @@ func (s *Server) mcpStatus(name string) mcpRowStatus {
 		}
 		st.Configured, st.Enabled, st.Transport, st.Command = true, srv.Enabled, srv.Transport, srv.Command
 	}
+	// mcp_tools_cache keys on server_id, not on the server's name; the old query
+	// referenced a column that does not exist and threw the error away, so this
+	// always reported 0 and made a discovered server look undiscovered.
 	var cached int
-	_ = s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache WHERE server=$1`, name).Scan(&cached)
+	if err := s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache c JOIN mcp_servers s ON s.id = c.server_id WHERE s.name = $1`, name).Scan(&cached); err != nil {
+		log.Printf("[harness/browser] 统计 %s 工具缓存失败: %v", name, err)
+	}
 	st.ToolsCached = cached
 	st.Ready = st.Enabled && cached > 0
 	return st
