@@ -43,3 +43,10 @@ html, body, #root { height: 100%; margin: 0; }
 /* Radix 的 Theme 会插一层 div：不给它高度，内部的 100% 就撑不开，
  * composer 会被挤到可视区下方（实测就是这样丢的）。 */
 .radix-themes { height: 100%; }
+
+/* 浮动"回到底部"：跟随粘底状态出现，不遮挡输入区 */
+.jump-bottom { position: absolute; right: 28px; bottom: 118px; z-index: 5;
+  border: 1px solid var(--gray-a6); background: var(--color-panel-solid); color: var(--gray-12);
+  border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; box-shadow: var(--shadow-3); }
+.jump-bottom:hover { background: var(--gray-a3); }
+.main { position: relative; }

@@ -48,6 +48,8 @@ export default function App() {
   const [palette, setPalette] = useState(false);
   const abort = useRef(null);
   const scroller = useRef(null);
+  const stick = useRef(true);
+  const [showJump, setShowJump] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -103,10 +105,28 @@ export default function App() {
     api(`/api/harness/budget/${encodeURIComponent(taskId)}`).then(setBudget).catch(() => setBudget(null));
   }, [taskId, live]);
 
+  // 粘底：内容一变（含流式追加）就跟到底；用户主动上滑则不打断，只提示"回到底部"。
   useEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [rows.length]);
+    if (!el) return;
+    if (stick.current) el.scrollTop = el.scrollHeight;
+  });
+
+  const onStreamScroll = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stick.current = atBottom;
+    setShowJump(!atBottom);
+  }, []);
+
+  const jumpToBottom = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = true;
+    setShowJump(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -162,7 +182,7 @@ export default function App() {
             </Box>
           </Flex>
 
-          <div className="stream" ref={scroller}>
+          <div className="stream" ref={scroller} onScroll={onStreamScroll}>
             {err ? (
               <Card size="1" style={{ borderColor: "var(--red-7)" }}>
                 <Flex gap="2" align="center"><XCircle size={14} /><Text size="2" color="red">{err}</Text></Flex>
@@ -173,6 +193,12 @@ export default function App() {
               {rows.map((r) => <Row key={r.key} row={r} />)}
             </AnimatePresence>
           </div>
+          {showJump ? (
+            <motion.button className="jump-bottom" onClick={jumpToBottom}
+                           initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+              回到底部 ↓
+            </motion.button>
+          ) : null}
           <Composer taskId={taskId} live={live} budget={budget} onSent={() => setLive("connecting")} />
         </div>
 

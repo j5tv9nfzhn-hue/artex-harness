@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Badge, Box, Flex, IconButton, Select, Separator, Text, TextField, Tooltip } from "@radix-ui/themes";
+import { Badge, Box, Flex, IconButton, Select, Separator, Text, TextArea, Tooltip } from "@radix-ui/themes";
 import { ArrowUp, Gauge, Lock, SendHorizontal, Sparkles } from "lucide-react";
 
 /* 输入区：控件全部来自 Radix Themes（Select / TextField / IconButton / Badge / Tooltip），
@@ -22,6 +22,7 @@ export default function Composer({ taskId, live, budget, onSent }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [tps, setTps] = useState(null);
+  const taRef = useRef(null);
   const startedAt = useRef(0);
   const chars = useRef(0);
 
@@ -61,6 +62,13 @@ export default function Composer({ taskId, live, budget, onSent }) {
     return () => window.removeEventListener("agui:text", onDelta);
   }, []);
 
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [text]);
+
   const current = profiles.find((p) => String(p.id) === String(profileId));
   const thinking = describeThinking(current);
 
@@ -96,21 +104,26 @@ export default function Composer({ taskId, live, budget, onSent }) {
   return (
     <Box px="4" py="3" style={{ borderTop: "1px solid var(--gray-a5)" }}>
       <Flex direction="column" gap="2">
-        <TextField.Root
-          placeholder={taskId ? "对 agent 说话（同一会话继续，不改历史）" : "先选择一个会话"}
-          value={text} disabled={!taskId}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
-        >
-          <TextField.Slot><Sparkles size={14} /></TextField.Slot>
-          <TextField.Slot side="right">
-            <Tooltip content="发送（⌘/Ctrl+Enter）">
-              <IconButton size="1" variant="solid" disabled={!text.trim() || busy} onClick={send} aria-label="发送">
-                {busy ? <SendHorizontal size={13} /> : <ArrowUp size={13} />}
-              </IconButton>
-            </Tooltip>
-          </TextField.Slot>
-        </TextField.Root>
+        {/* 多行输入：随内容自增高，到 200px 后内部滚动；Enter 发送、Shift+Enter 换行。
+            单行 TextField 会把多行消息挤成一条，看不到自己写了什么。 */}
+        <Box style={{ position: "relative" }}>
+          <TextArea
+            ref={taRef}
+            placeholder={taskId ? "对 agent 说话（Enter 发送 · Shift+Enter 换行）" : "先选择一个会话"}
+            value={text} disabled={!taskId} rows={1}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+            }}
+            style={{ minHeight: 46, maxHeight: 200, resize: "none", paddingRight: 44, lineHeight: 1.55 }}
+          />
+          <Tooltip content="发送（Enter）">
+            <IconButton size="1" variant="solid" disabled={!text.trim() || busy} onClick={send} aria-label="发送"
+                        style={{ position: "absolute", right: 8, bottom: 8 }}>
+              {busy ? <SendHorizontal size={13} /> : <ArrowUp size={13} />}
+            </IconButton>
+          </Tooltip>
+        </Box>
 
         <Flex align="center" gap="3" wrap="wrap">
           <Flex align="center" gap="1">
