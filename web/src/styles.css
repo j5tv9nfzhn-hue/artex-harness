@@ -39,3 +39,7 @@ html, body, #root { height: 100%; margin: 0; }
 .row .dot { width:6px; height:6px; border-radius:99px; flex:0 0 auto; }
 .row .row-title { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .row .row-tail { flex:0 0 auto; display:flex; align-items:center; }
+
+/* Radix 的 Theme 会插一层 div：不给它高度，内部的 100% 就撑不开，
+ * composer 会被挤到可视区下方（实测就是这样丢的）。 */
+.radix-themes { height: 100%; }
