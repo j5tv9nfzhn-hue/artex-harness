@@ -73,6 +73,7 @@ export default function App() {
   const sinceRef = useRef(0);          // AG-UI 续传游标（= 最后一条事件的活动 id）
   const [retryNonce, setRetryNonce] = useState(0);
   const [subOpen, setSubOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);   // 新建对话：侧栏/标题栏/命令面板共用一个
 
   const loadTasks = useCallback(async () => {
     try {
@@ -191,6 +192,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((v) => !v); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") { e.preventDefault(); setNewOpen(true); }
       if (e.key === "Escape") setPalette(false);
     };
     window.addEventListener("keydown", onKey);
@@ -219,8 +221,11 @@ export default function App() {
       <SettingsView open={view === "settings"} onOpenChange={(o) => setView(o ? "settings" : "chat")}
                     appearance={appearance} onAppearance={changeAppearance}
                     version={version} health={health} toast={toast} />
+      <NewTaskDialog open={newOpen} onOpenChange={setNewOpen}
+                     onCreated={(t) => { setTasks((prev) => [t, ...prev]); setTaskId(String(t.id)); }} />
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
+                 onNew={() => setNewOpen(true)}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
                  toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
                  appearance={appearance} onAppearance={changeAppearance}
@@ -234,7 +239,9 @@ export default function App() {
             </Text>
             <Box style={{ marginLeft: "auto" }}>
               <Flex gap="2" align="center">
-                <NewTaskDialog onCreated={(t) => setTasks((prev) => [t, ...prev])} />
+                <Tooltip content="新建对话（⌘N）">
+                  <Button size="1" variant="soft" onClick={() => setNewOpen(true)}><Plus size={13} /> 新建</Button>
+                </Tooltip>
                 <Tooltip content="暂停任务（含正在跑的轮次）">
                   <IconButton size="1" variant="ghost" aria-label="暂停" onClick={() => control("pause")}><Pause size={13} /></IconButton>
                 </Tooltip>
@@ -301,7 +308,8 @@ export default function App() {
         </Flex>
 
         {palette ? (
-          <Palette tasks={tasks} onPick={(id) => { setTaskId(id); setPalette(false); }} onClose={() => setPalette(false)} />
+          <Palette tasks={tasks} onPick={(id) => { setTaskId(id); setPalette(false); }}
+                   onNew={() => setNewOpen(true)} onClose={() => setPalette(false)} />
         ) : null}
       </div>
     </Theme>
@@ -370,7 +378,7 @@ function Row({ row }) {
   );
 }
 
-function Palette({ tasks, onPick, onClose }) {
+function Palette({ tasks, onPick, onNew, onClose }) {
   return (
     <div className="cmdk-overlay" onClick={onClose}>
       <div className="cmdk-box" onClick={(e) => e.stopPropagation()}>
@@ -381,6 +389,15 @@ function Palette({ tasks, onPick, onClose }) {
           </Flex>
           <Command.List>
             <Command.Empty><Text size="2" color="gray">没有匹配项</Text></Command.Empty>
+            <Command.Group heading="操作">
+              <Command.Item value="新建对话 新建会话 新任务 new chat" onSelect={() => { onClose(); onNew?.(); }}>
+                <Flex align="center" gap="2" style={{ width: "100%" }}>
+                  <Plus size={13} />
+                  <Text size="2">新建对话</Text>
+                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N</Text></Box>
+                </Flex>
+              </Command.Item>
+            </Command.Group>
             <Command.Group heading="任务">
               {tasks.map((t) => (
                 <Command.Item key={t.id} value={`${t.id} ${t.goal || ""} ${t.description || ""}`}
@@ -441,8 +458,11 @@ function CodeBlock({ children }) {
   );
 }
 
-function NewTaskDialog({ onCreated }) {
-  const [open, setOpen] = useState(false);
+function NewTaskDialog({ open: openProp, onOpenChange, onCreated }) {
+  // 受控 + 非受控两用：侧栏、标题栏、命令面板都指向同一个对话框，状态必须由 App 持有。
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
   const [goal, setGoal] = useState("");
   const [desc, setDesc] = useState("");
   const [harness, setHarness] = useState(true);

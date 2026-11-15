@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Avatar, Badge, Box, Card, ContextMenu, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
+  Avatar, Badge, Box, Button, Card, ContextMenu, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
 } from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import SettingsDialog from "./Settings.jsx";
-import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Settings, ShieldAlert } from "lucide-react";
+import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Settings, ShieldAlert } from "lucide-react";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
  * 组内行高固定 30px，113 条也只渲染可见的那十几行（@tanstack/react-virtual）。
@@ -32,7 +32,7 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
+export default function Sidebar({ tasks, taskId, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -123,6 +123,21 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
             </Tooltip>
           </Box>
         </Flex>
+      )}
+
+      {/* 新建对话放在列表正上方——所有聊天产品都是这个位置，不该只藏在标题栏。 */}
+      {collapsed ? (
+        <Flex px="2" pb="2" justify="center">
+          <Tooltip content="新建对话">
+            <IconButton size="2" variant="soft" aria-label="新建对话" onClick={onNew}><Plus size={15} /></IconButton>
+          </Tooltip>
+        </Flex>
+      ) : (
+        <Box px="3" pb="2">
+          <Button size="2" variant="soft" style={{ width: "100%", justifyContent: "flex-start" }} onClick={onNew}>
+            <Plus size={14} /> 新建对话
+          </Button>
+        </Box>
       )}
 
       <Flex align="center" gap="2" px="3" pb="2" style={collapsed ? { display: "none" } : undefined}>
