@@ -18,8 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/agentcore"
@@ -234,6 +237,59 @@ func harnessSituationBlock(tsx *ToolSet) string {
 	return b.String()
 }
 
+// defaultSubagentTimeout bounds one subagent run.
+//
+// Why a separate budget at all: a subagent is a *delegated* unit of work with its own
+// tool loop, so it must not inherit the parent run's turn budget (that is the bug this
+// constant exists next to — see subagentContext).
+const defaultSubagentTimeout = 10 * time.Minute
+
+// subagentTimeoutEnv lets an operator raise/lower the cap without a rebuild.
+const subagentTimeoutEnv = "HARNESS_SUBAGENT_TIMEOUT"
+
+// subagentTimeout resolves the bound for one subagent run.
+func subagentTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(subagentTimeoutEnv))
+	if raw == "" {
+		return defaultSubagentTimeout
+	}
+	// Accept "90s", "10m", or a bare number of seconds.
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return defaultSubagentTimeout
+}
+
+// subagentContext detaches a subagent run from the parent's cancellation while
+// keeping its own deadline.
+//
+// The failure this fixes: the parent run gets canceled when its turn budget is
+// exhausted (norma aborts in-flight tools and synthesizes interrupted results), and
+// because the subagent's context was derived from the parent's, the child died with
+// "subagent failed: context canceled" mid-delegation — the delegation was recorded as
+// an error even though the work was perfectly sound.
+//
+// Semantics of the returned context:
+//   - parent cancellation (turn budget, pause, shutdown) does NOT propagate;
+//   - it carries its own timeout, so a subagent can never run unbounded;
+//   - the caller must call the returned CancelFunc (defer) to release the timer.
+//
+// Trade-off, stated plainly: a subagent may outlive a paused/deleted parent by up to
+// its timeout. That is deliberate — a half-executed recon leaves the graph in a worse
+// state than one that finishes and reports — and it is bounded, since nothing else
+// keeps the goroutine alive.
+func subagentContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), subagentTimeout())
+}
+
+// shouldStartSubagent reports whether a delegation may begin now. A run that is
+// already canceled must not START new work (that would just burn tokens after a stop),
+// but an already-started subagent is allowed to finish (see subagentContext).
+func shouldStartSubagent(ctx context.Context) bool { return ctx.Err() == nil }
+
 // agentTool wraps norma's Agent tool so a delegation is visible in the harness
 // event stream: the parent's transcript shows who was dispatched and what came
 // back, which is what makes "the model decided to parallelise" auditable.
@@ -280,13 +336,25 @@ func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity))
 		},
 		Run: func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 			agentType, prompt := peekAgentInput(in)
+			// Do not start new delegated work after a stop/pause/shutdown.
+			if !shouldStartSubagent(ctx) {
+				return actool.Errorf("Error: 本轮已取消，未启动子代理 " + agentType + "（已取消的轮次不再产生新工作）"), nil
+			}
 			if emit != nil {
 				emit(db.Activity{
 					Worker: "harness", Kind: "tool_use", Tool: "Agent",
 					Summary: fmt.Sprintf("派发子代理 %s：%s", agentType, truncOutput(prompt, 160)),
 				})
 			}
-			res, err := inner.Call(ctx, in, tc)
+			// Detach from the parent's cancellation: the parent's turn budget must not
+			// kill a delegation that is already running (docs/08 §1). The child keeps
+			// its own timeout instead.
+			subCtx, cancelSub := subagentContext(ctx)
+			defer cancelSub()
+			res, err := inner.Call(subCtx, in, tc)
+			if err != nil && subCtx.Err() == context.DeadlineExceeded {
+				err = fmt.Errorf("子代理 %s 超时（%s）：%w", agentType, subagentTimeout(), err)
+			}
 			if emit != nil {
 				summary := "(无输出)"
 				if len(res.Content) > 0 {
@@ -294,7 +362,7 @@ func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity))
 				}
 				emit(db.Activity{
 					Worker: "harness", Kind: "tool_result", Tool: "Agent",
-					IsError: res.IsError, Summary: summary,
+					IsError: res.IsError || err != nil, Summary: summary,
 				})
 			}
 			return res, err

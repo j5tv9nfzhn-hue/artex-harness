@@ -22,6 +22,41 @@ harness 会取消在飞工具（合成 interrupted 结果），子代理随之�
 
 > 现状结论：**委派链路通了、可见、可审计；但"子代理被父预算误杀"是真实缺陷**，不能算完成。
 
+### 修复（2026-11-15）
+
+按"在 Agent 工具内部剥离父级取消 + 子代理自有超时"实施：
+
+| 变更 | 位置 |
+|---|---|
+| `subagentContext(parent)` = `context.WithTimeout(context.WithoutCancel(parent), subagentTimeout())` | `agent/harness.go` |
+| 包装器先用 `shouldStartSubagent(ctx)` 拒绝"已取消的轮次**新开**子代理"，再对**已启动**的委派用剥离后的 ctx | `agent/harness.go` |
+| 子代理自有超时 `defaultSubagentTimeout = 10m`，可用 `HARNESS_SUBAGENT_TIMEOUT`（`90s` / `10m` / 纯秒数）覆盖 | `agent/harness.go` |
+| 超时被如实区分：`子代理 X 超时（10m）`，不再混成 `context canceled` | `agent/harness.go` |
+
+**语义取舍（写清楚）**：父级暂停/删除后，子代理最多再跑一个超时窗口。这是故意的——
+"半途而废的侦察"比"跑完并回报"让图谱更脏；而它**有界**，且进程退出会终止它。
+
+**回归测试（两级）**
+
+1. 机制级 `agent/harness_subagent_test.go`：父 ctx 取消后子 ctx 不取消、且带自己的 deadline；
+   `HARNESS_SUBAGENT_TIMEOUT` 解析（`90s`/`10m`/`120`/非法/负数）；`shouldStartSubagent` 三种输入。
+2. **集成级** `agent/harness_subagent_it_test.go`：跑**真实的 Agent 工具**（假 provider，流式），
+   在子代理执行中途取消父 ctx，断言子代理仍返回答案；另测"已取消的轮次拒绝新开子代理"与
+   "未知 agent_type 报错"。
+
+**负向对照（证明这是真回归测试）**：
+
+```
+# 把 subagentContext(ctx) 换回 ctx（即修复前）：
+--- FAIL: TestAgentToolSurvivesParentCancel
+    subagent reported an error: Error: subagent failed: context canceled
+# 还原修复后：
+ok  github.com/Autumn-27/artex/agent
+```
+
+即：去掉 detach 立刻复现线上那条错误，加回即通过。未再跑一次真实模型委派（随机且慢），
+因为集成测试用确定性方式覆盖了同一条路径。
+
 ## 二、F12 面（P3-4）
 
 - 预置 `chrome-devtools` MCP（stdio，`npx -y chrome-devtools-mcp@latest`），与 `browser`（Playwright）分列。
