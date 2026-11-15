@@ -86,3 +86,11 @@ html, body, #root { height: 100%; margin: 0; }
 
 /* 设置：内容区固定高（460px）自带滚动，标签切换不改变对话框尺寸 */
 [role="dialog"] [role="tablist"] { flex-wrap: wrap; }
+
+/* 设置视图：左栏是设置导航，主区是表单（DSH 的形态） */
+.settings-app { grid-template-columns: 232px minmax(0,1fr); }
+.set-nav { display:flex; align-items:center; gap:8px; padding:7px 10px; border:0; background:transparent;
+  border-radius:8px; cursor:pointer; color:var(--gray-11); font:inherit; text-align:left; width:100%; }
+.set-nav:hover { background: var(--gray-a3); color: var(--gray-12); }
+.set-nav.active { background: var(--accent-a4); color: var(--gray-12); font-weight:550; }
+@media (max-width: 900px) { .settings-app { grid-template-columns: 1fr; } }

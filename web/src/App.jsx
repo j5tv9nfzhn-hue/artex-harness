@@ -13,7 +13,7 @@ import "highlight.js/styles/github.css";
 import { Copy, Pause, Play, Plus } from "lucide-react";
 import Sidebar from "./Sidebar.jsx";
 import Composer from "./Composer.jsx";
-import Settings from "./Settings.jsx";
+import SettingsView from "./SettingsView.jsx";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
@@ -47,7 +47,9 @@ export default function App() {
   const [err, setErr] = useState("");
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
+  const [view, setView] = useState("chat"); // chat | settings
   const [version, setVersion] = useState("");
+  const [health, setHealth] = useState(null);
   const [appearance, setAppearance] = useState(() => { try { return localStorage.getItem("artex.appearance") || "inherit"; } catch { return "inherit"; } });
   const changeAppearance = (v) => { setAppearance(v); try { localStorage.setItem("artex.appearance", v); } catch {} };
   const [profiles, setProfiles] = useState([]);
@@ -106,7 +108,7 @@ export default function App() {
   }, [taskId]);
 
   useEffect(() => {
-    api("/api/health").then((d) => setVersion(d.version || "")).catch(() => {});
+    api("/api/health").then((d) => { setVersion(d.version || ""); setHealth(d); }).catch(() => {});
     api("/api/llm/profiles").then((d) => setProfiles(Array.isArray(d) ? d : (d.profiles || []))).catch(() => {});
   }, []);
 
@@ -163,6 +165,16 @@ export default function App() {
   const cur = useMemo(() => tasks.find((t) => String(t.id) === String(taskId)), [tasks, taskId]);
   const series = (budget && budget.series) || [];
 
+  if (view === "settings") {
+    return (
+      <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
+        <Toaster position="bottom-center" richColors closeButton />
+        <SettingsView onBack={() => setView("chat")} appearance={appearance} onAppearance={changeAppearance}
+                      version={version} health={health} toast={toast} />
+      </Theme>
+    );
+  }
+
   return (
     <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
@@ -170,7 +182,8 @@ export default function App() {
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
                  toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
-                 appearance={appearance} onAppearance={changeAppearance} />
+                 appearance={appearance} onAppearance={changeAppearance}
+                 onOpenSettings={() => setView("settings")} />
 
         <div className="main">
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>

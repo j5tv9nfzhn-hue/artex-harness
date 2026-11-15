@@ -32,7 +32,7 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance }) {
+export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -301,7 +301,7 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, pr
                 </IconButton>
               </Tooltip>
               <DropdownMenu.Root>
-                <IconButton size="1" variant="ghost" color="gray" aria-label="设置" onClick={() => setSettingsOpen(true)}>
+                <IconButton size="1" variant="ghost" color="gray" aria-label="设置" onClick={() => onOpenSettings?.()}>
                   <Settings size={14} />
                 </IconButton>
                 <DropdownMenu.Trigger style={{ display: "none" }}><span /></DropdownMenu.Trigger>
