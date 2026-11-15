@@ -1015,6 +1015,8 @@ func (s *Server) Handler() http.Handler {
 	// 挂在 root 而不是 mux 上：mux 只被挂到 /api/，挂在上面会 404。
 	// 与上游前端一样公开（壳里没有数据，所有数据都走 /api 的 JWT 校验）。
 	root.Handle("GET /console/", s.consoleHandler())
+	// 轻量 React 控制台（web/ 产物）：与 /console/ 并存，便于对比替换
+	root.Handle("GET /app/", s.consoleAppHandler())
 	root.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/", http.StatusFound)
 	})
