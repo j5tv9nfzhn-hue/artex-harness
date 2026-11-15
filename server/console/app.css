@@ -469,3 +469,14 @@ button.sm{ padding: 3px 8px; font-size: 12px; }
   body{ background: #fff; color: #000; }
   *{ box-shadow: none !important; }
 }
+
+/* 屏幕阅读器专用标题：视觉不变，但文档必须有 h1（快照/读屏/SEO 都依赖它） */
+.sr{
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* 右侧状态栏：给内容留出可读宽度，避免"还没有派出子代理…"被挤成三行 */
+.dock{ min-width: 340px; }
+@media (max-width: 1180px){ .dock{ min-width: 280px; } }

@@ -21,7 +21,8 @@
 
 <div id="app" class="app" hidden>
   <!-- ══ 左栏：任务 · 对话 · 项目目录 ══════════════════════════════════ -->
-  <aside class="rail">
+  <h1 class="sr">artex-harness 控制台</h1>
+  <aside class="rail" aria-label="任务与对话">
     <div class="rail-head">
       <span class="brand">artex<span class="brand-x">·</span>harness</span>
       <button id="btn-refresh" class="icon" title="刷新任务列表">⟳</button>
@@ -49,7 +50,7 @@
   </aside>
 
   <!-- ══ 中栏：事件流与视图 ═══════════════════════════════════════════ -->
-  <main class="main">
+  <main class="main" aria-label="事件流">
     <header class="topbar">
       <div class="topbar-id">
         <span class="dim xs">task</span>
@@ -167,7 +168,7 @@
   </main>
 
   <!-- ══ 右栏：状态 / 文件 / DIFF / 预算 / 浏览器 / 干预 ═══════════════ -->
-  <aside class="dock">
+  <aside class="dock" aria-label="状态面板">
     <div class="dock-tabs" id="dock-tabs">
       <button class="dt active" data-dt="status">状态</button>
       <button class="dt" data-dt="files">文件</button>
