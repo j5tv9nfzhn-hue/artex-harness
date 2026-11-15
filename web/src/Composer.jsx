@@ -23,6 +23,9 @@ export default function Composer({ taskId, live, budget, onSent }) {
   const [err, setErr] = useState("");
   const [tps, setTps] = useState(null);
   const taRef = useRef(null);
+  const [files, setFiles] = useState([]);
+  const [mention, setMention] = useState(null); // {q, start} | null
+  const draftKey = taskId ? `artex.draft.${taskId}` : "";
   const startedAt = useRef(0);
   const chars = useRef(0);
 
@@ -61,6 +64,37 @@ export default function Composer({ taskId, live, budget, onSent }) {
     window.addEventListener("agui:text", onDelta);
     return () => window.removeEventListener("agui:text", onDelta);
   }, []);
+
+  // 草稿：按会话保存，切换会话不丢未发送内容
+  useEffect(() => {
+    if (!draftKey) return;
+    let v = ""; try { v = localStorage.getItem(draftKey) || ""; } catch {}
+    setText(v);
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const id = setTimeout(() => { try { localStorage.setItem(draftKey, text); } catch {} }, 250);
+    return () => clearTimeout(id);
+  }, [text, draftKey]);
+
+  // 工作区文件：给 @ 引用用。两个可能的路径都探一下，取能用的那个。
+  useEffect(() => {
+    if (!taskId) return;
+    (async () => {
+      for (const path of [`/api/harness/files/${encodeURIComponent(taskId)}`, `/api/tasks/${encodeURIComponent(taskId)}/files`]) {
+        try {
+          const r = await fetch(path, { headers: authHeaders(), credentials: "include" });
+          if (!r.ok) continue;
+          const d = await r.json();
+          const nodes = d.nodes || d.files || (Array.isArray(d) ? d : []);
+          const list = nodes.filter((n) => n && (n.path || n.name) && !n.dir && !n.is_dir)
+                            .map((n) => n.path || n.name).slice(0, 800);
+          if (list.length) { setFiles(list); return; }
+        } catch { /* 试下一个 */ }
+      }
+    })();
+  }, [taskId]);
 
   useEffect(() => {
     const el = taRef.current;
@@ -111,7 +145,12 @@ export default function Composer({ taskId, live, budget, onSent }) {
             ref={taRef}
             placeholder={taskId ? "对 agent 说话（Enter 发送 · Shift+Enter 换行）" : "先选择一个会话"}
             value={text} disabled={!taskId} rows={1}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setText(v);
+              const m = /@([\w./-]*)$/.exec(v);
+              setMention(m ? { q: m[1].toLowerCase(), start: v.length - m[0].length } : null);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
             }}
@@ -124,6 +163,19 @@ export default function Composer({ taskId, live, budget, onSent }) {
             </IconButton>
           </Tooltip>
         </Box>
+
+        {mention && files.length ? (
+          <Box style={{ position: "relative" }}>
+            <Box className="mention-list">
+              {files.filter((f) => !mention.q || f.toLowerCase().includes(mention.q)).slice(0, 8).map((f) => (
+                <div key={f} className="mention-item" onClick={() => {
+                  const next = text.slice(0, mention.start) + "@" + f + " ";
+                  setText(next); setMention(null); taRef.current?.focus();
+                }}>{f}</div>
+              ))}
+            </Box>
+          </Box>
+        ) : null}
 
         <Flex align="center" gap="3" wrap="wrap">
           <Flex align="center" gap="1">

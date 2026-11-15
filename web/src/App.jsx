@@ -234,7 +234,12 @@ function Row({ row }) {
 
   if (row.type === "tool")
     return (
-      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16, ease: [0.2, 0.7, 0.3, 1] }}>
+      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16, ease: [0.2, 0.7, 0.3, 1] }}
+                  className="msg-wrap">
+        <IconButton size="1" variant="ghost" color="gray" className="msg-copy" aria-label="复制这次工具调用"
+                    onClick={() => copyText(`${row.name}\n${row.args}\n${row.result ?? ""}`)}>
+          <Copy size={12} />
+        </IconButton>
         <Card size="1">
           <Flex direction="column" gap="2">
             <Flex align="center" gap="2">
@@ -262,7 +267,12 @@ function Row({ row }) {
     );
 
   return (
-    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}>
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}
+                className="msg-wrap">
+      <IconButton size="1" variant="ghost" color="gray" className="msg-copy" aria-label="复制这条消息"
+                  onClick={() => copyText(row.text || "")}>
+        <Copy size={12} />
+      </IconButton>
       <Box className={"md " + (row.role === "thinking" ? "thinking" : "")}>
         <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: CodeBlock }}>
           {row.text || ""}
@@ -320,6 +330,10 @@ function BudgetSpark({ data, pct }) {
       </Box>
     </Tooltip>
   );
+}
+
+function copyText(t) {
+  navigator.clipboard?.writeText(t).then(() => toast.success("已复制"), () => toast.error("复制失败"));
 }
 
 function CodeBlock({ children }) {
