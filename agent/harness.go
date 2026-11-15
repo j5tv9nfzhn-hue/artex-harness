@@ -391,6 +391,14 @@ func (h *HarnessAgent) agentTool(base []actool.CoreTool, emit func(db.Activity))
 		Provider:    h.prov,
 		ParentTools: registry,
 		Transcript:  h.tx,
+		// 子代理沿用父会话的权限语义：父会话本身是 ModeBypass，真正的否决权在平台
+		// hooks（拦截规则 / 审批门）。不设 CanUseTool 时 norma 会以"没有审批处理器"
+		// 拒掉子代理的每次 Bash，子代理只能拿 Grep/Read 硬凑，任务被拖到几分钟乃至超时。
+		CanUseTool: func(context.Context, string, json.RawMessage, acperm.Context) acperm.Decision {
+			return acperm.Allowed()
+		},
+		// 同一个 gate：子代理也不能绕过破坏性命令拦截。
+		Hooks: h.hooks,
 		// No definition lists "Agent", so a subagent can never delegate again: the
 		// depth guard stays as defence in depth, not as the only limit.
 		Agents: map[string]subagent.Definition{

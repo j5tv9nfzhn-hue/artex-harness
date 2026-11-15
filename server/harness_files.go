@@ -413,6 +413,11 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 			rows[i].DurationMS = now.Sub(rows[i].StartedAt).Milliseconds()
 		}
 	}
+	// 明细在磁盘 sidechain 里，activity 行没有 agent id：用提示词对一次，对上才可点开。
+	idx := s.subagentIndex(t.ExpID)
+	for i := range rows {
+		rows[i].AgentID = matchSubagent(idx, rows[i].Prompt, rows[i].StartedAt)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":        t.ID,
 		"harness":     t.HarnessMode,
@@ -504,4 +509,7 @@ type delegationRow struct {
 	// running without the client having to reconstruct timestamps from the stream.
 	StartedAt  time.Time `json:"started_at"`
 	DurationMS int64     `json:"duration_ms"`
+	// AgentID 是磁盘 sidechain 文件里的子代理 id；点开一次委派看它的明细要靠它。
+	// 空 = 没有找到对应记录（从未真正跑起来，或运行在旧版本上）。
+	AgentID string `json:"agent_id,omitempty"`
 }
