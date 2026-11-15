@@ -13,6 +13,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -92,7 +94,10 @@ func run() int {
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, shutdown := shutdownContext(sigCtx)
+	// 取消要由我们自己决定时机：收到信号后先给在跑的轮次一个收尾窗口，再 cancel。
+	// 直接 cancel 会把说到一半的回复连同它的活动写一起打断（日志里就是
+	// "sql: database is closed"，用户看到的就是"说了几个字就停了"）。
+	ctx, shutdown := context.WithCancelCause(context.Background())
 	defer shutdown(agent.AbortShutdown)
 
 	mgr, err := server.NewManager(*dataDir, *proxy)
@@ -131,9 +136,16 @@ func run() int {
 	// bootstrap above installs the new build).
 	code := 0
 	select {
-	case <-ctx.Done():
+	case <-sigCtx.Done():
+		// 收尾：等在跑的 LLM 轮次结束（有上限），再取消。窗口内完成的轮次会把正文和
+		// 活动写都落库，重启不再截断任何一句话。
+		if !srv.DrainAgents(drainTimeout()) {
+			log.Println("[shutdown] 收尾窗口已到，仍在运行的轮次将被取消")
+		}
+		shutdown(agent.AbortShutdown)
 	case <-server.RestartRequested():
 		code = selfupdate.ExitRestart
+		srv.DrainAgents(drainTimeout())
 		shutdown(agent.AbortShutdown)
 	}
 
@@ -142,6 +154,17 @@ func run() int {
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
 	return code
+}
+
+// drainTimeout is how long shutdown waits for in-flight agent turns.
+// HARNESS_SHUTDOWN_DRAIN (seconds) overrides; 0 disables waiting entirely.
+func drainTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("HARNESS_SHUTDOWN_DRAIN")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 30 * time.Second
 }
 
 // shutdownContext deliberately does not derive from signalCtx. If it did, the

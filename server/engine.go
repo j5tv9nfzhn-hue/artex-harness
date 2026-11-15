@@ -420,6 +420,21 @@ func (e *Engine) ActiveLLMCalls(taskID string) int64 {
 	return 0
 }
 
+// AnyActiveCalls reports whether ANY task has an LLM call in flight right now.
+// Used by shutdown: a restart that cancels a turn mid-sentence truncates the
+// agent's reply and loses its activity write ("sql: database is closed").
+func (e *Engine) AnyActiveCalls() bool {
+	busy := false
+	e.llmCalls.Range(func(_, v any) bool {
+		if p, ok := v.(*int64); ok && atomic.LoadInt64(p) > 0 {
+			busy = true
+			return false
+		}
+		return true
+	})
+	return busy
+}
+
 func (e *Engine) touch(taskID string) { e.lastAct.Store(taskID, time.Now().Unix()) }
 
 func NewEngine(m *Manager) *Engine {

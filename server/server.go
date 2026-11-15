@@ -1211,6 +1211,29 @@ func (s *Server) resolvedTaskStatus(t *Task) string {
 	}
 }
 
+// DrainAgents waits (bounded) until no agent turn is in flight, so a restart or
+// stop does not cut a reply off mid-sentence or lose the activity write that
+// follows it. Returns true when the engine went quiet in time.
+//
+// Why bounded: an in-flight turn can legitimately run for minutes (a long tool
+// call), and a shutdown must still finish. The window is the trade-off between
+// "never truncate" and "never hang"; after it, the turn is cancelled deliberately.
+func (s *Server) DrainAgents(timeout time.Duration) bool {
+	if s == nil || s.engine == nil {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if !s.engine.AnyActiveCalls() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func (s *Server) setActive(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`
