@@ -165,19 +165,12 @@ export default function App() {
   const cur = useMemo(() => tasks.find((t) => String(t.id) === String(taskId)), [tasks, taskId]);
   const series = (budget && budget.series) || [];
 
-  if (view === "settings") {
-    return (
-      <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
-        <Toaster position="bottom-center" richColors closeButton />
-        <SettingsView onBack={() => setView("chat")} appearance={appearance} onAppearance={changeAppearance}
-                      version={version} health={health} toast={toast} />
-      </Theme>
-    );
-  }
-
   return (
     <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
+      <SettingsView open={view === "settings"} onOpenChange={(o) => setView(o ? "settings" : "chat")}
+                    appearance={appearance} onAppearance={changeAppearance}
+                    version={version} health={health} toast={toast} />
       <div className="app">
         <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Badge, Box, Button, Card, Code, Flex, Heading, IconButton, ScrollArea, Separator,
-  Table, Text, TextField, Tooltip,
+  Dialog, Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
 import { ArrowLeft, Check, Cpu, FileText, Palette, Plug, Shield, Sparkles, Terminal, Trash2 } from "lucide-react";
 
@@ -29,7 +29,7 @@ const SECTIONS = [
   { id: "look", label: "外观", icon: Palette },
 ];
 
-export default function SettingsView({ onBack, appearance, onAppearance, version, health, toast }) {
+export default function SettingsView({ open, onOpenChange, appearance, onAppearance, version, health, toast }) {
   const [section, setSection] = useState("models");
   const [profiles, setProfiles] = useState([]);
   const [mcps, setMcps] = useState([]);
@@ -63,14 +63,17 @@ export default function SettingsView({ onBack, appearance, onAppearance, version
   const providers = groupProviders(profiles);
 
   return (
-    <div className="app settings-app">
-      {/* 左栏：设置导航（取代会话列表） */}
-      <aside className="rail settings-rail" aria-label="设置导航">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="settings-dialog" maxWidth="none"
+                      style={{ width: "min(920px, 94vw)", height: "min(640px, 86vh)", padding: 0, overflow: "hidden" }}>
+      <div className="settings-grid">
+      {/* 弹窗内的左栏：设置导航 */}
+      <aside className="settings-rail" aria-label="设置导航">
         <Flex align="center" gap="2" px="3" pt="3" pb="2">
           <Tooltip content="返回会话">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="返回会话" onClick={onBack}><ArrowLeft size={15} /></IconButton>
+            <IconButton size="1" variant="ghost" color="gray" aria-label="返回会话" onClick={() => onOpenChange(false)}><ArrowLeft size={15} /></IconButton>
           </Tooltip>
-          <Heading size="3" weight="medium">设置</Heading>
+          <Dialog.Title><Heading size="3" weight="medium" style={{ margin: 0 }}>设置</Heading></Dialog.Title>
         </Flex>
         <ScrollArea style={{ flex: 1 }}>
           <Flex direction="column" gap="1" px="2" py="2">
@@ -90,8 +93,8 @@ export default function SettingsView({ onBack, appearance, onAppearance, version
         <Box px="3" py="2"><Text size="1" color="gray">artex-harness {version ? "v" + version : ""}</Text></Box>
       </aside>
 
-      {/* 主区：分区表单 */}
-      <div className="main settings-main">
+      {/* 弹窗内的右栏：分区表单 */}
+      <div className="settings-main">
         <Flex align="center" gap="2" px="5" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
           <Text size="3" weight="medium">{SECTIONS.find((s) => s.id === section)?.label}</Text>
         </Flex>
@@ -224,7 +227,9 @@ export default function SettingsView({ onBack, appearance, onAppearance, version
           </Box>
         </ScrollArea>
       </div>
-    </div>
+      </div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
