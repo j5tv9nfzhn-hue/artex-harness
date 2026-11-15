@@ -7,6 +7,7 @@
 循环 · 状态 · 调度 · 留痕 · 干预 · 评测
 
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+[![ci](https://github.com/j5tv9nfzhn-hue/artex-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/j5tv9nfzhn-hue/artex-harness/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![UI](https://img.shields.io/badge/UI-React%2019%20·%20Vite%207-61DAFB?logo=react&logoColor=white)
 ![DB](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)
