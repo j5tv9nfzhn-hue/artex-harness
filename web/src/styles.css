@@ -30,3 +30,12 @@ html, body, #root { height: 100%; margin: 0; }
 .cmdk-box [cmdk-item] { display: flex; align-items: center; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
 .cmdk-box [cmdk-item][data-selected="true"] { background: var(--accent-a4); }
 .cmdk-box [cmdk-empty] { padding: 14px; }
+
+/* 会话列表：紧凑单行，视觉仍来自 Radix 的排版与颜色令牌 */
+.group-head { display:flex; align-items:center; gap:8px; padding:6px 12px 2px; }
+.row { display:flex; align-items:center; gap:8px; padding:0 10px; margin:0 6px; border-radius:6px; cursor:pointer; }
+.row:hover { background: var(--gray-a3); }
+.row.active { background: var(--accent-a4); }
+.row .dot { width:6px; height:6px; border-radius:99px; flex:0 0 auto; }
+.row .row-title { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row .row-tail { flex:0 0 auto; display:flex; align-items:center; }

@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Command } from "cmdk";
+import Sidebar from "./Sidebar.jsx";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
@@ -113,40 +114,7 @@ export default function App() {
   return (
     <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large">
       <div className="app">
-        <aside className="rail">
-          <Flex align="center" gap="2" px="3" py="3">
-            <Bot size={18} />
-            <Heading size="3" weight="medium">artex · harness</Heading>
-            <Box style={{ marginLeft: "auto" }}>
-              <Tooltip content="命令面板 ⌘K">
-                <button className="ghost-btn" onClick={() => setPalette(true)} aria-label="命令面板">
-                  <CommandIcon size={15} />
-                </button>
-              </Tooltip>
-            </Box>
-          </Flex>
-          <Box px="3" pb="2"><Text size="1" color="gray">{tasks.length} 个任务</Text></Box>
-          <ScrollArea style={{ flex: 1 }}>
-            <Flex direction="column" gap="1" px="2" pb="3">
-              {tasks.map((t) => {
-                const active = String(t.id) === String(taskId);
-                return (
-                  <Card key={t.id} size="1" variant={active ? "surface" : "ghost"}
-                        onClick={() => setTaskId(String(t.id))} style={{ cursor: "pointer" }}>
-                    <Flex direction="column" gap="1">
-                      <Text size="2" style={{ lineHeight: 1.4 }}>{clip(t.goal || t.description || "task " + t.id, 88)}</Text>
-                      <Flex gap="2" align="center">
-                        <StatusBadge status={t.status} />
-                        <Text size="1" color="gray">#{t.id}</Text>
-                        {t.harness_mode ? <Badge size="1" variant="outline" color="gray">H</Badge> : null}
-                      </Flex>
-                    </Flex>
-                  </Card>
-                );
-              })}
-            </Flex>
-          </ScrollArea>
-        </aside>
+        <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId} onPalette={() => setPalette(true)} />
 
         <div className="main">
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
