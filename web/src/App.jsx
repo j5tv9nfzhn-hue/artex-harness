@@ -46,6 +46,8 @@ export default function App() {
   const [err, setErr] = useState("");
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
+  const [version, setVersion] = useState("");
+  const [profiles, setProfiles] = useState([]);
   const abort = useRef(null);
   const scroller = useRef(null);
   const stick = useRef(true);
@@ -99,6 +101,11 @@ export default function App() {
     })();
     return () => ac.abort();
   }, [taskId]);
+
+  useEffect(() => {
+    api("/api/health").then((d) => setVersion(d.version || "")).catch(() => {});
+    api("/api/llm/profiles").then((d) => setProfiles(Array.isArray(d) ? d : (d.profiles || []))).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!taskId) return;
@@ -157,7 +164,9 @@ export default function App() {
     <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
       <div className="app">
-        <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId} onPalette={() => setPalette(true)} />
+        <Sidebar tasks={tasks} taskId={taskId} onPick={setTaskId}
+                 onPalette={() => setPalette(true)} profiles={profiles} version={version}
+                 toast={toast} onFilter={() => setPalette(true)} />
 
         <div className="main">
           <Flex align="center" gap="3" px="4" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>

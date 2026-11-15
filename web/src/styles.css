@@ -61,3 +61,10 @@ html, body, #root { height: 100%; margin: 0; }
   background: var(--color-panel-solid); border: 1px solid var(--gray-a6); border-radius: 10px; box-shadow: var(--shadow-4); padding: 4px; }
 .mention-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; }
 .mention-item:hover { background: var(--accent-a4); }
+
+/* 侧栏收窄 + 底部条：成熟产品的左栏不会占掉四分之一屏幕 */
+.app { grid-template-columns: 264px minmax(0,1fr); }
+@media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+.rail-foot { background: var(--color-panel-solid); }
+.notif-dot { position: absolute; top: -6px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 99px; background: var(--red-9); color: #fff; font-size: 9px; line-height: 14px; text-align: center; }

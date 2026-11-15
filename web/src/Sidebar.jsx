@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from "react";
-import { Box, DropdownMenu, Flex, Heading, IconButton, ScrollArea, Text, Tooltip } from "@radix-ui/themes";
+import {
+  Avatar, Badge, Box, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, Tooltip,
+} from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Command as CommandIcon, Copy, MoreHorizontal, Search } from "lucide-react";
+import { Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, Search, Settings } from "lucide-react";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
  * 组内行高固定 30px，113 条也只渲染可见的那十几行（@tanstack/react-virtual）。
@@ -24,9 +26,12 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, taskId, onPick, onPalette }) {
+export default function Sidebar({ tasks, taskId, onPick, onPalette, onFilter, profiles = [], version, toast }) {
   const [hover, setHover] = useState(null);
+  const [about, setAbout] = useState(false);
   const scrollRef = useRef(null);
+  const running = tasks.filter((t) => t.status === "running").length;
+  const notifCount = tasks.filter((t) => t.status === "running" || t.status === "failed").length;
 
   // 扁平化成 [分组头, 行, 行, 分组头, ...]，虚拟化需要一维列表
   const flat = useMemo(() => {
@@ -136,6 +141,78 @@ export default function Sidebar({ tasks, taskId, onPick, onPalette }) {
           })}
         </div>
       </div>
+
+      <Separator size="4" />
+      <Flex align="center" gap="2" px="3" py="2" className="rail-foot">
+        <Avatar size="1" fallback="A" radius="full" color="tomato" />
+        <Box style={{ minWidth: 0 }}>
+          <Text size="1" weight="medium" style={{ display: "block", lineHeight: 1.2 }}>ARTEX</Text>
+          <Text size="1" color="gray" truncate style={{ display: "block", fontSize: 10 }}>
+            {version ? "v" + version : "版本未知"}
+          </Text>
+        </Box>
+
+        <Box style={{ marginLeft: "auto" }}>
+          <Flex gap="1" align="center">
+            <Tooltip content={notifCount ? `${notifCount} 个会话需要注意（运行中或失败）` : "没有需要处理的会话"}>
+              <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => onFilter?.("attention")}>
+                <Box style={{ position: "relative", display: "inline-flex" }}>
+                  <Bell size={14} />
+                  {notifCount ? <span className="notif-dot">{notifCount > 9 ? "9+" : notifCount}</span> : null}
+                </Box>
+              </IconButton>
+            </Tooltip>
+
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <IconButton size="1" variant="ghost" color="gray" aria-label="设置"><Settings size={14} /></IconButton>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content size="1" align="end">
+                <DropdownMenu.Label>模型</DropdownMenu.Label>
+                {profiles.slice(0, 6).map((p) => (
+                  <DropdownMenu.Item key={p.id} onSelect={() => toast?.("模型切换在右侧面板的输入框下方")}>
+                    {p.name || p.model}{p.is_default ? " · 当前" : ""}
+                  </DropdownMenu.Item>
+                ))}
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item asChild>
+                  <a href="/console/" target="_blank" rel="noreferrer">打开完整控制台（旧版：MCP / 技能 / 平台设置）</a>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item asChild>
+                  <a href="/api/health" target="_blank" rel="noreferrer">服务健康</a>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+
+            <Tooltip content="关于">
+              <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}>
+                <Info size={14} />
+              </IconButton>
+            </Tooltip>
+          </Flex>
+        </Box>
+      </Flex>
+
+      <Dialog.Root open={about} onOpenChange={setAbout}>
+        <Dialog.Content maxWidth="420px">
+          <Dialog.Title size="4">artex-harness</Dialog.Title>
+          <Dialog.Description size="1" color="gray">任务式渗透测试会话控制台</Dialog.Description>
+          <Flex direction="column" gap="2" mt="3">
+            <Row k="版本" v={version || "未知"} />
+            <Row k="会话" v={`${tasks.length} 个`} />
+            <Row k="运行中" v={`${running} 个`} />
+            <Row k="事件协议" v="AG-UI（SSE）" />
+            <Row k="界面依赖" v="Radix Themes · lucide · motion · cmdk · recharts · sonner" />
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
     </aside>
   );
 }
+
+const Row = ({ k, v }) => (
+  <Flex justify="between" gap="3">
+    <Text size="1" color="gray">{k}</Text>
+    <Text size="1">{v}</Text>
+  </Flex>
+);
