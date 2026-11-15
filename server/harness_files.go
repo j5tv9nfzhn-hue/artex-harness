@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/harness/diff"
 )
 
@@ -30,14 +31,31 @@ const (
 	maxDiffFileBytes   = 1 << 20 // 1 MiB per file
 )
 
-// taskWorkspace is <data>/tasks/<taskID> — the same tree the agent works in.
+// taskWorkspace is the tree the agent works in: the task's project_dir when it was
+// given one, else <data>/tasks/<taskID> (docs/09 §4).
 func (s *Server) taskWorkspace(taskID int64) string {
+	if t, ok := s.m.Task(strconv.FormatInt(taskID, 10)); ok {
+		if dir := strings.TrimSpace(t.ProjectDir); dir != "" {
+			return dir
+		}
+	}
 	return filepath.Join(s.m.dir, "tasks", strconv.FormatInt(taskID, 10))
 }
 
+// baselineDir is where the diff reference lives.
+//
+// For a task's own workspace the baseline sits inside it (and is skipped by every
+// walk). For a PROJECT directory we must not write our bookkeeping into the user's
+// tree, so the reference lives under <data>/baselines/<taskID> instead.
 func (s *Server) baselineDir(taskID int64) string {
+	if t, ok := s.m.Task(strconv.FormatInt(taskID, 10)); ok && strings.TrimSpace(t.ProjectDir) != "" {
+		return filepath.Join(s.m.dir, "baselines", strconv.FormatInt(taskID, 10))
+	}
 	return filepath.Join(s.taskWorkspace(taskID), harnessBaselineDir)
 }
+
+// isSidecar reports whether a path is harness bookkeeping rather than user content.
+func isSidecar(name string) bool { return name == harnessBaselineDir }
 
 // ensureBaseline copies the task workspace once so later diffs have a reference.
 // Best effort: if it fails, diffs report "no baseline" instead of failing the task.
@@ -308,13 +326,19 @@ func (s *Server) harnessBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	// The last turn's input tokens is the best available "current context size".
 	lastInput := t.Store.LastUsageInputTokens()
+	series, compactions := t.Store.InputTokenSeries()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task":       t.ID,
-		"window":     window,
-		"last_input": lastInput,
-		"totals":     stats,
-		"pct":        pct(lastInput, window),
-		"note":       "pct 基于最近一轮的输入 token 估算上下文占用；超过 80% 时压缩阈值即将触发。",
+		"task":               t.ID,
+		"window":             window,
+		"last_input":         lastInput,
+		"totals":             stats,
+		"pct":                pct(lastInput, window),
+		"run_budget_seconds": int(agent.RunBudget().Seconds()),
+		// series = 每轮 usage 的输入 token；compactions = 输入 token 明显回落的次数。
+		// SDK 不提供压缩事件，所以这是**推断**（回落 ≥20% 计一次），API 里也这样标注。
+		"series":      series,
+		"compactions": compactions,
+		"note":        "pct 基于最近一轮输入 token 估算上下文占用；compactions 由输入 token 回落推断（≥20% 计一次）。",
 	})
 }
 

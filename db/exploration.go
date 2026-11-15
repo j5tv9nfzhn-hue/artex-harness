@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -175,6 +176,9 @@ type ExplorationStore struct {
 	// tx, when non-nil, is a READ ONLY snapshot this store's reads are pinned to
 	// (see WithReadSnapshot in readsnapshot.go). Nil = read straight from the pool.
 	tx *sql.Tx
+	// snapMu serializes snapshot installation (see WithReadSnapshot): the field above is
+	// shared state, so concurrent snapshots on one store must not interleave.
+	snapMu sync.Mutex
 }
 
 // CreateExploration creates a new exploration root and returns its id.
@@ -2037,4 +2041,37 @@ SELECT COALESCE(input_tokens, 0) FROM activity
 WHERE exploration_id = $1 AND input_tokens IS NOT NULL
 ORDER BY id DESC LIMIT 1`, s.expID).Scan(&n)
 	return n
+}
+
+// InputTokenSeries returns the input-token count of every usage bearing activity,
+// oldest first, plus the number of sharp drops (>=20%).
+//
+// "Sharp drop" stands in for "compaction happened": the SDK emits no compaction
+// event, but compaction IS a large reduction of the request context, so the next
+// usage row's input_tokens falls. Derived, not reported — the API says so.
+func (s *ExplorationStore) InputTokenSeries() ([]int, int) {
+	rows, err := s.q().Query(`
+SELECT COALESCE(input_tokens,0) FROM activity
+WHERE exploration_id=$1 AND input_tokens IS NOT NULL AND input_tokens > 0
+ORDER BY id ASC`, s.expID)
+	if err != nil {
+		return nil, 0
+	}
+	defer rows.Close()
+	out := make([]int, 0, 32)
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			return out, 0
+		}
+		out = append(out, n)
+	}
+	compactions := 0
+	for i := 1; i < len(out); i++ {
+		prev, cur := out[i-1], out[i]
+		if prev > 0 && float64(cur) < float64(prev)*0.8 {
+			compactions++
+		}
+	}
+	return out, compactions
 }

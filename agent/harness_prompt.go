@@ -45,3 +45,17 @@ const harnessRoundIntro = `任务目标：%s
 
 本轮输入：
 %s`
+
+// harnessTimeoutWrapup is injected as a user turn when the run hits its wall-clock
+// budget, so the agent lands what it has instead of being cut off mid-action.
+//
+// Why a dedicated prompt rather than reusing the per-run wrap-up: the two cases mean
+// different things to the model. "步数用尽" = you have been thinking too long;
+// "时间到" = the wall clock is out of your control, dump findings now.
+const harnessTimeoutWrapup = `【时间到】本次运行已达到墙钟上限。立即停止一切新的探测与命令，
+把手里的结论落地：用 record_fact 写下已确认的事实、用 report_finding 登记已确认的漏洞
+（没有就不登记），然后用几句话总结：做到了什么、证据在哪、哪些方向没做完。不要再启动新动作。`
+
+// harnessMaxTurnsWrapup is the same idea for the step budget.
+const harnessMaxTurnsWrapup = `【步数上限】本次运行的回合数已用尽。立即停止新动作，
+把已确认的结论用 record_fact / report_finding 落地，并用几句话总结当前进展与未完成的部分。`

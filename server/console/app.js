@@ -243,6 +243,13 @@ function renderItem(it) {
   } else {
     body = `<span class="txt">${esc(it.summary || it.detail || "")}</span>`;
   }
+  // 截图标记 → <img>（内容寻址，见 docs/09 §3）
+  const thumb = /\[thumb\]\s*([0-9a-f]{64})/.exec(body);
+  if (thumb) {
+    body = body.replace(thumb[0], "");
+    body += ` <a href="/api/harness/shot/${thumb[1]}" target="_blank" rel="noopener">
+      <img class="thumb" src="/api/harness/shot/${thumb[1]}" alt="screenshot" loading="lazy" /></a>`;
+  }
   if (it.node_id) body += ` <span class="intent-ref" data-intent="${esc(it.node_id)}">#${esc(it.node_id)}</span>`;
   row.innerHTML = `<div class="item-badge ${esc(kind)}">${esc(String(kind).replace("_", " "))}</div>
     <div class="item-body${it.is_error ? " err" : ""}">${body}</div>`;
@@ -443,13 +450,26 @@ async function renderBrowserPanel() {
   try {
     const b = await api(`/api/harness/browser?task=${encodeURIComponent(S.task.id)}`);
     S.browser = b;
+    let sess = null;
+    try { sess = (await api(`/api/harness/browser/sessions?task=${encodeURIComponent(S.task.id)}`)).session; } catch {}
+    const sessHTML = sess ? `
+      <div class="dcard">
+        <div class="dcard-head"><span class="tag">会话 · 生命周期</span>
+          <span class="${sess.alive ? "eval-pass" : "dim"}">${sess.alive ? "存活" : "未启动"}</span></div>
+        <div class="dcard-res">${Object.entries(sess.servers || {}).map(([k, v]) => `${k}: ${v}`).join("\n")}</div>
+        <div class="dcard-res">标签 ${(sess.tabs || []).length} 个：${(sess.tabs || []).map(t => t.id + " " + (t.url || "")).join(" · ") || "—"}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="sm" id="btn-br-tab">新标签</button>
+          <button class="sm" id="btn-br-restart">重建会话</button>
+        </div>
+      </div>` : "";
     const recent = (b.recent || []).map((r) => `
       <div class="dcard">
         <div class="dcard-head"><span class="tag">${esc(r.tool.replace("mcp__browser__", ""))}</span>
           <span class="dim">${esc(r.kind)}</span></div>
         <div class="dcard-res">${esc(r.summary || "")}</div>
       </div>`).join("");
-    box.innerHTML = `
+    box.innerHTML = sessHTML + `
       <div class="dstat">
         <span>已配置 <b>${b.configured ? "是" : "否"}</b></span>
         <span>已启用 <b>${b.enabled ? "是" : "否"}</b></span>
@@ -465,7 +485,24 @@ async function renderBrowserPanel() {
         ${b.f12_hint ? `<div class="dcard-res">${esc(b.f12_hint)}</div>` : ""}
       </div>
       ${recent || `<p class="dim xs">本任务还没有浏览器动作。</p>`}
-      <p class="dim xs">说明：面板给状态与最近动作（完整输出在事件流里）；逐像素内嵌视图仍未做，见 docs/07 §P3。</p>`;
+      <p class="dim xs">说明：截图以缩略图形式挂在事件流每条浏览器动作旁（点击看大图）；存储按哈希去重、24h TTL、上限 2000 张。</p>`;
+    const tabBtn = $("#btn-br-tab");
+    if (tabBtn) tabBtn.addEventListener("click", async () => {
+      const url = prompt("新标签要打开的地址（可留空）", "http://127.0.0.1:8899/console/");
+      if (url === null) return;
+      try {
+        await api("/api/harness/browser/tabs", { method: "POST", body: JSON.stringify({ task: S.task.id, action: "open", url }) });
+        toast("已开新标签"); refreshDock();
+      } catch (e) { toast("开标签失败：" + e.message, true); }
+    });
+    const restartBtn = $("#btn-br-restart");
+    if (restartBtn) restartBtn.addEventListener("click", async () => {
+      try {
+        const r = await api("/api/harness/browser/restart", { method: "POST", body: JSON.stringify({ task: S.task.id }) });
+        toast(`会话已重建（${r.elapsed_ms}ms）` + (r.error ? "：" + r.error : ""));
+        refreshDock();
+      } catch (e) { toast("重建失败：" + e.message, true); }
+    });
   } catch (e) { box.innerHTML = `<p class="eval-fail">${esc(e.message)}</p>`; }
 }
 

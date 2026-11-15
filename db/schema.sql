@@ -1433,3 +1433,8 @@ CREATE INDEX IF NOT EXISTS idx_harness_turn_items_act ON harness_turn_items(acti
 -- 默认 false 是为了让既有任务在升级后**行为不变**；新任务由创建参数显式置 true。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS harness_mode BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_tasks_harness_mode ON tasks(harness_mode) WHERE deleted_at IS NULL;
+
+-- HARNESS 项目目录（docs/09 §4）：任务可指定一个已存在的工作目录，文件树/终端/DIFF
+-- 都以它为根。空 = 沿用 <data>/tasks/<taskID>（每任务独立目录）。
+-- 互斥（同一目录同时只允许一个 harness 任务）由服务端登记表保证，不在库里做约束。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_dir TEXT NOT NULL DEFAULT '';

@@ -335,3 +335,10 @@ table.plan-table, table.eval-table{ width: 100%; border-collapse: collapse; font
   margin: 0; padding: 9px 10px; background: #fff; border: 1px solid var(--line-soft); border-radius: 8px;
   font: 11.5px/1.55 var(--mono); color: var(--ink-2); white-space: pre-wrap; overflow: auto; max-height: 26vh; min-height: 60px;
 }
+
+/* 事件流里的截图缩略图（docs/09 §3） */
+img.thumb{
+  display: inline-block; max-width: 100%; max-height: 180px; margin-top: 6px;
+  border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  box-shadow: 0 1px 2px rgba(27,26,23,.06);
+}

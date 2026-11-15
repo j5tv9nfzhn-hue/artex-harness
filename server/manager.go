@@ -62,12 +62,14 @@ type Task struct {
 	// (harness/runtime: model decides what to do, may delegate to subagents);
 	// false = the legacy ARTEX planner/worker pipeline, kept only for existing
 	// tasks. HARNESS never creates planner/worker roles (see docs/07).
-	HarnessMode bool                   `json:"harness_mode"`
-	FirstRunAt  int64                  `json:"first_run_at,omitempty"`
-	DeadlineAt  int64                  `json:"deadline_at,omitempty"`
-	Store       *pgdb.ExplorationStore `json:"-"`
-	Guard       *guard.Guard           `json:"-"`
-	notify      chan struct{}
+	HarnessMode bool `json:"harness_mode"`
+	// ProjectDir is the task's working directory ("" = <data>/tasks/<id>).
+	ProjectDir string                 `json:"project_dir,omitempty"`
+	FirstRunAt int64                  `json:"first_run_at,omitempty"`
+	DeadlineAt int64                  `json:"deadline_at,omitempty"`
+	Store      *pgdb.ExplorationStore `json:"-"`
+	Guard      *guard.Guard           `json:"-"`
+	notify     chan struct{}
 	// harnessIn carries human messages for the HARNESS runtime (one conversation
 	// per task). Lazily created so tasks that never use it cost nothing.
 	harnessOnce sync.Once
@@ -853,7 +855,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
-		CoverageEnabled: pt.CoverageEnabled, HarnessMode: pt.HarnessMode,
+		CoverageEnabled: pt.CoverageEnabled, HarnessMode: pt.HarnessMode, ProjectDir: pt.ProjectDir,
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}

@@ -55,7 +55,8 @@ type TaskDTO struct {
 	LLMProfileID       *int64             `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
 	LLMProfileIDs      []int64            `json:"llm_profile_ids"`
 	ActiveLLMProfileID *int64             `json:"active_llm_profile_id,omitempty"`
-	HarnessMode        bool               `json:"harness_mode"` // true = HARNESS 会话 agent 驱动（无 planner/worker）
+	HarnessMode        bool               `json:"harness_mode"`
+	ProjectDir         string             `json:"project_dir,omitempty"` // true = HARNESS 会话 agent 驱动（无 planner/worker）
 	// LLMReady=false 表示当前没有可用模型：任务会被创建但在引擎就绪前不会推进。
 	// 之前这种情况完全静默（看起来像"卡住"），现在控制台可以直接提示。
 	LLMReady          bool     `json:"llm_ready"`
@@ -144,6 +145,7 @@ func taskDTOWithLLM(t *Task, status string, llmReady bool) TaskDTO {
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
 		HarnessMode:        t.HarnessMode,
+		ProjectDir:         t.ProjectDir,
 		LLMReady:           llmReady,
 	}
 }

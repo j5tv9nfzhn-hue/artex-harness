@@ -123,6 +123,18 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 			log.Printf("[harness] task %s 本轮无输出: %v", t.ID, err)
 		}
 		e.touch(t.ID)
+		// Record WHY the run ended when it was cut short, so console/replay shows
+		// "时间到 / 步数上限" instead of the stream just stopping.
+		if isAbnormalReason(reason) {
+			label := map[harness.TerminalReason]string{
+				harness.ReasonTimeout:  "墙钟预算用尽（已收尾）",
+				harness.ReasonMaxTurns: "回合预算用尽（已收尾）",
+			}[reason]
+			if label == "" {
+				label = "运行结束：" + string(reason)
+			}
+			e.emitActivity(t, db.Activity{Worker: "harness", Kind: "lifecycle", Summary: label})
+		}
 
 		// A turn is finished. If nothing was queued while it ran, the conversation
 		// is at rest: mark the task done so it stops looking "running" forever.

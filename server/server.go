@@ -21,6 +21,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/harness/browser"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
@@ -117,8 +118,12 @@ type Server struct {
 	// Cold task archives run through one persistent FIFO worker. The buffered wake
 	// channel coalesces enqueue bursts; the database remains the source of truth.
 	archiveWake chan struct{}
-	archiveWG   sync.WaitGroup
-	side        *sideQuestionState
+	// projectDirs enforces "one harness task per project directory" (docs/09 §4).
+	projectDirs *projectGuard
+	// browser owns per-task browser sessions (MCP + tab model + rebuild), docs/09 §2.
+	browser   *browser.Manager
+	archiveWG sync.WaitGroup
+	side      *sideQuestionState
 }
 
 // provEntry is a cached provider + its config for one LLM profile id.
@@ -150,7 +155,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		projectDirs: newProjectGuard()}
+	s.browser = s.newBrowserManager()
+	go s.startBrowserGC(ctx)
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
@@ -294,6 +302,8 @@ func (s *Server) restoreTaskRuntimes() {
 			s.engine.startDeadlineCoordinator(s.ctx, t)
 		}
 	}
+	// 重启后恢复「目录→任务」绑定（docs/09 §4）
+	s.rebuildProjectGuard()
 	// Restore every task that had already been admitted before shutdown. Starting
 	// only the active UI task left other non-queued tasks counted as concurrency
 	// occupants without live loops, which could permanently block the persistent
@@ -826,6 +836,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/browser", s.harnessBrowserStatus)
 	// 终端抽屉 + 接管执行一步（P4）
 	mux.HandleFunc("POST /api/tasks/{id}/exec", s.harnessExec)
+	mux.HandleFunc("PUT /api/tasks/{id}/project", s.harnessProject)
+	// 浏览器会话（P3）：会话/标签/重启/截图
+	mux.HandleFunc("GET /api/harness/browser/sessions", s.harnessBrowserSessions)
+	mux.HandleFunc("POST /api/harness/browser/restart", s.harnessBrowserRestart)
+	mux.HandleFunc("GET /api/harness/browser/tabs", s.harnessBrowserTabs)
+	mux.HandleFunc("POST /api/harness/browser/tabs", s.harnessBrowserTabs)
+	mux.HandleFunc("GET /api/harness/shot/{hash}", s.harnessShot)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
@@ -1530,6 +1547,8 @@ type createTaskReq struct {
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
 	// HarnessMode 显式覆盖运行模式；nil = 用设置项 harness_runtime（默认 true）。
 	HarnessMode *bool `json:"harness_mode,omitempty"`
+	// ProjectDir 绑定一个已存在的绝对目录作为工作目录；空 = 任务自有目录。
+	ProjectDir string `json:"project_dir,omitempty"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1583,6 +1602,22 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		on := s.harnessRuntimeOn()
 		harnessMode = &on
 	}
+	// 项目目录：仅 harness 模式有意义（历史管线按任务自有目录工作）。
+	projectDir := cleanDir(req.ProjectDir)
+	if projectDir != "" {
+		if *harnessMode == false {
+			writeErr(w, 400, "project_dir 仅适用于 HARNESS 运行模式")
+			return
+		}
+		if !filepath.IsAbs(projectDir) {
+			writeErr(w, 400, "project_dir 必须是绝对路径")
+			return
+		}
+		if fi, statErr := os.Stat(projectDir); statErr != nil || !fi.IsDir() {
+			writeErr(w, 400, "目录不存在或不是目录: "+projectDir)
+			return
+		}
+	}
 	interceptRules, err := buildTaskInterceptRules(req.InterceptRules)
 	if err != nil {
 		writeErr(w, 400, "任务级拦截规则无效："+err.Error())
@@ -1595,7 +1630,17 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		CoverageEnabled: req.CoverageEnabled,
 		InterceptRules:  interceptRules,
 		HarnessMode:     harnessMode,
+		ProjectDir:      projectDir,
 	})
+	if err == nil && projectDir != "" {
+		// Bind the directory to this task; on conflict the task is rolled back so a
+		// rejected create leaves no half-bound state.
+		if cerr := s.projectDirs.claim(projectDir, t.ID); cerr != nil {
+			_, _ = s.m.DeleteTask(t.ID, DeleteTaskOptions{})
+			writeErr(w, http.StatusConflict, cerr.Error())
+			return
+		}
+	}
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
 			writeErr(w, 400, "任务分类不存在或无效")

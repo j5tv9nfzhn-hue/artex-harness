@@ -66,6 +66,17 @@ func (s *ExplorationStore) WithReadSnapshot(ctx context.Context, fn func() error
 	if s == nil || s.db == nil {
 		return fn()
 	}
+	// Serialize snapshots on this store.
+	//
+	// The snapshot is carried by a mutable field (s.tx) because every read path already
+	// goes through q(); two concurrent callers on the SAME store would therefore swap
+	// the field under each other, and the loser would issue queries on a transaction the
+	// winner had already rolled back — which surfaced as a pgx panic
+	// ("index out of range [0] with length 0") once two consumers rendered the graph at
+	// the same time. One snapshot at a time per store is enough: it is a read of a few
+	// hundred rows.
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,

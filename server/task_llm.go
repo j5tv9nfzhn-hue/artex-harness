@@ -16,6 +16,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
 )
 
@@ -611,6 +612,10 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	hx.SetNoaEnabled(s.m.NoaCompactionEnabled)
 	hx.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	hx.SetWebSearch(s.webSearchFor("harness"))
+	// 浏览器会话由 Manager 持有（一任务一会话，Playwright 与 DevTools 共用），docs/09 §2
+	hx.SetBrowserTools(func(ctx context.Context, taskID int64) ([]actool.CoreTool, error) {
+		return s.browserToolsFor(ctx, taskID)
+	})
 
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,

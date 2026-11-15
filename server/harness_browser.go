@@ -176,6 +176,29 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 		out["f12_hint"] = "F12 面（chrome-devtools）已登记但尚未连通：需要一个开着远程调试的 Chrome（--remote-debugging-port=9222）"
 	}
 
+	// The Manager's live view wins over the (stale) DB tool cache: a server that is
+	// actually connected is ready even if nothing ever wrote mcp_tools_cache.
+	if s.browser != nil {
+		var taskID int64
+		if id := r.URL.Query().Get("task"); id != "" {
+			if t, ok := s.m.Task(id); ok {
+				taskID, _ = parseI64(t.ID)
+			}
+		}
+		if taskID > 0 {
+			sess := s.browser.Status(taskID)
+			if sess.Servers["browser"] == "live" {
+				ready = true
+				out["ready"] = true
+			}
+			if sess.Servers["chrome-devtools"] == "live" {
+				dev.Ready, dev.ToolsCached = true, dev.ToolsCached
+				dev.Hint = ""
+				out["devtools"] = dev
+			}
+		}
+	}
+
 	// Last browser activity, so the console can show "what the agent last saw".
 	if id := r.URL.Query().Get("task"); id != "" {
 		if t, ok := s.m.Task(id); ok {

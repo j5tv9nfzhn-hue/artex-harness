@@ -47,9 +47,12 @@ type HarnessAgent struct {
 	proxyCACert     string
 	webSearch       WebSearchOpts
 	findingRecorder FindingRecorder
-	nonStreamingFn  func() bool
-	noaEnabledFn    func() bool
-	maxTokensFn     func() int
+	// browserTools, when set, returns the session-managed browser tools for a task
+	// (docs/09 §2). They replace the per-run MCP clients for those servers.
+	browserTools   func(ctx context.Context, taskID int64) ([]actool.CoreTool, error)
+	nonStreamingFn func() bool
+	noaEnabledFn   func() bool
+	maxTokensFn    func() int
 }
 
 // NewHarnessAgent builds the runtime for one task. Same construction contract as
@@ -68,6 +71,12 @@ func (h *HarnessAgent) SetNoaEnabled(fn func() bool)              { h.noaEnabled
 func (h *HarnessAgent) SetMaxTokens(fn func() int)                { h.maxTokensFn = fn }
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
 func (h *HarnessAgent) SetFindingRecorder(f FindingRecorder)      { h.findingRecorder = f }
+
+// SetBrowserTools wires the session-managed browser tools (nil = use the per-run MCP
+// augmentation path, which is what happens before the Manager exists).
+func (h *HarnessAgent) SetBrowserTools(fn func(ctx context.Context, taskID int64) ([]actool.CoreTool, error)) {
+	h.browserTools = fn
+}
 
 func (h *HarnessAgent) nonStreaming() bool {
 	return h.nonStreamingFn != nil && h.nonStreamingFn()
@@ -147,8 +156,23 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 	base := h.domainTools(tsx)
 	base = append(base, defaultToolsExcept("MultiEdit")...) // keep Edit/LS/Glob/Grep/Bash/Read/Write
 	base = append(base, h.agentTool(base, emit))
+	// Browser tools come from the session Manager (one session per task, shared by
+	// Playwright and DevTools). When it is wired we add them here and drop the copies
+	// the per-run augmentation would add, so there is exactly one browser stack.
+	managed := false
+	if h.browserTools != nil {
+		if bt, err := h.browserTools(ctx, req.TaskID); err == nil && len(bt) > 0 {
+			base = append(base, bt...)
+			managed = true
+		} else if err != nil {
+			fmt.Printf("") // keep silent for the model; the status panel reports it
+		}
+	}
 	tools, def, cleanup := AugmentTools(ctx, "harness", base)
 	defer cleanup()
+	if managed {
+		tools = dropManagedBrowserTools(tools)
+	}
 
 	sysBody := harnessDefaultPrompt
 	sysBody += harnessSituationBlock(tsx)
@@ -166,9 +190,20 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 		WorkingDir:      runDir,
 		MaxTurns:        h.maxTurns,
 		ToolOutputDir:   cmdOutDir(runDir),
-		// No settlement round: a conversational agent stops when it stops, and the
-		// human can always send another message (unlike an unattended pipeline run,
-		// which needs a forced wrap-up before its budget runs out).
+		// Wall-clock budget for THIS run (docs/09 §1): a step budget alone lets a slow
+		// endpoint run for hours. On expiry the SDK enters the settlement phase with
+		// the timeout prompt below, so the agent lands conclusions instead of being
+		// killed mid-action.
+		MaxDuration: runBudget(),
+	}
+	if settle := wrapupSettlement("harness", nil); settle != nil {
+		// Distinct wording per reason: "time is up" vs "steps are up" mean different
+		// things to the model.
+		settle.PromptByReason = map[harness.TerminalReason]string{
+			harness.ReasonTimeout:  harnessTimeoutWrapup,
+			harness.ReasonMaxTurns: harnessMaxTurnsWrapup,
+		}
+		opts.Settlement = settle
 	}
 	runCfg.ApplyModelDefaults(&opts)
 	runCfg.WithTodos(&opts)
@@ -243,6 +278,38 @@ func harnessSituationBlock(tsx *ToolSet) string {
 // tool loop, so it must not inherit the parent run's turn budget (that is the bug this
 // constant exists next to — see subagentContext).
 const defaultSubagentTimeout = 10 * time.Minute
+
+// runBudgetEnv / defaultRunBudget bound ONE harness run (wall clock).
+//
+// Why: the runtime only had MaxTurns, which is a step budget. A single turn can take
+// minutes on a slow endpoint, so a task could run for hours without ever hitting the
+// turn cap — "long session" behaviour was simply unobserved (docs/09 §1).
+const (
+	runBudgetEnv     = "HARNESS_RUN_BUDGET"
+	defaultRunBudget = 20 * time.Minute
+)
+
+// runBudget resolves the wall-clock budget for one run.
+func runBudget() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(runBudgetEnv))
+	if raw == "" {
+		return defaultRunBudget
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return defaultRunBudget
+}
+
+// RunBudget exposes the resolved wall-clock budget so the console can show it
+// (HARNESS_RUN_BUDGET or the 20-minute default).
+func RunBudget() time.Duration { return runBudget() }
+
+// SubagentBudget exposes the resolved per-delegation budget for the same reason.
+func SubagentBudget() time.Duration { return subagentTimeout() }
 
 // subagentTimeoutEnv lets an operator raise/lower the cap without a rebuild.
 const subagentTimeoutEnv = "HARNESS_SUBAGENT_TIMEOUT"
@@ -387,4 +454,20 @@ func peekAgentInput(in json.RawMessage) (agentType, prompt string) {
 // runtime so the console's file tree and the agent see the same tree.
 func (h *HarnessAgent) WorkDirFor(taskID int64) string {
 	return filepath.Join(h.workDir, "tasks", fmt.Sprint(taskID))
+}
+
+// dropManagedBrowserTools removes the per-run MCP copies of the browser servers. The
+// names come from norma's MCP tool naming (mcp__<server>__<tool>).
+func dropManagedBrowserTools(tools []actool.CoreTool) []actool.CoreTool {
+	drop := func(name string) bool {
+		return strings.HasPrefix(name, "mcp__browser__") || strings.HasPrefix(name, "mcp__chrome-devtools__")
+	}
+	out := make([]actool.CoreTool, 0, len(tools))
+	for _, t := range tools {
+		if drop(t.Name()) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
