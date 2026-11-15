@@ -3,7 +3,7 @@ import {
   Badge, Box, Button, Card, Code, Dialog, Flex, IconButton, Select, Separator, Tabs,
   Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
-import { Check, Cpu, Palette, Plug, Plus, Sparkles, Trash2, Zap } from "lucide-react";
+import { Check, Cpu, FileText, Palette, Pencil, Plug, Plus, Sparkles, Trash2 } from "lucide-react";
 
 /* 设置页：供应商 → 模型 两级。
  *
@@ -37,6 +37,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
   const [mcps, setMcps] = useState([]);
   const [skills, setSkills] = useState([]);
   const [adding, setAdding] = useState(null); // {provider?} | "new"
+  const [editing, setEditing] = useState(null); // 正在编辑的模型 profile
+  const [editProvider, setEditProvider] = useState(null); // 正在编辑的供应商分组
+  const [logs, setLogs] = useState([]);
   const [err, setErr] = useState("");
 
   async function reload() {
@@ -86,6 +89,7 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
             <Tabs.Trigger value="models"><Cpu size={13} /> 供应商与模型</Tabs.Trigger>
             <Tabs.Trigger value="mcp"><Plug size={13} /> MCP</Tabs.Trigger>
             <Tabs.Trigger value="skills"><Sparkles size={13} /> 技能</Tabs.Trigger>
+            <Tabs.Trigger value="logs"><FileText size={13} /> 会话日志</Tabs.Trigger>
             <Tabs.Trigger value="look"><Palette size={13} /> 外观</Tabs.Trigger>
           </Tabs.List>
 
@@ -101,9 +105,14 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                         {pv.api_key_hint ? <Badge size="1" variant="soft" color="green">密钥 {pv.api_key_hint}</Badge> : <Badge size="1" variant="soft" color="red">缺少密钥</Badge>}
                         {pv.proxy ? <Badge size="1" variant="soft" color="gray">代理 {pv.proxy}</Badge> : null}
                         <Box style={{ marginLeft: "auto" }}>
-                          <Button size="1" variant="soft" onClick={() => setAdding({ provider: pv })}>
-                            <Plus size={12} /> 模型
-                          </Button>
+                          <Flex gap="1">
+                            <Button size="1" variant="soft" color="gray" onClick={() => setEditProvider(pv)}>
+                              <Pencil size={12} /> 端点
+                            </Button>
+                            <Button size="1" variant="soft" onClick={() => setAdding({ provider: pv })}>
+                              <Plus size={12} /> 模型
+                            </Button>
+                          </Flex>
                         </Box>
                       </Flex>
                       <Separator size="4" />
@@ -131,6 +140,9 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
                               <Table.Cell><Text size="1" color="gray">{m.rate_per_second ? m.rate_per_second + "/s" : m.rate_per_minute ? m.rate_per_minute + "/min" : "不限"}</Text></Table.Cell>
                               <Table.Cell>
                                 <Flex gap="1" justify="end">
+                                  <Tooltip content="编辑该模型">
+                                    <IconButton size="1" variant="ghost" aria-label="编辑" onClick={() => setEditing(m)}><Pencil size={12} /></IconButton>
+                                  </Tooltip>
                                   {m.is_default ? null : (
                                     <Tooltip content="设为默认模型">
                                       <IconButton size="1" variant="ghost" aria-label="设为默认" onClick={() => activate(m.id)}><Check size={12} /></IconButton>
@@ -177,6 +189,36 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
               </Flex>
             </Tabs.Content>
 
+            <Tabs.Content value="logs">
+              <Flex direction="column" gap="2">
+                <Flex justify="between" align="center">
+                  <Text size="1" color="gray">最近的模型调用记录（GET /api/llm/records）</Text>
+                  <Button size="1" variant="soft" onClick={() => jfetch("/api/llm/records").then((d) => setLogs(Array.isArray(d) ? d : d.records || d.items || [])).catch((e) => toast?.(e.message, true))}>刷新</Button>
+                </Flex>
+                <Table.Root size="1" variant="surface">
+                  <Table.Header><Table.Row>
+                    <Table.ColumnHeaderCell>时间</Table.ColumnHeaderCell>
+                    <Table.ColumnHeaderCell>模型</Table.ColumnHeaderCell>
+                    <Table.ColumnHeaderCell>输入</Table.ColumnHeaderCell>
+                    <Table.ColumnHeaderCell>输出</Table.ColumnHeaderCell>
+                    <Table.ColumnHeaderCell>状态</Table.ColumnHeaderCell>
+                  </Table.Row></Table.Header>
+                  <Table.Body>
+                    {logs.slice(0, 50).map((r, i) => (
+                      <Table.Row key={r.id || i} align="center">
+                        <Table.Cell><Text size="1" color="gray">{(r.created_at || "").replace("T", " ").slice(0, 19)}</Text></Table.Cell>
+                        <Table.Cell><Code size="1">{r.model || "—"}</Code></Table.Cell>
+                        <Table.Cell><Text size="1">{r.input_tokens ?? "—"}</Text></Table.Cell>
+                        <Table.Cell><Text size="1">{r.output_tokens ?? "—"}</Text></Table.Cell>
+                        <Table.Cell><Badge size="1" variant="soft" color={r.status === "ok" ? "green" : "red"}>{r.status || "—"}</Badge></Table.Cell>
+                      </Table.Row>
+                    ))}
+                    {!logs.length ? <Table.Row><Table.Cell colSpan={5}><Text size="1" color="gray">点「刷新」加载调用记录</Text></Table.Cell></Table.Row> : null}
+                  </Table.Body>
+                </Table.Root>
+              </Flex>
+            </Tabs.Content>
+
             <Tabs.Content value="look">
               <Flex align="center" gap="2">
                 <Text size="2">主题</Text>
@@ -192,6 +234,18 @@ export default function Settings({ open, onOpenChange, appearance, onAppearance,
             </Tabs.Content>
           </Box>
         </Tabs.Root>
+
+        <EditModelDialog model={editing} onClose={() => setEditing(null)}
+          onSave={async (body) => { await save(body); setEditing(null); }} />
+        <EditProviderDialog pv={editProvider} onClose={() => setEditProvider(null)}
+          onSave={async (patch) => {
+            try {
+              for (const m of editProvider.models) {
+                await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, api_key: patch.api_key || "", base_url: patch.base_url, proxy: patch.proxy }) });
+              }
+              toast?.("供应商已更新"); setEditProvider(null); reload();
+            } catch (e) { toast?.(e.message, true); }
+          }} />
 
         <ProviderForm
           open={!!adding}
@@ -291,3 +345,97 @@ const Field = ({ label, children }) => (
     {children}
   </Box>
 );
+
+function EditModelDialog({ model, onClose, onSave }) {
+  const [modelName, setModelName] = useState("");
+  const [ctx, setCtx] = useState("");
+  const [thinking, setThinking] = useState("");
+  const [effort, setEffort] = useState("");
+  const [rps, setRps] = useState("");
+  const [rpm, setRpm] = useState("");
+
+  useEffect(() => {
+    if (!model) return;
+    setModelName(model.model || "");
+    setCtx(model.context_window_k ? String(model.context_window_k) : "");
+    setThinking(model.thinking_type || "");
+    setEffort(model.reasoning_effort || "");
+    setRps(model.rate_per_second ? String(model.rate_per_second) : "");
+    setRpm(model.rate_per_minute ? String(model.rate_per_minute) : "");
+  }, [model]);
+
+  return (
+    <Dialog.Root open={!!model} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">编辑模型</Dialog.Title>
+        <Dialog.Description size="1" color="gray">
+          密钥留空即保留原值。
+        </Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="模型名"><TextField.Root value={modelName} onChange={(e) => setModelName(e.target.value)} /></Field>
+          <Flex gap="3">
+            <Field label="上下文 K"><TextField.Root value={ctx} onChange={(e) => setCtx(e.target.value)} placeholder="128" /></Field>
+            <Field label="每秒请求"><TextField.Root value={rps} onChange={(e) => setRps(e.target.value)} placeholder="不限" /></Field>
+            <Field label="每分钟请求"><TextField.Root value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder="不限" /></Field>
+          </Flex>
+          <Flex gap="3">
+            <Field label="思考开关">
+              <Select.Root value={thinking || "none"} onValueChange={(v) => setThinking(v === "none" ? "" : v)}>
+                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Content>
+                  <Select.Item value="none">不发送</Select.Item>
+                  <Select.Item value="enabled">开启</Select.Item>
+                  <Select.Item value="disabled">关闭</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+            <Field label="思考强度">
+              <Select.Root value={effort || "none"} onValueChange={(v) => setEffort(v === "none" ? "" : v)}>
+                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Content>
+                  <Select.Item value="none">不发送</Select.Item>
+                  {["low", "medium", "high", "xhigh", "max"].map((v) => <Select.Item key={v} value={v}>{v}</Select.Item>)}
+                </Select.Content>
+              </Select.Root>
+            </Field>
+          </Flex>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={() => onSave({
+            ...model,
+            model: modelName, context_window_k: Number(ctx) || 0,
+            thinking_type: thinking, reasoning_effort: effort,
+            rate_per_second: Number(rps) || 0, rate_per_minute: Number(rpm) || 0,
+          })}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+function EditProviderDialog({ pv, onClose, onSave }) {
+  const [baseURL, setBaseURL] = useState("");
+  const [apiKey, setAPIKey] = useState("");
+  const [proxy, setProxy] = useState("");
+  useEffect(() => { if (pv) { setBaseURL(pv.base_url || ""); setProxy(pv.proxy || ""); setAPIKey(""); } }, [pv]);
+  return (
+    <Dialog.Root open={!!pv} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="480px">
+        <Dialog.Title size="4">编辑供应商端点</Dialog.Title>
+        <Dialog.Description size="1" color="gray">
+          改动会应用到该供应商下的 {pv?.models?.length || 0} 个模型。密钥留空即保留原值。
+        </Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="Base URL"><TextField.Root value={baseURL} onChange={(e) => setBaseURL(e.target.value)} /></Field>
+          <Field label="API Key"><TextField.Root type="password" value={apiKey} onChange={(e) => setAPIKey(e.target.value)} placeholder="留空保留" /></Field>
+          <Field label="出站代理"><TextField.Root value={proxy} onChange={(e) => setProxy(e.target.value)} /></Field>
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={() => onSave({ base_url: baseURL, api_key: apiKey, proxy })}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
