@@ -32,8 +32,13 @@ func (s *Server) consoleAppHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache")
+		// 入口 HTML 绝不能被缓存：它指向带哈希的资源名，一旦被缓存住，
+		// 升级后就永远加载旧的 JS（实测：改了设置页结构，服务端已是新版，
+		// 浏览器仍渲染旧 tab）。带哈希的静态资源反之要长缓存。
 		if p == "/" || !strings.Contains(p, ".") {
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
 			b, rerr := fs.ReadFile(root, "index.html")
 			if rerr != nil {
 				http.NotFound(w, r)
@@ -43,6 +48,7 @@ func (s *Server) consoleAppHandler() http.Handler {
 			_, _ = w.Write(b)
 			return
 		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = p
 		fileServer.ServeHTTP(w, r2)
