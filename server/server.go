@@ -833,6 +833,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/diff/{id}", s.harnessDiff)
 	mux.HandleFunc("GET /api/harness/budget/{id}", s.harnessBudget)
 	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)
+	// AG-UI 事件流（公开协议）：上游 agent UI 直接消费，docs/10 §4
+	mux.HandleFunc("GET /api/agui/agent", s.aguiAgent)
 	mux.HandleFunc("GET /api/harness/browser", s.harnessBrowserStatus)
 	// 终端抽屉 + 接管执行一步（P4）
 	mux.HandleFunc("POST /api/tasks/{id}/exec", s.harnessExec)
