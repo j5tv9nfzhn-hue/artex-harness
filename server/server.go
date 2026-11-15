@@ -229,6 +229,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
 		s.seedHarnessBindings()    // HARNESS: harness agent 行 + 图谱工具绑定（幂等）
 		s.ensureBrowserEnabled()   // HARNESS: 让 browser(Playwright) MCP 真正可用（可关）
+		s.ensureDevtoolsMCP()      // HARNESS: F12 面（chrome-devtools：console/network/性能）
 		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
@@ -823,6 +824,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/budget/{id}", s.harnessBudget)
 	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)
 	mux.HandleFunc("GET /api/harness/browser", s.harnessBrowserStatus)
+	// 终端抽屉 + 接管执行一步（P4）
+	mux.HandleFunc("POST /api/tasks/{id}/exec", s.harnessExec)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)

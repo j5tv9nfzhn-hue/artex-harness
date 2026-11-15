@@ -458,8 +458,14 @@ async function renderBrowserPanel() {
       <div class="dstat"><span>npx <b>${b.npx && b.npx.found ? "可用" : "缺失"}</b></span>
         <span>${esc(b.transport || "")}</span></div>
       <p class="${b.ready ? "dim xs" : "eval-fail xs"}">${esc(b.hint || "")}</p>
+      <div class="dcard">
+        <div class="dcard-head"><span class="tag">F12 · chrome-devtools</span>
+          <span class="${b.devtools && b.devtools.ready ? "eval-pass" : "dim"}">${b.devtools && b.devtools.ready ? "就绪" : "未连接"}</span></div>
+        <div class="dcard-res">${esc((b.devtools && (b.devtools.hint || (b.devtools.enabled ? "已启用 · 工具缓存 " + b.devtools.tools_cached : "未启用"))) || "未配置")}</div>
+        ${b.f12_hint ? `<div class="dcard-res">${esc(b.f12_hint)}</div>` : ""}
+      </div>
       ${recent || `<p class="dim xs">本任务还没有浏览器动作。</p>`}
-      <p class="dim xs">说明：当前只提供状态与最近动作（工具输出已进事件流）。内嵌页面视图仍是缺口，见 docs/07 §P3。</p>`;
+      <p class="dim xs">说明：面板给状态与最近动作（完整输出在事件流里）；逐像素内嵌视图仍未做，见 docs/07 §P3。</p>`;
   } catch (e) { box.innerHTML = `<p class="eval-fail">${esc(e.message)}</p>`; }
 }
 
@@ -730,6 +736,42 @@ function switchTab(name) {
   if (name === "replay") loadReplay();
 }
 $$(".tab").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+
+
+/* ── 终端抽屉（P4）：在任务工作区执行命令；可选把结果交给 agent ────────── */
+function toggleDrawer(force) {
+  const d = $("#drawer");
+  const show = force === undefined ? d.hidden : force;
+  d.hidden = !show;
+  if (show) $("#drawer-cmd").focus();
+}
+$("#btn-term").addEventListener("click", () => toggleDrawer());
+$("#btn-drawer-close").addEventListener("click", () => toggleDrawer(false));
+document.addEventListener("keydown", (ev) => {
+  if (ev.ctrlKey && ev.key === "`") { ev.preventDefault(); toggleDrawer(); }
+});
+
+async function runDrawer() {
+  if (!S.task) return toast("先选一个任务", true);
+  const cmd = $("#drawer-cmd").value.trim();
+  if (!cmd) return toast("命令不能为空", true);
+  const out = $("#drawer-out");
+  out.textContent = "$ " + cmd + "\n…运行中";
+  try {
+    const r = await api(`/api/tasks/${encodeURIComponent(S.task.id)}/exec`, {
+      method: "POST",
+      body: JSON.stringify({ command: cmd, inject: $("#drawer-inject").checked }),
+    });
+    $("#drawer-cwd").textContent = r.cwd || "";
+    out.textContent = `$ ${cmd}\n${r.output || "(无输出)"}\n\n[退出码 ${r.exit_code} · ${r.duration_ms}ms${r.injected ? " · 已交给 agent" : ""}]`;
+    if (r.injected) toast("已交给 agent：它会在同一会话里继续");
+  } catch (e) {
+    out.textContent = "$ " + cmd + "\n[eval-fail] " + e.message;
+    toast("执行失败：" + e.message, true);
+  }
+}
+$("#btn-drawer-run").addEventListener("click", runDrawer);
+$("#drawer-cmd").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); runDrawer(); } });
 
 /* ── init ─────────────────────────────────────────────────────────────── */
 renderDockTabs();

@@ -11,6 +11,7 @@ package server
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -344,14 +345,7 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	type delegation struct {
-		ActivityID int64  `json:"activity_id"`
-		AgentType  string `json:"agent_type"`
-		Prompt     string `json:"prompt"`
-		State      string `json:"state"` // running | done | error
-		Result     string `json:"result,omitempty"`
-	}
-	out := make([]delegation, 0, 8)
+	out := make([]delegationRow, 0, 8)
 	pending := map[int64]int{} // activity id → index in out
 	for _, a := range acts {
 		if a.Tool != "Agent" {
@@ -359,7 +353,7 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 		if a.Kind == "tool_use" {
 			at, prompt := parseAgentSummary(a.Summary)
-			out = append(out, delegation{ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running"})
+			out = append(out, delegationRow{ActivityID: a.ID, AgentType: at, Prompt: prompt, State: "running"})
 			pending[a.ID] = len(out) - 1
 			continue
 		}
@@ -378,17 +372,80 @@ func (s *Server) harnessWorkers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":        t.ID,
 		"harness":     t.HarnessMode,
-		"delegations": out,
+		"delegations": dedupeDelegations(out),
 		"note":        "HARNESS 没有 worker 池：这里列出 agent 自己派出的子代理（Agent 工具）及其结果。",
 	})
 }
 
-// parseAgentSummary splits "派发子代理 recon：<prompt>" back into its parts.
+// parseAgentSummary extracts (agent_type, prompt) from either summary shape:
+//
+//	"派发子代理 recon：<prompt>"                      (the readable wrapper emit)
+//	`Agent {"agent_type":"recon","prompt":"<prompt>"}` (the raw tool_use row)
+//
+// Both exist for one call — the harness stream records the tool call, and the
+// wrapper adds a readable line — so the panel must understand both.
 func parseAgentSummary(s string) (string, string) {
-	const prefix = "派发子代理 "
-	s = strings.TrimPrefix(s, prefix)
-	if idx := strings.Index(s, "："); idx > 0 {
-		return s[:idx], s[idx+len("："):]
+	if strings.HasPrefix(s, "派发子代理 ") {
+		rest := strings.TrimPrefix(s, "派发子代理 ")
+		if idx := strings.Index(rest, "："); idx > 0 {
+			return rest[:idx], rest[idx+len("："):]
+		}
+		return rest, ""
 	}
-	return s, ""
+	if strings.HasPrefix(s, "Agent ") {
+		raw := strings.TrimPrefix(s, "Agent ")
+		var in struct {
+			AgentType string `json:"agent_type"`
+			Prompt    string `json:"prompt"`
+		}
+		if json.Unmarshal([]byte(raw), &in) == nil {
+			return in.AgentType, in.Prompt
+		}
+	}
+	return "", ""
+}
+
+// dedupeDelegations collapses the two rows recorded for one Agent call (raw
+// tool_use + readable wrapper) into a single entry, preferring the readable prompt
+// and the most advanced state.
+func dedupeDelegations(in []delegationRow) []delegationRow {
+	key := func(d delegationRow) string { return d.AgentType + "\x00" + firstRunes(d.Prompt, 80) }
+	out := make([]delegationRow, 0, len(in))
+	idx := map[string]int{}
+	for _, d := range in {
+		if d.AgentType == "" {
+			continue // not a delegation row (e.g. an unrelated tool named Agent)
+		}
+		k := key(d)
+		if i, ok := idx[k]; ok {
+			// merge: keep the friendlier prompt, prefer done/error over running
+			if len(d.Prompt) > len(out[i].Prompt) && !strings.Contains(out[i].Prompt, "已截断") {
+				out[i].Prompt = d.Prompt
+			}
+			if out[i].State == "running" && d.State != "running" {
+				out[i].State, out[i].Result = d.State, d.Result
+			}
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, d)
+	}
+	return out
+}
+
+func firstRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// delegationRow is one Agent (subagent) dispatch, as surfaced to the console.
+type delegationRow struct {
+	ActivityID int64  `json:"activity_id"`
+	AgentType  string `json:"agent_type"`
+	Prompt     string `json:"prompt"`
+	State      string `json:"state"` // running | done | error
+	Result     string `json:"result,omitempty"`
 }

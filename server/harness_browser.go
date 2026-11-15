@@ -31,6 +31,11 @@ const settingHarnessBrowser = "harness_browser"
 
 const browserMCPServer = "browser"
 
+// devtoolsMCPServer is the F12 surface: console messages, network requests,
+// performance traces. Playwright MCP drives pages; DevTools MCP *inspects* them.
+// They are separate servers on purpose (different lifetimes, different risks).
+const devtoolsMCPServer = "chrome-devtools"
+
 // ensureBrowserEnabled flips the seeded browser MCP on (default behaviour) so the
 // capability is real rather than theoretical. A human can still disable it in the
 // MCP page; this only acts when the setting says "on" AND the server is off.
@@ -57,6 +62,59 @@ func (s *Server) ensureBrowserEnabled() {
 		}
 		log.Printf("[harness/browser] 已启用 browser MCP（Playwright，stdio）；如需关闭请在「系统 → MCP」停用")
 	}
+}
+
+// ensureDevtoolsMCP seeds the F12-capable MCP server (Chrome DevTools) so console
+// messages / network requests / performance data are obtainable by the agent.
+//
+// It is seeded DISABLED-BY-DEFAULT-OFF? No: it is seeded enabled, but it still needs
+// a Chrome with remote debugging available; the status endpoint reports that
+// honestly instead of pretending the tools work.
+func (s *Server) ensureDevtoolsMCP() {
+	if s.m == nil || s.m.pg == nil {
+		return
+	}
+	if !s.m.pg.GetBool(settingHarnessBrowser, true) {
+		return
+	}
+	if _, err := s.m.pg.Exec(`
+INSERT INTO mcp_servers(name, transport, command, args, env, enabled)
+VALUES ($1,'stdio','npx','["-y","chrome-devtools-mcp@latest"]'::jsonb,'{}'::jsonb,true)
+ON CONFLICT (name) DO NOTHING`, devtoolsMCPServer); err != nil {
+		log.Printf("[harness/devtools] 预置 %s 失败: %v", devtoolsMCPServer, err)
+	}
+}
+
+// mcpRowStatus is the shared shape for one browser-side MCP server.
+type mcpRowStatus struct {
+	Name        string `json:"name"`
+	Configured  bool   `json:"configured"`
+	Enabled     bool   `json:"enabled"`
+	Transport   string `json:"transport,omitempty"`
+	Command     string `json:"command,omitempty"`
+	ToolsCached int    `json:"tools_cached"`
+	Ready       bool   `json:"ready"`
+	Hint        string `json:"hint,omitempty"`
+}
+
+func (s *Server) mcpStatus(name string) mcpRowStatus {
+	st := mcpRowStatus{Name: name}
+	servers, err := s.m.pg.ListMCP()
+	if err != nil {
+		st.Hint = err.Error()
+		return st
+	}
+	for _, srv := range servers {
+		if srv.Name != name {
+			continue
+		}
+		st.Configured, st.Enabled, st.Transport, st.Command = true, srv.Enabled, srv.Transport, srv.Command
+	}
+	var cached int
+	_ = s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache WHERE server=$1`, name).Scan(&cached)
+	st.ToolsCached = cached
+	st.Ready = st.Enabled && cached > 0
+	return st
 }
 
 // harnessBrowserStatus reports what the browser surface can actually do right now.
@@ -87,6 +145,9 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 	var cached int
 	_ = s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache WHERE server=$1`, browserMCPServer).Scan(&cached)
 
+	dev := s.mcpStatus(devtoolsMCPServer)
+	out["devtools"] = dev
+
 	npxPath, npxErr := exec.LookPath("npx")
 	out["configured"] = true
 	out["enabled"] = row.Enabled
@@ -107,9 +168,12 @@ func (s *Server) harnessBrowserStatus(w http.ResponseWriter, r *http.Request) {
 		out["hint"] = "可直接使用：agent 侧工具名为 mcp__browser__*"
 	}
 	if npxErr != nil {
-		out["hint"] = "找不到 npx：Playwright MCP 需要 Node（或在镜像里预装）"
+		out["hint"] = "找不到 npx：Playwright / DevTools MCP 都需要 Node（或在镜像里预装）"
 		ready = false
 		out["ready"] = ready
+	}
+	if dev.Configured && !dev.Ready {
+		out["f12_hint"] = "F12 面（chrome-devtools）已登记但尚未连通：需要一个开着远程调试的 Chrome（--remote-debugging-port=9222）"
 	}
 
 	// Last browser activity, so the console can show "what the agent last saw".

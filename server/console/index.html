@@ -62,6 +62,7 @@
         <span class="pill mono" id="pill-llm">llm</span>
       </div>
       <div class="topbar-actions">
+        <button id="btn-term" class="sm" title="终端抽屉（Ctrl+`）">终端</button>
         <button id="btn-replan" class="primary sm">立即重规划</button>
         <button id="btn-pause" class="sm">暂停</button>
         <button id="btn-resume" class="sm">恢复</button>
@@ -80,6 +81,24 @@
         <div class="empty" id="stream-empty">选择一个任务后，这里显示实时事件流（按轮次分组）。</div>
       </div>
     </section>
+
+    <!-- 终端抽屉：在任务工作区执行命令；可把结果交给 agent（接管一步） -->
+    <div id="drawer" class="drawer" hidden>
+      <div class="drawer-head">
+        <span class="drawer-title">终端 · 接管一步</span>
+        <span class="dim xs mono" id="drawer-cwd"></span>
+        <label class="drawer-opt"><input type="checkbox" id="drawer-inject" checked /> 结果交给 agent</label>
+        <button id="btn-drawer-close" class="icon sm">×</button>
+      </div>
+      <div class="drawer-body">
+        <div class="drawer-input">
+          <span class="mono dim">$</span>
+          <input id="drawer-cmd" class="mono" placeholder="ls -la; curl -sI http://127.0.0.1:8899/api/health" />
+          <button id="btn-drawer-run" class="primary sm">运行</button>
+        </div>
+        <pre id="drawer-out" class="drawer-out">（在任务工作区里执行命令；勾选「结果交给 agent」会把输出作为人工作为下一步输入）</pre>
+      </div>
+    </div>
 
     <section id="tab-plan" class="pane" hidden>
       <div class="plan-head">
