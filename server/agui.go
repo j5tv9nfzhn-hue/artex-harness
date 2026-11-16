@@ -120,6 +120,28 @@ func aguiFromActivity(a db.Activity, threadID, runID string, turnSeq int) []agui
 			Type: "TOOL_CALL_RESULT", ThreadD: threadID, RunID: runID,
 			MsgID: msgID, CallID: callID, Content: a.Summary, Status: "compacted", Seq: a.ID,
 		}}
+	case "intercept_request":
+		// The console renders an inline approval card from this event. Without the
+		// mapping the request existed only in the DB, so a long run would sit
+		// blocked on an approval nobody could see without opening the sidebar.
+		//
+		// Content must carry pending_id/tool/input. The activity LIST query omits
+		// detail (it can be huge), so metadata is the copy that is always present;
+		// fall back to detail, then to summary, for rows written before that field
+		// existed.
+		content := strings.TrimSpace(string(a.Metadata))
+		if content == "" {
+			content = body()
+		}
+		return []aguiEvent{{
+			Type: "INTERCEPT_REQUEST", ThreadD: threadID, RunID: runID,
+			MsgID: msgID, Content: content, Seq: a.ID,
+		}}
+	case "permission_decision":
+		return []aguiEvent{{
+			Type: "PERMISSION_DECISION", ThreadD: threadID, RunID: runID,
+			MsgID: msgID, Content: body(), Seq: a.ID,
+		}}
 	}
 	return nil
 }

@@ -634,6 +634,12 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		Kind:    "intercept_request",
 		Summary: fmt.Sprintf("工具 %s 请求审批 (#%d)", toolName, pendingID),
 		Detail:  string(detail),
+		// Metadata is the small, always-loaded copy of the addressing fields. The
+		// activity LIST query deliberately omits detail (it can be megabytes), so a
+		// card built from the list/AG-UI stream had no pending id and no tool name —
+		// it rendered "工具 #" and its buttons could not resolve the request. Detail
+		// keeps the full input for the lazy detail view.
+		Metadata: detail,
 	}
 
 	if convID != 0 {

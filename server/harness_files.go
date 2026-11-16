@@ -9,6 +9,7 @@ package server
 // (harness/diff). Nothing else is stored — no per-write history, no index.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/harness/delegation"
@@ -28,9 +30,10 @@ import (
 )
 
 const (
-	harnessBaselineDir = ".harness-baseline"
-	maxTreeEntries     = 2000
-	maxDiffFileBytes   = 1 << 20 // 1 MiB per file
+	harnessBaselineDir   = ".harness-baseline"
+	harnessCheckpointDir = ".harness-checkpoints"
+	maxTreeEntries       = 2000
+	maxDiffFileBytes     = 1 << 20 // 1 MiB per file
 )
 
 // taskWorkspace is the tree the agent works in: the task's project_dir when it was
@@ -57,7 +60,11 @@ func (s *Server) baselineDir(taskID int64) string {
 }
 
 // isSidecar reports whether a path is harness bookkeeping rather than user content.
-func isSidecar(name string) bool { return name == harnessBaselineDir }
+// Checkpoints are internal too: they live under the task workspace unless the task
+// has a project_dir, and must never appear in the file tree or the DIFF.
+func isSidecar(name string) bool {
+	return name == harnessBaselineDir || name == harnessCheckpointDir
+}
 
 // ensureBaseline copies the task workspace once so later diffs have a reference.
 // Best effort: if it fails, diffs report "no baseline" instead of failing the task.
@@ -89,7 +96,8 @@ func copyTree(src, dst, skipName string) error {
 		if rel == "." {
 			return os.MkdirAll(dst, 0o755)
 		}
-		if rel == skipName || strings.HasPrefix(rel, skipName+string(os.PathSeparator)) {
+		if rel == skipName || strings.HasPrefix(rel, skipName+string(os.PathSeparator)) ||
+			rel == harnessCheckpointDir || strings.HasPrefix(rel, harnessCheckpointDir+string(os.PathSeparator)) {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
@@ -146,7 +154,8 @@ func (s *Server) harnessFiles(w http.ResponseWriter, r *http.Request) {
 		if relErr != nil || rel == "." {
 			return nil
 		}
-		if rel == harnessBaselineDir || strings.HasPrefix(rel, harnessBaselineDir+string(os.PathSeparator)) {
+		if rel == harnessBaselineDir || strings.HasPrefix(rel, harnessBaselineDir+string(os.PathSeparator)) ||
+			rel == harnessCheckpointDir || strings.HasPrefix(rel, harnessCheckpointDir+string(os.PathSeparator)) {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
@@ -212,6 +221,10 @@ func hashTree(root, skipName string) map[string]string {
 			return nil
 		}
 		if skipName != "" && (rel == skipName || strings.HasPrefix(rel, skipName+string(os.PathSeparator))) {
+			return nil
+		}
+		// Checkpoints are harness bookkeeping, not user content — never diff them.
+		if rel == harnessCheckpointDir || strings.HasPrefix(rel, harnessCheckpointDir+string(os.PathSeparator)) {
 			return nil
 		}
 		if !d.Type().IsRegular() {
@@ -280,7 +293,8 @@ func (s *Server) harnessDiff(w http.ResponseWriter, r *http.Request) {
 		"baseline": baselineExists,
 		"files":    files,
 		"changed":  len(files),
-		"note":     "与任务启动时的基线对比（无需 git）。baseline=false 表示尚未建立基线：下一个任务轮次会自动建立。",
+		"note": "与任务启动时的基线对比（无需 git）。baseline=false 表示尚未建立基线：下一个任务轮次会自动建立。" +
+			" 如果基线是刚刚建立的，此前已有的文件不会显示为变更——之后的新改动才会。",
 	})
 }
 
@@ -305,6 +319,76 @@ func readDiff(taskID int64, rel, liveRoot, baseRoot string) diff.FileDiff {
 		}
 	}
 	return diff.Unified(rel, base, cur)
+}
+
+// ── file read (workbench) ─────────────────────────────────────────────────
+
+// harnessFileRead returns one task-workspace file's text so the console's file
+// tree can preview it. It is deliberately task-scoped (unlike /api/workspace/*,
+// which is rooted at the server data dir): a project-mode task must show the
+// user's project files, not the server's own storage.
+func (s *Server) harnessFileRead(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		writeErr(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	abs, ok := safeJoin(s.taskWorkspace(taskID), rel)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "非法路径")
+		return
+	}
+	fi, err := os.Stat(abs)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "文件不存在")
+		return
+	}
+	if fi.IsDir() {
+		writeErr(w, http.StatusBadRequest, "是目录，不能作为文件读取")
+		return
+	}
+	if fi.Size() > maxDiffFileBytes {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"path": rel, "size": fi.Size(), "too_large": true,
+			"note": "超过 1 MiB，控制台不内联预览。",
+		})
+		return
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"path": rel, "size": fi.Size(), "binary": true,
+			"note": "二进制文件，控制台不内联预览。",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task": t.ID, "path": rel, "size": fi.Size(), "content": string(data),
+	})
+}
+
+// safeJoin resolves rel under root and rejects any path that escapes it
+// (absolute paths, "..", or a symlink-resolved target outside the root).
+func safeJoin(root, rel string) (string, bool) {
+	root = filepath.Clean(root)
+	if filepath.IsAbs(rel) {
+		return "", false
+	}
+	abs := filepath.Clean(filepath.Join(root, rel))
+	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+		return "", false
+	}
+	return abs, true
 }
 
 // ── budget ────────────────────────────────────────────────────────────────

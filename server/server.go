@@ -880,6 +880,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/tasks/{id}/harness-mode", s.harnessMode)
 	// 三栏工作区（P1）：文件树 / DIFF / 预算 / 委派
 	mux.HandleFunc("GET /api/harness/files/{id}", s.harnessFiles)
+	mux.HandleFunc("GET /api/harness/file/{id}", s.harnessFileRead)
 	mux.HandleFunc("GET /api/harness/diff/{id}", s.harnessDiff)
 	mux.HandleFunc("GET /api/harness/budget/{id}", s.harnessBudget)
 	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)

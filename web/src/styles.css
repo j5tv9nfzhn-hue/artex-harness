@@ -176,3 +176,28 @@ html, body, #root { height: 100%; margin: 0; }
 .traj-foot { border-top: 1px solid var(--gray-a5); flex: 0 0 auto; }
 @media (max-width: 900px) { .traj-detail { display: none; } }
 
+/* ── Sprint 4：工作台（文件 / DIFF / 终端）──────────────────────────────── */
+.bench-tab { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
+  color: var(--gray-11); font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+.bench-tab:hover { background: var(--gray-a3); }
+.bench-tab.active { background: var(--accent-a4); color: var(--accent-12); }
+
+.file-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 26px; padding: 0 10px;
+  border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.file-row:hover { background: var(--gray-a2); }
+.file-row.dir { cursor: default; color: var(--gray-11); }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size { color: var(--gray-9); font-size: 10px; font-variant-numeric: tabular-nums; }
+.diff-add { color: var(--green-11); font-size: 11px; font-variant-numeric: tabular-nums; }
+.diff-del { color: var(--red-11); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.diff-body { margin: 0; padding: 8px 0; font-family: var(--default-mono-font-family, ui-monospace);
+  font-size: 11.5px; line-height: 1.5; white-space: pre; overflow: auto; }
+.diff-line { padding: 0 10px; }
+.diff-line.add { background: var(--green-a3); color: var(--green-11); }
+.diff-line.del { background: var(--red-a3); color: var(--red-11); }
+.diff-line.hunk { color: var(--accent-11); background: var(--accent-a2); }
+
+.toolgroup-head { display: flex; align-items: center; gap: 7px; width: 100%; border: 0;
+  background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; text-align: left; }
+

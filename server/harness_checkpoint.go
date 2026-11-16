@@ -48,6 +48,12 @@ func (s *Server) wireCheckpoints() {
 		if err != nil {
 			return
 		}
+		// The DIFF baseline must reflect the workspace BEFORE the first turn writes
+		// anything. Legacy tasks get it at goal decomposition; harness tasks skip
+		// that path, so without this line the baseline was only established when the
+		// operator first opened the DIFF panel — after the agent had already written
+		// files, which made every change invisible.
+		s.ensureBaseline(id)
 		if _, err := s.checkpointStore(id).Capture(turn.Revision, time.Now()); err != nil {
 			log.Printf("[checkpoint] task %s rev=%d 快照失败: %v", t.ID, turn.Revision, err)
 		}

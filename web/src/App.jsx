@@ -19,10 +19,11 @@ import Subagents from "./Subagents.jsx";
 import Trajectory from "./Trajectory.jsx";
 import Checkpoints from "./Checkpoints.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
+import Workbench from "./Workbench.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
-  Activity, Bot, BrainCircuit, CheckCircle2, CircleDot, Command as CommandIcon,
+  Activity, Bot, BrainCircuit, CheckCircle2, ChevronRight, CircleDot, Command as CommandIcon,
   Search, ShieldAlert, SquareTerminal, Users, Wrench, XCircle,
 } from "lucide-react";
 
@@ -70,8 +71,10 @@ export default function App() {
   const scroller = useRef(null);
   const stick = useRef(true);
   // 长任务的事件上千条，全量渲染会拖死主线程；虚拟化只渲染视口内的行。
+  // 连续的同类工具调用先合并成一行（如 "Bash × 6"），展开才渲染每一次。
+  const displayRows = useMemo(() => groupRows(rows), [rows]);
   const rowVirtualizer = useVirtualizer({
-    count: rows.length,
+    count: displayRows.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => 96,
     overscan: 10,
@@ -81,6 +84,7 @@ export default function App() {
   const sinceRef = useRef(0);          // AG-UI 续传游标（= 最后一条事件的活动 id）
   const [retryNonce, setRetryNonce] = useState(0);
   const [subOpen, setSubOpen] = useState(false);
+  const [benchOpen, setBenchOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);   // 新建对话：侧栏/标题栏/命令面板共用一个
   const [stale, setStale] = useState(false);       // 页面跑的是旧包 → 提示刷新
   const [convs, setConvs] = useState([]);          // 对话（无目标，首条消息才开跑）
@@ -419,8 +423,13 @@ export default function App() {
                   </Tooltip>
                 ) : null}
                 <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
-                  <Button size="1" variant={subOpen ? "solid" : "soft"} onClick={() => setSubOpen((v) => !v)}>
+                  <Button size="1" variant={subOpen ? "solid" : "soft"} onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}>
                     <Users size={12} /> 子代理
+                  </Button>
+                </Tooltip>
+                <Tooltip content="工作台：文件树、DIFF 审阅、终端">
+                  <Button size="1" variant={benchOpen ? "solid" : "soft"} onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}>
+                    <Wrench size={12} /> 工作台
                   </Button>
                 </Tooltip>
                 <StatusBadge status={cur && cur.status} />
@@ -480,7 +489,7 @@ export default function App() {
             ) : null}
             <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
               {rowVirtualizer.getVirtualItems().map((vi) => {
-                const r = rows[vi.index];
+                const r = displayRows[vi.index];
                 if (!r) return null;
                 return (
                   <div key={r.key} data-index={vi.index} ref={rowVirtualizer.measureElement}
@@ -504,6 +513,7 @@ export default function App() {
         </div>
 
         {subOpen ? <Subagents taskId={taskId} live={live} onClose={() => setSubOpen(false)} /> : null}
+        {benchOpen ? <Workbench taskId={taskId} onClose={() => setBenchOpen(false)} /> : null}
 
         <Flex className="statusbar" align="center" gap="3">
           <Flex align="center" gap="1"><LiveDot live={live} /><Text size="1" color="gray">{liveLabel(live)}</Text></Flex>
@@ -542,6 +552,10 @@ function Row({ row }) {
         </Flex>
       </motion.div>
     );
+
+  if (row.type === "approval") return <ApprovalCard row={row} />;
+
+  if (row.type === "toolgroup") return <ToolGroup row={row} />;
 
   if (row.type === "tool")
     return (
@@ -705,6 +719,119 @@ function copyText(t) {
   navigator.clipboard?.writeText(t).then(() => toast.success("已复制"), () => toast.error("复制失败"));
 }
 
+/* 就地审批卡片（Sprint 4）：intercept_request 以前只写进 DB，长任务会卡在审批上
+ * 而界面上看不到——人必须先打开侧栏才发现。现在它出现在事件流里，允许/拒绝都
+ * 直接调 /api/intercept/pending/{id}/decide，后端仍是唯一否决点。 */
+function ApprovalCard({ row }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(row.decided ? "已处理" : "");
+  const [showInput, setShowInput] = useState(false);
+  // The decide endpoint takes "allowed" | "denied". Sending "allow"/"deny" (the
+  // wording used by the buttons and by the model-facing vocabulary) returns 400,
+  // which made the card render but every click fail — the run stayed blocked.
+  async function decide(choice) {
+    const decision = choice === "allow" ? "allowed" : "denied";
+    setBusy(true);
+    try {
+      const r = await authedFetch(`/api/intercept/pending/${encodeURIComponent(row.pendingId)}/decide`, {
+        method: "POST", credentials: "include",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      setDone(choice === "allow" ? "已允许" : "已拒绝");
+      toast.success(choice === "allow" ? "已允许执行" : "已拒绝执行");
+    } catch (e) { toast.error("审批失败：" + e.message); }
+    finally { setBusy(false); }
+  }
+  let pretty = row.input;
+  try { pretty = JSON.stringify(JSON.parse(row.input), null, 2); } catch { /* keep raw */ }
+  return (
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}>
+      <Card size="1" style={{ borderColor: "var(--amber-7)", background: "var(--amber-a2)" }}>
+        <Flex direction="column" gap="2">
+          <Flex align="center" gap="2">
+            <ShieldAlert size={14} color="var(--amber-9)" />
+            <Text size="2" weight="medium">需要审批：{row.tool || "工具"}</Text>
+            <Badge size="1" color="amber">#{row.pendingId}</Badge>
+            <Box style={{ marginLeft: "auto" }} />
+            {done ? <Badge size="1" variant="soft" color={done === "已允许" ? "green" : "gray"}>{done}</Badge> : null}
+          </Flex>
+          <Code size="1" variant="ghost" className="mono"
+                style={{ display: "block", maxHeight: showInput ? 260 : 72, overflow: "auto", whiteSpace: "pre-wrap" }}>
+            {pretty || "(无参数)"}
+          </Code>
+          <Flex gap="2" align="center">
+            <Button size="1" variant="soft" onClick={() => setShowInput((v) => !v)}>
+              {showInput ? "收起完整输入" : "显示完整输入"}
+            </Button>
+            <Box style={{ marginLeft: "auto" }} />
+            <Button size="1" variant="soft" color="red" disabled={busy || !!done} onClick={() => decide("deny")}>拒绝</Button>
+            <Button size="1" variant="solid" color="green" disabled={busy || !!done} onClick={() => decide("allow")}>允许</Button>
+          </Flex>
+        </Flex>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* 连续同类工具调用合并（Sprint 4）：一行 "Bash × 6"，点开才逐条渲染。
+ * 长任务里几十次 read/grep 会把事件流刷成一堵墙，合并后扫一眼就知道做了什么。 */
+function ToolGroup({ row }) {
+  const [open, setOpen] = useState(false);
+  const n = row.items.length;
+  const failed = row.items.some((x) => x.isError);
+  return (
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}>
+      <Card size="1">
+        <button className="toolgroup-head" onClick={() => setOpen((v) => !v)}>
+          <ChevronRight size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
+          <Wrench size={13} color="var(--accent-11)" />
+          <Text size="1" weight="medium">{row.name || "工具"} × {n}</Text>
+          {failed ? <Badge size="1" color="red">有失败</Badge> : null}
+          <Box style={{ marginLeft: "auto" }} />
+          <Text size="1" color="gray">{open ? "收起" : "展开"}</Text>
+        </button>
+        {open ? (
+          <Flex direction="column" gap="2" mt="2">
+            {row.items.map((it) => (
+              <Box key={it.key}>
+                <Code size="1" variant="ghost" className="mono" style={{ display: "block", whiteSpace: "pre-wrap", maxHeight: 140, overflow: "auto" }}>
+                  {it.args || "(无参数)"}
+                </Code>
+                {it.result !== undefined ? (
+                  <Code size="1" variant="ghost" color={it.isError ? "red" : undefined} className="mono"
+                        style={{ display: "block", marginTop: 4, whiteSpace: "pre-wrap", maxHeight: 180, overflow: "auto" }}>
+                    {it.result || "(无输出)"}
+                  </Code>
+                ) : null}
+              </Box>
+            ))}
+          </Flex>
+        ) : null}
+      </Card>
+    </motion.div>
+  );
+}
+
+function groupRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    if (r.type !== "tool") { out.push(r); continue; }
+    const last = out[out.length - 1];
+    if (last && last.type === "toolgroup" && last.name === r.name) {
+      out[out.length - 1] = { ...last, items: [...last.items, r] };
+      continue;
+    }
+    if (last && last.type === "tool" && last.name === r.name) {
+      out[out.length - 1] = { type: "toolgroup", key: "g:" + last.key, name: r.name, items: [last, r] };
+      continue;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 function CodeBlock({ children }) {
   const ref = useRef(null);
   return (
@@ -832,6 +959,15 @@ function applyEvent(rows, ev) {
       const i = findLast(rows, (r) => r.callId === ev.toolCallId); if (i < 0) return rows;
       const next = rows.slice(); next[i] = { ...next[i], done: true, result: ev.content ?? "", isError: ev.status === "error" }; return next;
     }
+    case "INTERCEPT_REQUEST": {
+      let p = {};
+      try { p = JSON.parse(ev.content || "{}"); } catch { /* 保留原文 */ }
+      return [...rows, {
+        type: "approval", key: key("ap"), pendingId: p.pending_id,
+        tool: p.tool || "", input: typeof p.input === "string" ? p.input : JSON.stringify(p.input ?? {}, null, 2),
+        decided: false,
+      }];
+    }
     default: return rows;
   }
 }
@@ -861,6 +997,15 @@ function applyActivity(rows, a) {
       const next = rows.slice();
       next[i] = { ...next[i], done: true, result: body, isError: !!a.is_error };
       return next;
+    }
+    case "intercept_request": {
+      let p = {};
+      try { p = JSON.parse(body || "{}"); } catch { /* 保留原文 */ }
+      return [...rows, {
+        type: "approval", key, pendingId: p.pending_id,
+        tool: p.tool || "", input: typeof p.input === "string" ? p.input : JSON.stringify(p.input ?? {}, null, 2),
+        decided: false,
+      }];
     }
     default: return rows;
   }

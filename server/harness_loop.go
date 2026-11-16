@@ -94,6 +94,15 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 			return
 		}
 
+		// A turn is about to run: the task must not keep looking "created" while the
+		// agent is actively working. Harness tasks are created before the runtime
+		// exists, and only a human message used to flip the status to running, so a
+		// freshly created task showed "created" for its entire first turn (and the
+		// console's status badge lied about what was happening).
+		if st := e.m.TaskStatus(t.ID); st != "running" {
+			_, _ = e.m.SetTaskStatusGuarded(t.ID, "running")
+		}
+
 		e.OpenTurn(t, db.TurnHarness, "run", "会话执行")
 		e.stampFirstRun(t)
 		e.touch(t.ID)
