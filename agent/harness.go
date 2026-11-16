@@ -61,9 +61,10 @@ type HarnessAgent struct {
 	maxTokensFn    func() int
 	// delegationNotify wakes the parent conversation with a background
 	// delegation's <task-notification>. Injected by the server (the agent package
-	// must not import it). nil = notifications are still recorded as activities
-	// but cannot wake a resting task (the parent must send a message to resume).
-	delegationNotify func(taskID int64, text string)
+	// must not import it). It returns true when the notification was handed to the
+	// parent; only then is it drained from the registry, so a paused or deleted
+	// task keeps the completion until it can be delivered.
+	delegationNotify func(taskID int64, text string) bool
 }
 
 // NewHarnessAgent builds the runtime for one task. Same construction contract as
@@ -80,7 +81,7 @@ func (h *HarnessAgent) SetWebSearch(o WebSearchOpts)   { h.webSearch = o }
 func (h *HarnessAgent) SetNonStreaming(fn func() bool) { h.nonStreamingFn = fn }
 func (h *HarnessAgent) SetNoaEnabled(fn func() bool)   { h.noaEnabledFn = fn }
 func (h *HarnessAgent) SetMaxTokens(fn func() int)     { h.maxTokensFn = fn }
-func (h *HarnessAgent) SetDelegationNotifier(fn func(taskID int64, text string)) {
+func (h *HarnessAgent) SetDelegationNotifier(fn func(taskID int64, text string) bool) {
 	h.delegationNotify = fn
 }
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
@@ -622,14 +623,22 @@ func (h *HarnessAgent) finishDelegation(reg *delegation.Registry, id string, res
 					break
 				}
 			}
-			// Deliberately NOT drained here: the notification queue is consumed by
-			// the harness loop when it next feeds the agent (the parent may still be
-			// mid-turn, and an idle task must be woken by the completion).
+			// Hand every pending completion to the parent as ONE notification block,
+			// then drain only if the hand-off succeeded. Draining before delivery (or
+			// never draining, which is what happened when the notifier was unwired)
+			// leaves the model guessing: it polls TaskList and sleeps instead of
+			// reading a result that already exists.
 			if h.delegationNotify != nil {
-				for _, n := range reg.PeekNotifications() {
-					if n.TaskID == id {
-						h.delegationNotify(taskID, n.String())
-						break
+				if notes := reg.PeekNotifications(); len(notes) > 0 {
+					var b strings.Builder
+					for i, n := range notes {
+						if i > 0 {
+							b.WriteString("\n")
+						}
+						b.WriteString(n.String())
+					}
+					if h.delegationNotify(taskID, b.String()) {
+						reg.DrainNotifications()
 					}
 				}
 			}

@@ -634,6 +634,20 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	if t.Guard != nil {
 		hx.SetHooks(t.Guard.Hooks())
 	}
+	// 后台委派完成通知：投递到父会话并唤醒它（Sprint 3）。只有投递成功（true）
+	// 时 agent 才会从委派注册表里清掉通知，避免"投递失败还丢掉结果"。
+	hx.SetDelegationNotifier(func(taskID int64, text string) bool {
+		tt, ok := s.m.Task(strconv.FormatInt(taskID, 10))
+		if !ok || tt == nil {
+			return false
+		}
+		if !s.engine.NotifyDelegation(tt, text) {
+			return false
+		}
+		// 进程重启后任务可能已被 reload 但循环没起：Run 在已运行时是 no-op。
+		s.engine.Run(s.ctx, tt)
+		return true
+	})
 	// 压缩事件直接落 activity（不新建表）：观测口径与回放同一份真值，且
 	// "压缩发生了" 变成被记录的事实，而不是从 token 回落推断出来的猜测。
 	hx.SetCompactHook(func(kind string, preTokens int) {
@@ -650,11 +664,6 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// 浏览器会话由 Manager 持有（一任务一会话，Playwright 与 DevTools 共用），docs/09 §2
 	hx.SetBrowserTools(func(ctx context.Context, taskID int64) ([]actool.CoreTool, error) {
 		return s.browserToolsFor(ctx, taskID)
-	})
-	// 后台委派完成时唤醒父会话（Sprint 3）：通知经同一收件箱投递，空闲任务被
-	// revive，运行中任务在下一轮消费——执行权仍在这一个对话式 agent 手里。
-	hx.SetDelegationNotifier(func(taskID int64, text string) {
-		s.engine.NotifyDelegation(t, text)
 	})
 
 	bundle := &taskAgentBundle{

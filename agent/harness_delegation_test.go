@@ -94,6 +94,74 @@ func TestBackgroundDelegationRunsAndNotifies(t *testing.T) {
 	}
 }
 
+// TestBackgroundDelegationNotifierDeliversAndDrains pins the delivery contract
+// that verification found broken: the completion must be handed to the parent
+// (notifier), and only then removed from the registry. Before the fix the
+// notifier was never wired, so `pending` stayed 1 forever and the parent model
+// polled TaskList / slept instead of reading a result that already existed.
+func TestBackgroundDelegationNotifierDeliversAndDrains(t *testing.T) {
+	prov := &fakeSubagentProvider{}
+	h := NewHarnessAgent(prov, "fake", t.TempDir(), nil, 64000, 4)
+	h.SetNonStreaming(func() bool { return true })
+
+	delivered := make(chan string, 4)
+	h.SetDelegationNotifier(func(taskID int64, text string) bool {
+		delivered <- text
+		return true
+	})
+
+	emit := func(db.Activity) {}
+	tool := h.agentTool(nil, emit, 778)
+	in := json.RawMessage(`{"agent_type":"recon","prompt":"enumerate hosts","run_in_background":true}`)
+	if res, err := tool.Call(context.Background(), in, &actool.ToolContext{WorkingDir: t.TempDir()}); err != nil || res.IsError {
+		t.Fatalf("background start failed: %v %s", err, resultText(res))
+	}
+
+	select {
+	case text := <-delivered:
+		if !strings.Contains(text, "<task-notification>") || !strings.Contains(text, "<status>done</status>") {
+			t.Fatalf("notification text missing its contract fields: %q", text)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the completion was never handed to the parent (notifier not called)")
+	}
+
+	reg := delegation.Global.For("778", h.delegationOutputDir(778))
+	if got := reg.PeekNotifications(); len(got) != 0 {
+		t.Fatalf("notification was delivered but not drained: %d left", len(got))
+	}
+}
+
+// A notifier that refuses (paused task, queue full) must NOT lose the result:
+// the notification stays queued so a later resume can still deliver it.
+func TestBackgroundDelegationKeepsNotificationWhenUndeliverable(t *testing.T) {
+	prov := &fakeSubagentProvider{}
+	h := NewHarnessAgent(prov, "fake", t.TempDir(), nil, 64000, 4)
+	h.SetNonStreaming(func() bool { return true })
+	h.SetDelegationNotifier(func(int64, string) bool { return false })
+
+	tool := h.agentTool(nil, func(db.Activity) {}, 779)
+	in := json.RawMessage(`{"agent_type":"recon","prompt":"enumerate hosts","run_in_background":true}`)
+	if res, err := tool.Call(context.Background(), in, &actool.ToolContext{WorkingDir: t.TempDir()}); err != nil || res.IsError {
+		t.Fatalf("background start failed: %v %s", err, resultText(res))
+	}
+
+	reg := delegation.Global.For("779", h.delegationOutputDir(779))
+	if !waitFor(t, 3*time.Second, func() bool {
+		for _, r := range reg.List() {
+			if r.Status.Terminal() {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("background delegation never reached a terminal state")
+	}
+	if got := reg.PeekNotifications(); len(got) == 0 {
+		t.Fatal("an undelivered completion must remain queued, not be dropped")
+	}
+}
+
 func TestBackgroundDelegationIsKilled(t *testing.T) {
 	// A killed background run must reach 'killed' and emit a failure result.
 	prov := &fakeSubagentProvider{}
@@ -221,7 +289,12 @@ func TestBackgroundDelegationRunsIsolated(t *testing.T) {
 		t.Fatalf("isolation dir not under the delegation store: %q", rec.WorkDir)
 	}
 	// Empty isolation dir is cleaned up (the fake provider writes no files).
-	if _, err := os.Stat(rec.WorkDir); err == nil {
+	// Cleanup runs right after finishDelegation emits the tool_result, so poll
+	// instead of assuming it already happened.
+	if !waitFor(t, 2*time.Second, func() bool {
+		_, err := os.Stat(rec.WorkDir)
+		return os.IsNotExist(err)
+	}) {
 		entries, _ := os.ReadDir(rec.WorkDir)
 		if len(entries) == 0 {
 			t.Fatal("an empty isolation dir should have been removed on cleanup")

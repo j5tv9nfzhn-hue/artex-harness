@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
@@ -48,7 +49,10 @@ func (e *Engine) snapshotHarness(t *Task) (*agent.HarnessAgent, bool) {
 // harnessLoop runs the task's conversation until the task is paused/deleted or a
 // human stops sending messages.
 func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
-	first := true
+	// A queued message means this loop is being (re)started to handle it, not to
+	// begin the task: sending the generic "start" input first would burn a turn
+	// and leave the real message for later.
+	first := !t.HasPendingHarnessMessage()
 	for {
 		var input string
 		if first {
@@ -187,6 +191,47 @@ func isAbnormalReason(r harness.TerminalReason) bool {
 	return false
 }
 
+// harnessWakePreamble frames a background delegation notification as the input of
+// an automatically resumed turn. The notification block itself follows.
+const harnessWakePreamble = "后台子代理已完成。请阅读下面的通知，必要时读取输出文件，然后继续任务或给出结论。\n\n"
+
+// NotifyDelegation delivers a background delegation's completion to a resting
+// task. It returns true only when the notification was handed to the parent.
+//
+// Why the return value matters: the agent drains the notification from the
+// delegation registry ONLY on success. Before this contract the notifier was
+// fire-and-forget, so a completion that could not be delivered (paused task,
+// full inbox) was still dropped — and when the notifier was unwired entirely the
+// parent model polled TaskList and slept waiting for a result it already had.
+//
+// Deliberately does nothing when the task is paused or being deleted: operator
+// intent wins, and the completion stays queued for a later resume.
+func (e *Engine) NotifyDelegation(t *Task, text string) bool {
+	if t == nil || !t.HarnessMode {
+		return false
+	}
+	if e.IsDeleting(t.ID) || e.IsPaused(t.ID) {
+		return false
+	}
+	body := strings.TrimSpace(text)
+	if body == "" {
+		return false
+	}
+	if !t.PushHarnessMessage(harnessWakePreamble + body) {
+		return false
+	}
+	// A resting task must look alive again: the loop picks the message up and the
+	// console should show the turn it is about to run.
+	if e.m != nil && e.m.TaskStatus(t.ID) != "running" {
+		_, _ = e.m.SetTaskStatusGuarded(t.ID, "running")
+	}
+	e.emitActivity(t, db.Activity{
+		Worker: "system", Kind: "lifecycle",
+		Summary: "后台委派完成，自动唤醒会话",
+	})
+	return true
+}
+
 // Say delivers a human message to a harness task, reviving it if it had settled.
 //
 // This is the HARNESS equivalent of typing in a chat: it is a first-class API, not
@@ -222,38 +267,6 @@ func (e *Engine) Say(t *Task, message string) (int64, error) {
 		e.Resume(t)
 	}
 	return turn.Revision, nil
-}
-
-// NotifyDelegation wakes a harness task with a background delegation's
-// <task-notification>. This is the mirror of Say for delegated work: the agent
-// decides whether the result changes its plan, and a resting task is revived
-// (ADR-0005: still one conversational agent holding every verb).
-//
-// It is best-effort by design. A notification that cannot be delivered (paused,
-// deleted, inbox full) is NOT an error: the delegation's tool_result was already
-// recorded, the completion lifecycle activity exists, and the delegations API
-// reports the terminal state — so no information is lost, only the nudge.
-func (e *Engine) NotifyDelegation(t *Task, text string) {
-	if t == nil || !t.HarnessMode {
-		return
-	}
-	if e.IsDeleting(t.ID) || e.IsPaused(t.ID) {
-		return
-	}
-	// A human message in flight wins the inbox slot: notifications are additive,
-	// operator input is not, and dropping the nudge costs nothing recoverable.
-	if !t.PushHarnessMessage(text) {
-		return
-	}
-	revived := false
-	if isTerminalStatus(e.m.TaskStatus(t.ID)) {
-		if won, err := e.m.SetTaskStatusGuarded(t.ID, "running"); err == nil && won {
-			revived = true
-		}
-	}
-	if revived || !e.Started(t.ID) {
-		e.Resume(t)
-	}
 }
 
 // protocolTurn builds the protocol view of the current turn (used by the console's
