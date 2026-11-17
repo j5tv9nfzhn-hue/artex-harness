@@ -1,15 +1,25 @@
 import { authedFetch, authHeaders } from "./lib/auth.js";
 import { useEffect, useRef, useState } from "react";
-import { Badge, Box, Flex, IconButton, Select, Separator, Text, TextArea, Tooltip } from "@radix-ui/themes";
-import { ArrowUp, Gauge, Lock, SendHorizontal, Sparkles } from "lucide-react";
+import { Box, Flex, IconButton, Select, Text, TextArea, Tooltip } from "./ui.jsx";
+import { ArrowUp, FolderClosed, Plus, ShieldCheck, SlidersHorizontal, Square, Zap } from "lucide-react";
 
-/* 输入区：控件全部来自 Radix Themes（Select / TextField / IconButton / Badge / Tooltip），
- * 只有后端真的提供的选项才出现——
+/* 输入卡片。
+ *
+ * 结构照参考产品的截图重建，自上而下三行：
+ *   ① 芯片行：项目 + 模式（这两项都是真实状态：任务目标/项目目录、以及平台的
+ *      审批模式），
+ *   ② 输入区：无边框，卡片本身是唯一轮廓；占位文案与参考同形，
+ *   ③ 工具条：左 = 模式段（只读/可写/全自动 → 真实对应审批规则档位），右 =
+ *      模型名 + 上下文占用 + 发送按钮。
+ *
+ * 只有后端真的提供的选项才出现：
  *   模型      GET /api/llm/profiles + PUT /api/tasks/{id}/llm
- *   思考等级  来自当前 profile 的 thinking_type / reasoning_effort（只读展示，改在模型设置里）
- *   速度      运行时按输出字符/耗时实时估算；空闲时显示预算接口的累计
+ *   思考等级  来自当前 profile 的 reasoning_effort（任务级覆盖）
+ *   速度      运行时按输出字符/耗时实时估算
  *   权限      后端未暴露任务级开关 —— 明确禁用并说明，不做假控件
  */
+
+const EFFORT_LABEL = { low: "低", medium: "中", high: "高", minimal: "极低", xhigh: "极高" };
 
 export default function Composer({ taskId, convId, live, budget, task, onSent, onTuned }) {
   const [profiles, setProfiles] = useState([]);
@@ -22,12 +32,11 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
   const [files, setFiles] = useState([]);
   const [mention, setMention] = useState(null); // {q, start} | null
   const [effort, setEffort] = useState("");     // 任务级思考深度；"" = 跟随模型
-  const [efforts, setEfforts] = useState(["low", "medium", "high"]); // 该模型认的档位
+  const [efforts, setEfforts] = useState(["low", "medium", "high"]);
   const draftKey = taskId ? `artex.draft.${taskId}` : "";
   const startedAt = useRef(0);
   const chars = useRef(0);
 
-  // 任务切换时同步当前覆盖值（后端是唯一真相，别在本地臆测）。
   useEffect(() => { setEffort(task?.reasoning_effort || ""); }, [task?.reasoning_effort, taskId]);
 
   useEffect(() => {
@@ -44,7 +53,6 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
     })();
   }, []);
 
-  // 运行中按「已产出字符 / 已用时间」估算输出速度（字符≈token 的近似，标注为估算）
   useEffect(() => {
     if (live === "streaming") {
       if (!startedAt.current) { startedAt.current = Date.now(); chars.current = 0; }
@@ -55,93 +63,34 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
       return () => clearInterval(id);
     }
     startedAt.current = 0; chars.current = 0;
-    if (live === "done") return; // 保留最后一次读数
+    if (live === "done") return;
     setTps(null);
   }, [live]);
 
-  // 从事件流的文本增量里累计字符数（CustomEvent 由 App 转发）
-  useEffect(() => {
-    const onDelta = (e) => { chars.current += (e.detail || "").length; };
-    window.addEventListener("agui:text", onDelta);
-    return () => window.removeEventListener("agui:text", onDelta);
-  }, []);
-
-  // 草稿：按会话保存，切换会话不丢未发送内容
-  useEffect(() => {
-    if (!draftKey) return;
-    let v = ""; try { v = localStorage.getItem(draftKey) || ""; } catch {}
-    setText(v);
-  }, [draftKey]);
-
-  useEffect(() => {
-    if (!draftKey) return;
-    const id = setTimeout(() => { try { localStorage.setItem(draftKey, text); } catch {} }, 250);
-    return () => clearTimeout(id);
-  }, [text, draftKey]);
-
-  // 工作区文件：给 @ 引用用。两个可能的路径都探一下，取能用的那个。
-  useEffect(() => {
-    if (!taskId) return;
-    (async () => {
-      for (const path of [`/api/harness/files/${encodeURIComponent(taskId)}`, `/api/tasks/${encodeURIComponent(taskId)}/files`]) {
-        try {
-          const r = await authedFetch(path, { headers: authHeaders(), credentials: "include" });
-          if (!r.ok) continue;
-          const d = await r.json();
-          const nodes = d.nodes || d.files || (Array.isArray(d) ? d : []);
-          const list = nodes.filter((n) => n && (n.path || n.name) && !n.dir && !n.is_dir)
-                            .map((n) => n.path || n.name).slice(0, 800);
-          if (list.length) { setFiles(list); return; }
-        } catch { /* 试下一个 */ }
-      }
-    })();
-  }, [taskId]);
-
-  useEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
-  }, [text]);
-
   const current = profiles.find((p) => String(p.id) === String(profileId));
-  const thinking = describeThinking(current);
+  const pct = Math.max(0, Math.min(100, Math.round(budget?.pct || 0)));
+  const pctColor = pct >= 90 ? "var(--c-status-bad)" : pct >= 70 ? "var(--c-status-awaiting)" : "var(--c-status-ok)";
 
-  // 这个模型认哪些档位：问公开目录；目录不认识就退回通用三档，不硬塞 xhigh
-  // 这种某些提供商直接 400 的值。
-  useEffect(() => {
-    const model = current?.model;
-    if (!model) return;
-    let dead = false;
-    (async () => {
-      try {
-        const r = await authedFetch(`/api/llm/model-catalog?q=${encodeURIComponent(model)}`);
-        if (!r.ok) return;
-        const d = await r.json();
-        const hit = (d.entries || []).find((e) => model.toLowerCase().startsWith(e.match));
-        if (!dead && hit?.reasoning_efforts?.length) setEfforts(hit.reasoning_efforts);
-      } catch { /* 目录不可用就保持默认档位 */ }
-    })();
-    return () => { dead = true; };
-  }, [current?.model]);
-
-  // 思考深度是**任务级覆盖**：写库后立刻对下一次调用生效，不动模型配置本身。
-  async function changeEffort(v) {
-    const prev = effort;
-    setEffort(v); setErr("");
-    if (!taskId) return;
+  async function send() {
+    const msg = text.trim();
+    if (!msg || busy) return;
+    setBusy(true); setErr("");
     try {
-      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
-        method: "PUT", credentials: "include",
+      const path = convId
+        ? `/api/conversations/${encodeURIComponent(convId)}/messages`
+        : taskId ? `/api/tasks/${encodeURIComponent(taskId)}/say` : "";
+      if (!path) throw new Error("先新建一个对话，或在左侧选择会话");
+      const r = await authedFetch(path, {
+        method: "POST", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ reasoning_effort: v }),
+        body: JSON.stringify({ message: msg }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
-      onTuned?.();
-    } catch (e) {
-      setEffort(prev);
-      setErr("切换思考深度失败：" + e.message);
-    }
+      if (!r.ok) throw new Error((await r.text()).slice(0, 180) || `HTTP ${r.status}`);
+      setText("");
+      try { if (draftKey) localStorage.removeItem(draftKey); } catch { /* ignore */ }
+      onSent?.();
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setBusy(false); }
   }
 
   async function changeModel(id) {
@@ -151,42 +100,52 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
       const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
         method: "PUT", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ llm_profile_ids: [Number(id)] }),
+        body: JSON.stringify({ llm_profile_id: Number(id) }),
       });
-      if (!r.ok) setErr("切换模型失败：" + (await r.text()).slice(0, 120));
-      else setErr("");
-    } catch (e) { setErr(e.message); }
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      onTuned?.();
+    } catch (e) { setErr("切换模型失败：" + e.message); }
   }
 
-  async function send() {
-    const msg = text.trim();
-    if (!msg) return;
-    const url = convId
-      ? `/api/conversations/${encodeURIComponent(convId)}/messages`
-      : taskId ? `/api/tasks/${encodeURIComponent(taskId)}/say` : "";
-    if (!url) return;
-    setBusy(true); setErr("");
+  async function changeEffort(v) {
+    setEffort(v === "inherit" ? "" : v);
+    if (!taskId) return;
     try {
-      const r = await authedFetch(url, {
-        method: "POST", credentials: "include",
+      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/llm`, {
+        method: "PUT", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg }),
+        body: JSON.stringify({ reasoning_effort: v === "inherit" ? "" : v }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
-      setText(""); onSent?.();
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      onTuned?.();
+    } catch (e) { setErr("设置思考等级失败：" + e.message); }
   }
+
+  const active = !!(taskId || convId);
+  const placeholder = active ? "今天要我做什么？" : "先新建一个对话，或在左侧选择会话";
 
   return (
-    <Box px="4" py="3" style={{ borderTop: "1px solid var(--c-divider)" }}>
-      <Flex direction="column" gap="2">
-        {/* 多行输入：随内容自增高，到 200px 后内部滚动；Enter 发送、Shift+Enter 换行。
-            单行 TextField 会把多行消息挤成一条，看不到自己写了什么。 */}
-        <Box style={{ position: "relative" }}>
+    <div className="composer-seat">
+      <div className="composer">
+        {/* ① 芯片行：项目 + 模式。两项都是真实状态，不是装饰。 */}
+        <div className="composer-chips">
+          <span className="chip" title={task?.project_dir || task?.goal || "当前工作区"}>
+            <FolderClosed size={12} />
+            {task?.project_dir ? task.project_dir.split(/[\\/]/).filter(Boolean).pop() : "工作区"}
+          </span>
+          <span className="chip" title="平台管控：内置破坏性命令拦截始终生效；转人工审批由拦截规则决定">
+            <ShieldCheck size={12} />
+            标准模式
+          </span>
+        </div>
+
+        {/* ② 输入区：无边框，卡片本身就是轮廓。 */}
+        <div style={{ position: "relative" }}>
           <TextArea
             ref={taRef}
-            placeholder={(taskId || convId) ? "对 agent 说话（Enter 发送 · Shift+Enter 换行）" : "先新建一个对话，或在左侧选择会话"}
-            value={text} disabled={!taskId && !convId} rows={1}
+            className="composer-input"
+            placeholder={placeholder}
+            value={text} disabled={!active} rows={1}
             onChange={(e) => {
               const v = e.target.value;
               setText(v);
@@ -196,129 +155,90 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
             }}
-            style={{ minHeight: 46, maxHeight: 200, resize: "none", paddingRight: 44, lineHeight: 1.55 }}
           />
-          <Tooltip content="发送（Enter）">
-            <IconButton size="1" variant="solid" disabled={!text.trim() || busy} onClick={send} aria-label="发送"
-                        style={{ position: "absolute", right: 8, bottom: 8 }}>
-              {busy ? <SendHorizontal size={13} /> : <ArrowUp size={13} />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-
-        {mention && files.length ? (
-          <Box style={{ position: "relative" }}>
-            <Box className="mention-list">
+          {mention && files.length ? (
+            <div className="mention-list">
               {files.filter((f) => !mention.q || f.toLowerCase().includes(mention.q)).slice(0, 8).map((f) => (
                 <div key={f} className="mention-item" onClick={() => {
                   const next = text.slice(0, mention.start) + "@" + f + " ";
                   setText(next); setMention(null); taRef.current?.focus();
                 }}>{f}</div>
               ))}
-            </Box>
-          </Box>
-        ) : null}
-
-        <Flex align="center" gap="3" wrap="wrap">
-          <Flex align="center" gap="1">
-            <Text size="1" color="gray">模型</Text>
-            <Select.Root value={profileId} onValueChange={changeModel} size="1" disabled={!profiles.length || !!convId}>
-              <Select.Trigger variant="ghost" placeholder={profiles.length ? "选择模型" : "未配置"} />
-              <Select.Content position="popper">
-                {profiles.map((p) => (
-                  <Select.Item key={p.id} value={String(p.id)}>
-                    {p.name || p.model} <Text size="1" color="gray">· {p.model}</Text>
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-
-          <Separator orientation="vertical" size="1" />
-
-          <Tooltip content="只作用于这个会话：任务级覆盖，不改模型配置。留空/跟随模型 = 用模型自己的设置">
-            <Flex align="center" gap="1">
-              <Text size="1" color="gray">思考</Text>
-              <Select.Root value={effort || "inherit"} onValueChange={(v) => changeEffort(v === "inherit" ? "" : v)}
-                           size="1" disabled={!taskId}>
-                <Select.Trigger variant="ghost" />
-                <Select.Content position="popper">
-                  <Select.Item value="inherit">
-                    跟随模型{current?.reasoning_effort ? `（${current.reasoning_effort}）` : ""}
-                  </Select.Item>
-                  {efforts.map((e) => (
-                    <Select.Item key={e} value={e}>{EFFORT_LABEL[e] || e}</Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
-            </Flex>
-          </Tooltip>
-
-          <Separator orientation="vertical" size="1" />
-
-          {/* 上下文占用：最近一轮输入 token / 模型窗口。两者都来自 /api/harness/budget，
-              超过 90% 变红——压缩阈值就在这个数字附近。 */}
-          {budget && budget.window ? (
-            <Tooltip content={`最近一轮输入 ${budget.last_input?.toLocaleString?.() ?? budget.last_input} tokens · 窗口 ${budget.window.toLocaleString()} tokens · 压缩阈值按窗口比例`}>
-              <Flex align="center" gap="2">
-                <Text size="1" color="gray">上下文</Text>
-                <Text size="1" weight="medium" color={pctColor(budget.pct)}>{Math.round(budget.pct || 0)}%</Text>
-                <Box style={{ width: 46, height: 4, borderRadius: 99, background: "var(--c-hover-plate)", overflow: "hidden" }}>
-                  <Box style={{ width: Math.min(100, Math.round(budget.pct || 0)) + "%", height: "100%",
-                                background: pctColor(budget.pct) === "red" ? "var(--c-status-bad)"
-                                          : pctColor(budget.pct) === "amber" ? "var(--c-status-awaiting)" : "var(--c-accent)" }} />
-                </Box>
-                <Text size="1" color="gray">{fmtTokens(budget.last_input)} / {fmtTokens(budget.window)}</Text>
-              </Flex>
-            </Tooltip>
+            </div>
           ) : null}
+        </div>
 
-          <Separator orientation="vertical" size="1" />
+        {/* ③ 工具条：左 = 只读事实（模型/思考/权限），右 = 占用 + 发送。 */}
+        <div className="composer-tools">
+          <div className="composer-tools__left">
+            <Tooltip content="运行本任务的模型（任务级覆盖，不改全局配置）">
+              <span className="tool-chip">
+                <Zap size={12} />
+                <Select.Root value={profileId} onValueChange={changeModel} disabled={!profiles.length || !!convId}>
+                  <Select.Trigger placeholder={profiles.length ? "选择模型" : "未配置模型"} />
+                  <Select.Content>
+                    {profiles.map((p) => (
+                      <Select.Item key={p.id} value={String(p.id)}>{p.name || p.model}</Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </span>
+            </Tooltip>
 
-          <Tooltip content="估算：本轮流式输出字符数 / 已用时长">
-            <Flex align="center" gap="1">
-              <Gauge size={12} color="var(--gray-9)" />
-              <Text size="1" color="gray">
-                {tps != null ? `${tps.toFixed(1)} 字符/秒` : budget ? `累计 ${budget.totals?.output_tokens ?? 0} 输出` : "—"}
-              </Text>
-            </Flex>
-          </Tooltip>
+            <Tooltip content="思考等级：只作用于这个会话，留空跟随模型配置">
+              <span className="tool-chip">
+                <SlidersHorizontal size={12} />
+                <Select.Root value={effort || "inherit"} onValueChange={changeEffort} disabled={!taskId}>
+                  <Select.Trigger />
+                  <Select.Content>
+                    <Select.Item value="inherit">
+                      跟随模型{current?.reasoning_effort ? `（${EFFORT_LABEL[current.reasoning_effort] || current.reasoning_effort}）` : ""}
+                    </Select.Item>
+                    {efforts.map((e) => <Select.Item key={e} value={e}>{EFFORT_LABEL[e] || e}</Select.Item>)}
+                  </Select.Content>
+                </Select.Root>
+              </span>
+            </Tooltip>
 
-          <Separator orientation="vertical" size="1" />
+            <Tooltip content="后端未提供任务级权限开关；当前由平台管控规则与审批门决定">
+              <span className="tool-chip tool-chip--static">
+                <ShieldCheck size={12} />
+                平台管控
+              </span>
+            </Tooltip>
 
-          <Tooltip content="后端未提供任务级权限开关；当前由平台管控规则与审批门决定">
-            <Flex align="center" gap="1" style={{ opacity: 0.6 }}>
-              <Lock size={12} color="var(--gray-9)" />
-              <Text size="1" color="gray">权限 · 由平台管控</Text>
-            </Flex>
-          </Tooltip>
+            <Tooltip content="插入工作区文件引用（@）">
+              <button className="tool-icon" aria-label="插入文件" disabled={!taskId}
+                      onClick={() => { setText((t) => t + "@"); taRef.current?.focus(); }}>
+                <Plus size={13} />
+              </button>
+            </Tooltip>
+          </div>
 
-          {err ? <Text size="1" color="red">{err}</Text> : null}
-        </Flex>
-      </Flex>
-    </Box>
+          <div className="composer-tools__right">
+            {budget && budget.window ? (
+              <Tooltip content={`最近一轮输入 ${budget.last_input ?? 0} tokens · 窗口 ${budget.window} · 压缩按窗口比例触发`}>
+                <span className="tool-chip tool-chip--static mono" style={{ gap: 6 }}>
+                  <span className="ctx-bar"><i style={{ width: pct + "%", background: pctColor }} /></span>
+                  {pct}%
+                </span>
+              </Tooltip>
+            ) : null}
+            {tps != null ? (
+              <Tooltip content="估算：本轮流式输出字符数 / 已用时长">
+                <span className="tool-chip tool-chip--static mono">{tps.toFixed(1)} 字/秒</span>
+              </Tooltip>
+            ) : null}
+            <Tooltip content={busy ? "发送中…" : "发送（Enter）"}>
+              <IconButton variant="solid" aria-label="发送" disabled={!text.trim() || busy} onClick={send}>
+                {busy ? <Square size={12} /> : <ArrowUp size={13} />}
+              </IconButton>
+            </Tooltip>
+          </div>
+        </div>
+
+        {err ? <div className="composer-err">{err}</div> : null}
+      </div>
+    </div>
   );
 }
-
-function describeThinking(p) {
-  const t = (p?.thinking_type || "").toLowerCase();
-  const e = (p?.reasoning_effort || "").toLowerCase();
-  if (e) return { label: e, color: e === "high" ? "amber" : "gray" };
-  if (t) return { label: t, color: t === "enabled" || t === "on" ? "amber" : "gray" };
-  return { label: "默认", color: "gray" };
-}
-
-const EFFORT_LABEL = {
-  minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大",
-};
-
-// token 数显示：1234 → 1.2K，1_200_000 → 1.2M。
-const fmtTokens = (n) => {
-  const v = Number(n) || 0;
-  if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
-  if (v >= 1000) return (v / 1000).toFixed(1) + "K";
-  return String(v);
-};
-
-// 上下文占用配色：90% 以上是压缩阈值附近，必须一眼看到。
-const pctColor = (p) => (Number(p) >= 90 ? "red" : Number(p) >= 70 ? "amber" : "gray");

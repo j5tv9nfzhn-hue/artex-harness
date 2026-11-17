@@ -1,10 +1,7 @@
 import { authedFetch, authHeaders, tokenCandidates } from "./lib/auth.js";
 import LoginGate, { clearToken } from "./LoginGate.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Badge, Box, Button, Card, Code, Dialog, Flex, Heading, IconButton, ScrollArea, Separator,
-  Switch, Text, TextArea, TextField as RTextField, Theme, Tooltip,
-} from "@radix-ui/themes";
+import { Badge, Box, Button, Card, Code, Dialog, Flex, Heading, IconButton, ScrollArea, Separator, Switch, Text, TextArea, TextField as RTextField, Theme, Tooltip } from "./ui.jsx";
 import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,6 +19,7 @@ import Checkpoints from "./Checkpoints.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import Workbench from "./Workbench.jsx";
 import HeatGrid from "./HeatGrid.jsx";
+import { Starburst } from "./ui.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
@@ -450,51 +448,45 @@ function Console({ theme, onLogout }) {
                          onPick={pickTab} onClose={closeTab} onNew={newConversation}
                          pendingByTask={pendingCount ? { [String(taskId)]: pendingCount } : {}} />
           <Flex align="center" gap="3" px="4" py="2" className="topband">
-            <Activity size={15} color="var(--c-ink-3)" />
-            <Text className="title" truncate style={{ maxWidth: "26vw", flex: "0 1 auto", minWidth: 0 }}>
+            {/* The reference's header: the starburst mark before the title, and a
+                quiet cluster of icon controls on the right. Nothing here carries a
+                word label — the band is chrome, the words live in the tooltips. */}
+            <span className="topband-mark"><Starburst /></span>
+            <Text className="title" truncate style={{ maxWidth: "34vw", flex: "0 1 auto", minWidth: 0 }}>
               {convId ? (convTitle || "对话")
-                : cur ? (cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
+                : cur ? (cur.name || cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
             </Text>
+            {!convId && cur ? <StatusBadge status={cur.status} /> : null}
             <Box style={{ marginLeft: "auto" }}>
               <Flex gap="1" align="center" className="topband-controls">
-                {/* The inspector lives where the reference puts it: a column that
-                    opens from the right edge, not a button that fights the band
-                    for width. These two are its launchers. */}
-                {!convId ? (<>
-                <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
-                  <IconButton size="1" variant={subOpen ? "soft" : "ghost"} aria-label="子代理"
-                              onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}><Users size={13} /></IconButton>
-                </Tooltip>
-                <Tooltip content="工作台：文件树、DIFF 审阅、终端">
-                  <IconButton size="1" variant={benchOpen ? "soft" : "ghost"} aria-label="工作台"
-                              onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}><Wrench size={13} /></IconButton>
-                </Tooltip>
-                <Separator orientation="vertical" size="1" />
-                </>) : null}
                 <SegmentedView view={view} onChange={setView} disabled={convId || !taskId} />
-                <Tooltip content="搜索本会话正文（summary + 完整 detail）">
-                  <IconButton size="1" variant="ghost" aria-label="搜索" disabled={!taskId || !!convId}
+                <Separator orientation="vertical" />
+                <Tooltip content="搜索本会话正文">
+                  <IconButton aria-label="搜索" disabled={!taskId || !!convId}
                               onClick={() => setSearchOpen((v) => !v)}><Search size={13} /></IconButton>
                 </Tooltip>
                 {!convId ? (<>
+                <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
+                  <IconButton aria-label="子代理" variant={subOpen ? "soft" : "ghost"}
+                              onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}><Users size={13} /></IconButton>
+                </Tooltip>
+                <Tooltip content="工作台：文件树、DIFF 审阅、终端">
+                  <IconButton aria-label="工作台" variant={benchOpen ? "soft" : "ghost"}
+                              onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}><Wrench size={13} /></IconButton>
+                </Tooltip>
+                <Separator orientation="vertical" />
                 <Tooltip content="暂停任务（含正在跑的轮次）">
-                  <IconButton size="1" variant="ghost" aria-label="暂停" onClick={() => control("pause")}><Pause size={13} /></IconButton>
+                  <IconButton aria-label="暂停" onClick={() => control("pause")}><Pause size={13} /></IconButton>
                 </Tooltip>
                 <Tooltip content="恢复任务">
-                  <IconButton size="1" variant="ghost" aria-label="恢复" onClick={() => control("resume")}><Play size={13} /></IconButton>
+                  <IconButton aria-label="恢复" onClick={() => control("resume")}><Play size={13} /></IconButton>
                 </Tooltip>
-                {budget ? <ContextRing pct={budget.pct} window={budget.window} last={budget.last_input} /> : null}
-                {budget ? <BudgetSpark data={series} pct={budget.pct} /> : null}
                 {pendingCount > 0 ? (
                   <Tooltip content={`${pendingCount} 个审批等待处理`}>
-                    <Badge size="1" color="amber"><ShieldAlert size={11} /> {pendingCount}</Badge>
+                    <Badge color="amber"><ShieldAlert size={11} /> {pendingCount}</Badge>
                   </Tooltip>
                 ) : null}
-                <StatusBadge status={cur && cur.status} />
                 </>) : null}
-                {/* The transport and live state are one fact; the status bar at
-                    the bottom already repeats it in words, so the band keeps a
-                    single dot instead of two badges. */}
                 <LiveBadge live={live} />
               </Flex>
             </Box>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Box, Button, Card, Code, Flex, Heading, Text, TextField } from "@radix-ui/themes";
+import { Box, Button, Card, Code, Flex, Heading, Text, TextField } from "./ui.jsx";
 import { KeyRound, ShieldCheck } from "lucide-react";
 
 /* 登录 / 首次设置密码（/app/ 的唯一入口门）。

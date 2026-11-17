@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Box, Button, Checkbox, Code, Flex, IconButton, ScrollArea, Separator, Text, TextField, Tooltip } from "@radix-ui/themes";
+import { Badge, Box, Button, Checkbox, Code, Flex, IconButton, ScrollArea, Separator, Text, TextField, Tooltip } from "./ui.jsx";
 import { ChevronRight, FileText, GitCompare, Play, RefreshCw, SquareTerminal, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { authedFetch } from "./lib/auth.js";

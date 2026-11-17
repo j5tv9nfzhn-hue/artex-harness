@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Select, Separator, Text, TextField } from "@radix-ui/themes";
+import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Select, Separator, Text, TextField } from "./ui.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeft, ChevronRight, Clock, Coins, Copy, Search, Wrench, X } from "lucide-react";
 import { toast } from "sonner";

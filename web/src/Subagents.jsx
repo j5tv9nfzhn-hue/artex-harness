@@ -1,6 +1,6 @@
 import { authedFetch } from "./lib/auth.js";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "@radix-ui/themes";
+import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "./ui.jsx";
 import { motion } from "motion/react";
 import { ArrowLeft, ChevronRight, Clock, Loader2, RefreshCw, Square, Users, X, XCircle } from "lucide-react";
 import { toast } from "sonner";

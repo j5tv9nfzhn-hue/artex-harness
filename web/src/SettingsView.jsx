@@ -1,8 +1,5 @@
 import { authedFetch } from "./lib/auth.js";
-import { useEffect, useState } from "react";import {
-  Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator,
-  Dialog, Select, Table, Text, TextField, Tooltip,
-} from "@radix-ui/themes";
+import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Table, Text, TextField, Tooltip } from "./ui.jsx";
 import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
 
 /* 设置：与 DSH 相同的形态——打开后【左侧栏变成设置导航】，主区显示该分区的表单。

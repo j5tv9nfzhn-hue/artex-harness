@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Avatar, Badge, Box, Button, Card, ContextMenu, Dialog, DropdownMenu, Flex, Heading, IconButton, Separator, Text, TextField as RTextField, Tooltip,
-} from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Archive, Bell, Command as CommandIcon, Copy, Info, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Settings, ShieldAlert } from "lucide-react";
+import {
+  Archive, Bell, Copy, Info, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen,
+  Pencil, Pin, Plus, Search, Settings, ShieldAlert, SlidersHorizontal, FolderPlus,
+} from "lucide-react";
+import { Avatar, Badge, Box, Button, ContextMenu, Dialog, DropdownMenu, Flex, IconButton, Separator, Starburst, Text, TextField, Tooltip } from "./ui.jsx";
 import { authedFetch, authHeaders } from "./lib/auth.js";
 
-/* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
- * 组内行高固定 30px，113 条也只渲染可见的那十几行（@tanstack/react-virtual）。
- * 分组用 date-fns 判断（今天/昨天/本周/更早），文案由 date-fns 的 zhCN 提供。 */
+/* 会话列表。
+ *
+ * 几何取自参考产品的截图：列宽 280px（分隔线落在 x=279）、行高 30px、6px 圆角、
+ * 10px 内边距、13px 字；选中的行是 #e7e7e5 的实心板。分组标题 11px、字重 500、
+ * 颜色比正文低两档。行首是一个 6px 的空心圆环——当前行才填实。
+ *
+ * 列表虚拟化：113 条会话也只渲染可见的十几行（@tanstack/react-virtual）。 */
 
 const ROW_H = 30;
-const HEAD_H = 26;
+const HEAD_H = 28;
 
+/** 分组：今天 / 昨天 / 本周 / 更早。 */
 function groupOf(t) {
   const ts = t.created_at ? new Date(t.created_at) : null;
   if (!ts || Number.isNaN(+ts)) return "更早";
@@ -24,10 +30,30 @@ function groupOf(t) {
   return "更早";
 }
 
-const statusColor = (s) =>
-  s === "running" ? "var(--c-status-awaiting)" : s === "done" || s === "achieved" ? "var(--c-status-ok)" : s === "failed" || s === "timeout" ? "var(--c-status-bad)" : "var(--c-status-running)";
+/** 行尾的相对时间，参考产品用「19 分钟」这种短写法。 */
+function relTime(t) {
+  const ts = t.last_activity_unix ? new Date(t.last_activity_unix * 1000)
+    : t.created_at ? new Date(t.created_at) : null;
+  if (!ts || Number.isNaN(+ts)) return "";
+  return formatDistanceToNowStrict(ts, { locale: zhCN, addSuffix: false })
+    .replace(" seconds", " 秒").replace(" second", " 秒")
+    .replace(" minutes", " 分钟").replace(" minute", " 分钟")
+    .replace(" hours", " 小时").replace(" hour", " 小时")
+    .replace(" days", " 天").replace(" day", " 天")
+    .replace(" months", " 个月").replace(" month", " 个月")
+    .replace(" years", " 年").replace(" year", " 年");
+}
 
-export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings, onLogout }) {
+const statusColor = (s) =>
+  s === "running" ? "var(--c-status-awaiting)"
+    : s === "done" || s === "achieved" ? "var(--c-status-ok)"
+    : s === "failed" || s === "timeout" ? "var(--c-status-bad)"
+    : "var(--c-ink-4)";
+
+export default function Sidebar({
+  tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette,
+  onFilter, profiles = [], version, toast, onReload, onOpenSettings, onLogout,
+}) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("artex.rail") === "collapsed"; } catch { return false; } });
@@ -35,8 +61,9 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
   const [notif, setNotif] = useState(false);
   const [renaming, setRenaming] = useState(null);
   const [newName, setNewName] = useState("");
-  useEffect(() => { try { localStorage.setItem("artex.rail", collapsed ? "collapsed" : "open"); } catch {} }, [collapsed]);
+  useEffect(() => { try { localStorage.setItem("artex.rail", collapsed ? "collapsed" : "open"); } catch { /* ignore */ } }, [collapsed]);
   const scrollRef = useRef(null);
+
   const loadPending = useCallback(async () => {
     try {
       const r = await authedFetch("/api/intercept/pending", { credentials: "include", headers: authHeaders() });
@@ -48,7 +75,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
   async function decide(id, decision) {
     // The endpoint's vocabulary is "allowed" | "denied"; the buttons say
     // allow/deny. Sending the button wording straight through returned 400 and
-    // left the run blocked (the same mismatch fixed earlier in App.jsx's card).
+    // left the run blocked.
     const body = decision === "allow" || decision === "allowed" ? "allowed" : "denied";
     try {
       const r = await authedFetch(`/api/intercept/pending/${encodeURIComponent(id)}/decide`, {
@@ -70,26 +97,27 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
     if (!r.ok) throw new Error((await r.text()).slice(0, 140));
     onReload?.();
   }
-  const running = tasks.filter((t) => t.status === "running").length;
-  const notifCount = tasks.filter((t) => t.status === "running" || t.status === "failed").length;
 
-  // 扁平化成 [分组头, 行, 行, 分组头, ...]，虚拟化需要一维列表
+  /* Flat list: group header, then its rows. Pinned tasks lead. */
   const flat = useMemo(() => {
-    const order = ["今天", "昨天", "本周", "更早"];
-    const buckets = new Map(order.map((k) => [k, []]));
-    for (const t of tasks) buckets.get(groupOf(t)).push(t);
     const out = [];
-    for (const k of order) {
-      const list = buckets.get(k);
-      if (!list.length) continue;
-      out.push({ kind: "head", key: "h-" + k, label: k, count: list.length });
-      for (const t of list) out.push({ kind: "row", key: "t-" + t.id, task: t });
+    const sorted = [...tasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    const groups = new Map();
+    for (const t of sorted) {
+      const g = t.pinned ? "置顶" : groupOf(t);
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(t);
     }
-    // 旧 ARTeX 控制台的 planner/worker 任务（harness_mode=false）不是 HARNESS 的东西，
-    // 单独成组放在最后，避免主列表看起来像"任务控制台"。
+    const order = ["置顶", "今天", "昨天", "本周", "更早"];
+    for (const g of order) {
+      const list = groups.get(g);
+      if (!list?.length) continue;
+      out.push({ kind: "head", key: "h-" + g, label: g, count: list.length });
+      for (const t of list) out.push({ kind: "task", key: "t-" + t.id, task: t });
+    }
     if (legacy.length) {
-      out.push({ kind: "head", key: "h-legacy", label: "ARTeX 控制台任务", count: legacy.length });
-      for (const t of legacy) out.push({ kind: "row", key: "l-" + t.id, task: t });
+      out.push({ kind: "head", key: "h-legacy", label: "旧管线任务", count: legacy.length });
+      for (const t of legacy) out.push({ kind: "task", key: "t-" + t.id, task: t, legacy: true });
     }
     return out;
   }, [tasks, legacy]);
@@ -101,81 +129,63 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
     overscan: 12,
   });
 
+  const activeConv = convs.find((c) => String(c.id) === String(convId));
+
   return (
     <aside className={"rail" + (collapsed ? " collapsed" : "")}>
-      {collapsed ? (
-        <Flex align="center" justify="center" py="3">
+      {/* Brand row: starburst + serif wordmark. Collapsed keeps only the mark. */}
+      <div className="rail-head">
+        {collapsed ? (
           <Tooltip content="展开侧栏" side="right">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="展开侧栏" onClick={() => setCollapsed(false)}>
+            <IconButton size="1" aria-label="展开侧栏" onClick={() => setCollapsed(false)}>
               <PanelLeftOpen size={15} />
             </IconButton>
           </Tooltip>
-        </Flex>
-      ) : (
-        <Flex align="center" gap="2" px="3" pt="3" pb="2" className="rail-head">
-          <Heading size="3" weight="medium" className="rail-brand">artex · harness</Heading>
-          <Box style={{ marginLeft: "auto" }}>
-            <Tooltip content="收起侧栏">
-              <IconButton size="1" variant="ghost" color="gray" aria-label="收起侧栏" onClick={() => setCollapsed(true)}>
-                <PanelLeftClose size={14} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip content="命令面板 ⌘K">
-              <IconButton size="1" variant="ghost" color="gray" aria-label="命令面板" onClick={onPalette}>
-                <CommandIcon size={14} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Flex>
-      )}
+        ) : (
+          <>
+            <span className="rail-brand"><Starburst />artex</span>
+            <Box style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
+              <Tooltip content="命令面板 ⌘K">
+                <IconButton size="1" aria-label="命令面板" onClick={onPalette}><Search size={14} /></IconButton>
+              </Tooltip>
+              <Tooltip content="收起侧栏">
+                <IconButton size="1" aria-label="收起侧栏" onClick={() => setCollapsed(true)}><PanelLeftClose size={14} /></IconButton>
+              </Tooltip>
+            </Box>
+          </>
+        )}
+      </div>
 
-      {/* 新建对话放在列表正上方——所有聊天产品都是这个位置，不该只藏在标题栏。 */}
+      {/* New conversation: the reference's circular plus chip on a full-width row. */}
       {collapsed ? (
-        <Flex px="2" pb="2" justify="center">
+        <Box px="2" pb="2" style={{ display: "flex", justifyContent: "center" }}>
           <Tooltip content="新建对话">
-            <IconButton size="2" variant="soft" aria-label="新建对话" onClick={onNew}><Plus size={15} /></IconButton>
+            <IconButton variant="soft" aria-label="新建对话" onClick={onNew}><Plus size={15} /></IconButton>
           </Tooltip>
-        </Flex>
-      ) : (
-        <Box px="3" pb="2">
-          <Button size="2" variant="soft" style={{ width: "100%", justifyContent: "flex-start" }} onClick={onNew}>
-            <Plus size={14} /> 新建对话
-          </Button>
         </Box>
+      ) : (
+        <button className="new-row" onClick={onNew}>
+          <span className="plus-chip"><Plus size={13} /></span>
+          新对话
+        </button>
       )}
 
-      {/* 对话：无目标、发第一条消息才开跑。和下面的任务（goal 驱动）是两种东西，
-          所以在侧栏里分区显示，而不是混进同一个列表。 */}
-      {!collapsed && convs.length ? (
-        <Box pb="2">
-          <Text size="1" color="gray" as="div" px="3" pb="1">对话</Text>
-          {convs.slice(0, 6).map((c) => {
-            const active = String(c.id) === String(convId);
-            return (
-              <div key={"c" + c.id} className={"row" + (active ? " active" : "")} role="button" tabIndex={0}
-                   title={c.title || "新对话"}
-                   onClick={() => onPickConv(String(c.id))}
-                   onKeyDown={(e) => { if (e.key === "Enter") onPickConv(String(c.id)); }}>
-                <span className="dot" style={{ background: "var(--c-accent)" }} />
-                <Text size="2" className="row-title">{c.title || "新对话"}</Text>
-              </div>
-            );
-          })}
-        </Box>
+      {/* The workspace section: label + its two quiet actions, then the list. */}
+      {!collapsed ? (
+        <div className="group-head" style={{ paddingTop: 18 }}>
+          工作区
+          <span className="group-actions">
+            <Tooltip content="筛选">
+              <IconButton size="1" aria-label="筛选" onClick={onFilter}><SlidersHorizontal size={12} /></IconButton>
+            </Tooltip>
+            <Tooltip content="新建任务（带目标）">
+              <IconButton size="1" aria-label="新建任务" onClick={() => onNew?.()}><FolderPlus size={12} /></IconButton>
+            </Tooltip>
+          </span>
+        </div>
       ) : null}
 
-      <Flex align="center" gap="2" px="3" pb="2" style={collapsed ? { display: "none" } : undefined}>
-        <Text size="1" color="gray">{tasks.length} 个 HARNESS 会话</Text>
-        <Box style={{ marginLeft: "auto" }}>
-          <Tooltip content="⌘K 搜索">
-            <IconButton size="1" variant="ghost" color="gray" aria-label="搜索" onClick={onPalette}>
-              <Search size={13} />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Flex>
-
-      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative" }}>
+      <div ref={scrollRef} className="ui-scroll" style={{ flex: 1, minHeight: 0, position: "relative" }}>
         <div style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((vi) => {
             const item = flat[vi.index];
@@ -186,8 +196,8 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
             if (item.kind === "head") {
               return (
                 <div key={item.key} style={style} className="group-head">
-                  <Text size="1" color="gray" weight="medium">{item.label}</Text>
-                  <Text size="1" color="gray">{item.count}</Text>
+                  {item.label}
+                  <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--c-ink-4)" }}>{item.count}</span>
                 </div>
               );
             }
@@ -197,85 +207,65 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
             return (
               <ContextMenu.Root key={item.key}>
                 <ContextMenu.Trigger>
-              <div style={style}
-                   className={"row" + (active ? " active" : "")}
-                   title={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
-                   aria-label={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
-                   onMouseEnter={() => setHover(t.id)}
-                   onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
-                   onClick={() => onPick(String(t.id))}
-                   role="button" tabIndex={0}
-                   onKeyDown={(e) => { if (e.key === "Enter") onPick(String(t.id)); }}>
-                <span className="dot" style={{ background: statusColor(t.status) }} />
-                {collapsed ? null : (
-                <Text size="2" className="row-title">
-                  {t.name || t.goal || t.description || "task " + t.id}
-                </Text>
-                )}
-                {collapsed ? null : (<span className="row-tail">
-                  {isHover || active ? (
-                    <DropdownMenu.Root>
-                      <DropdownMenu.Trigger>
-                        <IconButton size="1" variant="ghost" color="gray" aria-label="会话操作"
-                                    onClick={(e) => e.stopPropagation()}>
-                          <MoreHorizontal size={13} />
-                        </IconButton>
-                      </DropdownMenu.Trigger>
-                      <DropdownMenu.Content size="1" onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenu.Item onSelect={() => onPick(String(t.id))}>打开</DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
-                          <Copy size={12} /> 复制 ID #{t.id}
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
-                          <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
-                          <Pencil size={12} /> 重命名
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item color="red"
-                          onSelect={async () => {
-                            try {
-                              const r = await authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
-                              if (!r.ok) throw new Error((await r.text()).slice(0, 140));
-                              toast?.("已归档 #" + t.id); onReload?.();
-                            } catch (e) { toast?.(e.message, true); }
-                          }}>
-                          <Archive size={12} /> 归档
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Separator />
-                        <DropdownMenu.Item color="gray" disabled>
-                          {t.status} · {t.created_at ? formatDistanceToNowStrict(new Date(t.created_at), { addSuffix: true, locale: zhCN }) : "—"}
-                        </DropdownMenu.Item>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Root>
-                  ) : (
-                    <Text size="1" color="gray">
-                      {t.created_at ? formatDistanceToNowStrict(new Date(t.created_at), { locale: zhCN }) : ""}
-                    </Text>
-                  )}
-                </span>)}
-              </div>
+                  <div style={style}
+                       className={"row" + (active ? " active" : "")}
+                       title={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
+                       aria-label={collapsed ? (t.name || t.goal || t.description || "task " + t.id) : undefined}
+                       onMouseEnter={() => setHover(t.id)}
+                       onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
+                       onClick={() => onPick(String(t.id))}
+                       role="button" tabIndex={0}
+                       onKeyDown={(e) => { if (e.key === "Enter") onPick(String(t.id)); }}>
+                    <span className="dot" style={{ color: statusColor(t.status) }} />
+                    {collapsed ? null : (
+                      <span className="row-title">{t.name || t.goal || t.description || "task " + t.id}</span>
+                    )}
+                    {collapsed ? null : (
+                      <span className="row-tail">
+                        {isHover || active ? (
+                          <DropdownMenu.Root>
+                            <DropdownMenu.Trigger>
+                              <IconButton size="1" aria-label="会话操作" onClick={(e) => e.stopPropagation()}>
+                                <MoreHorizontal size={13} />
+                              </IconButton>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Content align="end">
+                              <DropdownMenu.Item onSelect={() => onPick(String(t.id))}>打开</DropdownMenu.Item>
+                              <DropdownMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
+                                <Copy size={12} /> 复制 ID #{t.id}
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                                <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
+                                <Pencil size={12} /> 重命名
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Separator />
+                              <DropdownMenu.Item onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                                <Archive size={12} /> 归档
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Item color="red"
+                                                 onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                                删除
+                              </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Root>
+                        ) : null}
+                        <span className="row-time">{relTime(t)}</span>
+                      </span>
+                    )}
+                  </div>
                 </ContextMenu.Trigger>
-                <ContextMenu.Content size="1">
+                <ContextMenu.Content>
                   <ContextMenu.Item onSelect={() => onPick(String(t.id))}>打开</ContextMenu.Item>
-                  <ContextMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
-                    <Copy size={12} /> 复制 ID #{t.id}
+                  <ContextMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>复制 ID</ContextMenu.Item>
+                  <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                    {t.pinned ? "取消置顶" : "置顶"}
                   </ContextMenu.Item>
                   <ContextMenu.Separator />
-                  <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
-                    <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
-                  </ContextMenu.Item>
-                  <ContextMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
-                    <Pencil size={12} /> 重命名
-                  </ContextMenu.Item>
-                  <ContextMenu.Item color="red" onSelect={async () => {
-                    try {
-                      const r = await authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
-                      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
-                      toast?.("已归档 #" + t.id); onReload?.();
-                    } catch (e) { toast?.(e.message, true); }
-                  }}>
-                    <Archive size={12} /> 归档
+                  <ContextMenu.Item color="red"
+                                   onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                    删除
                   </ContextMenu.Item>
                 </ContextMenu.Content>
               </ContextMenu.Root>
@@ -284,150 +274,114 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
         </div>
       </div>
 
-      <Separator size="4" />
-      {collapsed ? (
-        <Flex direction="column" align="center" gap="2" py="3" className="rail-foot"
-              style={{ flexShrink: 0, borderTop: "1px solid var(--c-divider)" }}>
-          <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"} side="right">
-            <IconButton size="2" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
-              <Box style={{ position: "relative", display: "inline-flex" }}>
-                <Bell size={16} />
-                {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
-              </Box>
-            </IconButton>
-          </Tooltip>
+      {/* Foot: the account row, and the pending-approval bell beside it. */}
+      <div className="rail-foot">
+        {collapsed ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "8px 0" }}>
+            <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"} side="right">
+              <IconButton size="1" aria-label="通知" onClick={() => setNotif(true)}>
+                <span style={{ position: "relative", display: "inline-flex" }}>
+                  <Bell size={14} />
+                  {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
+                </span>
+              </IconButton>
+            </Tooltip>
+            <Tooltip content="设置" side="right">
+              <IconButton size="1" aria-label="设置" onClick={() => onOpenSettings?.()}><Settings size={14} /></IconButton>
+            </Tooltip>
+            <button className="avatar-btn" aria-label="账户与菜单" onClick={() => setAbout(true)}>
+              <Avatar fallback="A" />
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+            <button className="avatar-btn" aria-label="账户与菜单" onClick={() => setAbout(true)}>
+              <Avatar fallback="A" />
+            </button>
+            <Box style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.2 }}>ARTEX</div>
+              <div style={{ fontSize: 10, color: "var(--c-ink-4)", lineHeight: 1.3 }}>
+                {version ? "v" + version : "本地"}
+              </div>
+            </Box>
+            <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"}>
+              <IconButton size="1" aria-label="通知" onClick={() => setNotif(true)}>
+                <span style={{ position: "relative", display: "inline-flex" }}>
+                  <Bell size={14} />
+                  {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
+                </span>
+              </IconButton>
+            </Tooltip>
+            <Tooltip content="设置">
+              <IconButton size="1" aria-label="设置" onClick={() => onOpenSettings?.()}><Settings size={14} /></IconButton>
+            </Tooltip>
+          </div>
+        )}
+      </div>
 
-          {/* 收起态只有两个入口：通知与头像。其余（展开 / 设置 / 关于）进头像菜单，
-              这样矮窗口里也不会溢出。 */}
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              <button className="avatar-btn" aria-label="账户与菜单">
-                <Avatar size="2" fallback="A" radius="full" color="tomato" />
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content size="1" side="right" align="start">
-              <DropdownMenu.Label>artex-harness {version ? "v" + version : ""}</DropdownMenu.Label>
-              <DropdownMenu.Item onSelect={() => setCollapsed(false)}>
-                <PanelLeftOpen size={12} /> 展开侧栏
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={() => setAbout(true)}>
-                <Info size={12} /> 关于
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => onOpenSettings?.()}>
-                <Settings size={12} /> 设置
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => onLogout?.()}>
-                <LogOut size={12} /> 退出登录
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-        </Flex>
-      ) : (
-        <Flex align="center" gap="2" px="3" py="2" className="rail-foot">
-          <Avatar size="1" fallback="A" radius="full" color="tomato" />
-          <Box style={{ minWidth: 0 }}>
-            <Text size="1" weight="medium" style={{ display: "block", lineHeight: 1.2 }}>ARTEX</Text>
-            <Text size="1" color="gray" truncate style={{ display: "block", fontSize: 10 }}>
-              {version ? "v" + version : "版本未知"}
-            </Text>
-          </Box>
-          <Box style={{ marginLeft: "auto" }}>
-            <Flex gap="1" align="center">
-              <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"}>
-                <IconButton size="1" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
-                  <Box style={{ position: "relative", display: "inline-flex" }}>
-                    <Bell size={14} />
-                    {pending.length ? <span className="notif-dot">{pending.length > 9 ? "9+" : pending.length}</span> : null}
-                  </Box>
-                </IconButton>
-              </Tooltip>
-              <DropdownMenu.Root>
-                <IconButton size="1" variant="ghost" color="gray" aria-label="设置" onClick={() => onOpenSettings?.()}>
-                  <Settings size={14} />
-                </IconButton>
-                <DropdownMenu.Trigger style={{ display: "none" }}><span /></DropdownMenu.Trigger>
-                <DropdownMenu.Content size="1" align="end">
-                  <DropdownMenu.Label>模型</DropdownMenu.Label>
-                  {profiles.slice(0, 6).map((pr) => (
-                    <DropdownMenu.Item key={pr.id} onSelect={() => toast?.("模型切换在输入框下方")}>
-                      {pr.name || pr.model}{pr.is_default ? " · 当前" : ""}
-                    </DropdownMenu.Item>
-                  ))}
-
-                </DropdownMenu.Content>
-              </DropdownMenu.Root>
-              <Tooltip content="关于">
-                <IconButton size="1" variant="ghost" color="gray" aria-label="关于" onClick={() => setAbout(true)}><Info size={14} /></IconButton>
-              </Tooltip>
-            </Flex>
-          </Box>
-        </Flex>
-      )}
-
+      {/* Rename dialog */}
       <Dialog.Root open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
-        <Dialog.Content maxWidth="420px">
-          <Dialog.Title size="4">重命名会话</Dialog.Title>
-          <RTextField.Root value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="例如：内网 8899 存活侦察" mt="3" />
-          <Flex gap="3" mt="4" justify="end">
-            <Dialog.Close><button className="ghost-btn">取消</button></Dialog.Close>
-            <IconButton variant="solid" onClick={async () => {
+        <Dialog.Content>
+          <Dialog.Title>重命名会话</Dialog.Title>
+          <Dialog.Description>名称只影响列表里的显示。</Dialog.Description>
+          <TextField.Root value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="例如：内网 8899 存活侦察" />
+          <Flex gap="2" mt="4" justify="end">
+            <Dialog.Close><Button variant="ghost">取消</Button></Dialog.Close>
+            <Button variant="solid" onClick={async () => {
               try { await patchTask(renaming.id, { name: newName.trim() }); setRenaming(null); toast?.("已重命名"); }
               catch (e) { toast?.(e.message, true); }
-            }}>保存</IconButton>
+            }}>保存</Button>
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
 
+      {/* Approval queue */}
       <Dialog.Root open={notif} onOpenChange={setNotif}>
-        <Dialog.Content maxWidth="520px">
-          <Dialog.Title size="4">需要你处理</Dialog.Title>
-          <Dialog.Description size="1" color="gray">
-            平台审批门挂起的动作；不处理会一直等着。
+        <Dialog.Content>
+          <Dialog.Title>待审批</Dialog.Title>
+          <Dialog.Description>
+            {pending.length ? `${pending.length} 个调用等待裁决；超过时限会按规则自动处理。` : "没有等待处理的审批。"}
           </Dialog.Description>
-          <Flex direction="column" gap="2" mt="3">
-            {!pending.length ? <Text size="1" color="gray">当前没有待审批动作。</Text> : null}
-            {pending.map((p) => (
-              <Card key={p.id} size="1">
-                <Flex direction="column" gap="1">
-                  <Flex align="center" gap="2">
-                    <ShieldAlert size={13} color="var(--c-status-awaiting)" />
-                    <Text size="1" weight="medium">{p.tool_name || p.tool || "工具调用"}</Text>
-                    <Text size="1" color="gray">#{p.id}</Text>
-                  </Flex>
-                  {p.reason ? <Text size="1" color="gray">{p.reason}</Text> : null}
-                  <Flex gap="2" justify="end">
-                    <IconButton size="1" variant="soft" color="red" onClick={() => decide(p.id, "deny")}>拒绝</IconButton>
-                    <IconButton size="1" variant="solid" onClick={() => decide(p.id, "allow")}>允许</IconButton>
-                  </Flex>
-                </Flex>
-              </Card>
-            ))}
-          </Flex>
+          {pending.map((p) => (
+            <Box key={p.id} style={{ borderTop: "0.5px solid var(--c-border-1)", padding: "10px 0" }}>
+              <Flex align="center" gap="2">
+                <ShieldAlert size={13} color="var(--c-status-awaiting)" />
+                <Text size="2" weight="medium">{p.tool || "工具"}</Text>
+                <Badge variant="outline">#{p.id}</Badge>
+                <Box style={{ marginLeft: "auto" }} />
+                <Button size="1" variant="soft" color="red" onClick={() => decide(p.id, "deny")}>拒绝</Button>
+                <Button size="1" variant="solid" onClick={() => decide(p.id, "allow")}>允许</Button>
+              </Flex>
+              <Text size="1" color="gray" as="div" className="mono" style={{ marginTop: 6, maxHeight: 80, overflow: "auto" }}>
+                {p.input || p.detail || ""}
+              </Text>
+            </Box>
+          ))}
         </Dialog.Content>
       </Dialog.Root>
 
+      {/* About */}
       <Dialog.Root open={about} onOpenChange={setAbout}>
-        <Dialog.Content maxWidth="420px">
-          <Dialog.Title size="4">artex-harness</Dialog.Title>
-          <Dialog.Description size="1" color="gray">任务式渗透测试会话控制台</Dialog.Description>
-          <Flex direction="column" gap="2" mt="3">
-            <Row k="版本" v={version || "未知"} />
-            <Row k="会话" v={`${tasks.length} 个`} />
-            <Row k="运行中" v={`${running} 个`} />
-            <Row k="事件协议" v="AG-UI（SSE）" />
-            <Row k="界面依赖" v="Radix Themes · lucide · motion · cmdk · recharts · sonner" />
+        <Dialog.Content>
+          <Dialog.Title>artex-harness</Dialog.Title>
+          <Dialog.Description>单 agent 的渗透执行骨架：循环、状态、调度、留痕、干预、评测。</Dialog.Description>
+          <Flex direction="column" gap="2">
+            <Flex justify="between"><Text size="2" color="gray">版本</Text><Text size="2" className="mono">{version || "dev"}</Text></Flex>
+            <Flex justify="between"><Text size="2" color="gray">会话</Text><Text size="2" className="mono">{tasks.length}</Text></Flex>
+            <Flex justify="between"><Text size="2" color="gray">待审批</Text><Text size="2" className="mono">{pending.length}</Text></Flex>
+          </Flex>
+          <Separator style={{ margin: "14px 0" }} />
+          <Text size="1" color="gray" as="div" style={{ lineHeight: 1.6 }}>
+            仅限已获明确书面授权的系统使用。完整条款见仓库 DISCLAIMER.md。
+          </Text>
+          <Flex gap="2" mt="4" justify="end">
+            <Button variant="ghost" onClick={() => setAbout(false)}>关闭</Button>
+            <Button variant="soft" onClick={() => { onLogout?.(); setAbout(false); }}>
+              <LogOut size={12} /> 退出登录
+            </Button>
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
     </aside>
   );
 }
-
-const Row = ({ k, v }) => (
-  <Flex justify="between" gap="3">
-    <Text size="1" color="gray">{k}</Text>
-    <Text size="1">{v}</Text>
-  </Flex>
-);
