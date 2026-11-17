@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/artex-mark-on-dark.png">
+  <img src=".github/assets/artex-mark-on-light.png" width="104" alt="artex-harness">
+</picture>
+
 # artex-harness
 
 **面向授权渗透场景的单 agent 执行骨架**
