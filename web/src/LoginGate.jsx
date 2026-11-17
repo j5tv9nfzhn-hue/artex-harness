@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, Button, Card, Code, Flex, Heading, Text, TextField } from "./ui.jsx";
 import { KeyRound, ShieldCheck } from "lucide-react";
+import { parseErrorBody } from "./lib/auth.js";
 
 /* 登录 / 首次设置密码（/app/ 的唯一入口门）。
  *
@@ -82,7 +83,11 @@ export default function LoginGate({ onAuthed }) {
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const text = await r.text();
-      if (!r.ok) throw new Error(text.slice(0, 200) || `HTTP ${r.status}`);
+      if (!r.ok) {
+        // 和后端统一错误信封一致：只把那句人话交给界面。
+        // 原先直接把 text 抛出去，登录页显示的是 {"error":"用户名或密码错误"} 这串原始 JSON。
+        throw new Error(parseErrorBody(text, r) || `HTTP ${r.status}`);
+      }
       let tok = "";
       try { tok = (JSON.parse(text) || {}).token || ""; } catch { /* ignore */ }
       if (!tok) throw new Error("服务端未返回令牌");

@@ -276,7 +276,7 @@ Windows 裸机：`start.bat` + 计划任务/服务包装（上游已处理 Git B
 
 - 备份：`pg_dump artex > artex.sql` + 打包 `data/`。
 - 迁移：**重启即迁移**（`db/schema.sql` 幂等，advisory lock 串行化多实例初始化）。
-- 升级：沿用 `selfupdate`，但更新源已改为本仓库（见 [PROVENANCE §3.1](PROVENANCE.md)）。
+- 升级：沿用 `selfupdate`，但更新源已改为本仓库（见 [PROVENANCE §3.1](../PROVENANCE.md)）。
 
 ## 六、渗透域设计：让它长成 harness 而不是工具堆
 

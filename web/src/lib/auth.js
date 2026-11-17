@@ -64,11 +64,20 @@ export async function authedFetch(url, opts = {}) {
 export async function errorText(r) {
   let raw = "";
   try { raw = await r.text(); } catch { return r.statusText || `HTTP ${r.status}`; }
+  return parseErrorBody(raw, r);
+}
+
+/**
+ * parseErrorBody 是 errorText 的纯字符串版本：当调用方已经把 body 读成文本
+ * （例如登录门要先判断有没有 token），就不要再读一次流——响应体只能消费一次。
+ */
+export function parseErrorBody(raw, r) {
   try {
     const j = JSON.parse(raw);
     if (j && typeof j.error === "string" && j.error) return j.error;
     if (j && typeof j.message === "string" && j.message) return j.message;
     if (typeof j === "string" && j) return j;
   } catch { /* not JSON — fall through */ }
-  return raw.slice(0, 200) || r.statusText || `HTTP ${r.status}`;
+  const status = r?.status ? `HTTP ${r.status}` : "";
+  return raw.slice(0, 200) || (r?.statusText || status || "请求失败");
 }

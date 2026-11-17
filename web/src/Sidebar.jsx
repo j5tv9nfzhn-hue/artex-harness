@@ -101,6 +101,13 @@ export default function Sidebar({
   /* Flat list: group header, then its rows. Pinned tasks lead. */
   const flat = useMemo(() => {
     const out = [];
+    // 对话（无 goal 的那条产品线）也要在侧栏有一行。
+    // 之前 `convs` 只用来算高亮、从不进列表：新建对话后标签是内存态，
+    // 一旦刷新，已存在的对话在界面上就再也打不开了（接口一直有返回）。
+    if (convs.length) {
+      out.push({ kind: "head", key: "h-conv", label: "对话", count: convs.length });
+      for (const c of convs) out.push({ kind: "conv", key: "c-" + c.id, conv: c });
+    }
     const sorted = [...tasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     const groups = new Map();
     for (const t of sorted) {
@@ -120,7 +127,7 @@ export default function Sidebar({
       for (const t of legacy) out.push({ kind: "task", key: "t-" + t.id, task: t, legacy: true });
     }
     return out;
-  }, [tasks, legacy]);
+  }, [tasks, legacy, convs]);
 
   const virt = useVirtualizer({
     count: flat.length,
@@ -202,6 +209,27 @@ export default function Sidebar({
               );
             }
             const t = item.task;
+            if (item.kind === "conv") {
+              const c = item.conv;
+              const convActive = String(c.id) === String(convId);
+              return (
+                <div key={item.key} style={style}
+                     className={"row" + (convActive ? " active" : "")}
+                     role="button" tabIndex={0}
+                     aria-label={collapsed ? (c.title || "对话 " + c.id) : undefined}
+                     title={collapsed ? (c.title || "对话 " + c.id) : undefined}
+                     onClick={() => onPickConv?.(String(c.id))}
+                     onKeyDown={(e) => { if (e.key === "Enter") onPickConv?.(String(c.id)); }}>
+                  <span className="dot" style={{ color: c.running ? "var(--c-status-running)" : "var(--c-ink-4)" }} />
+                  {collapsed ? null : <span className="row-title">{c.title || "新对话"}</span>}
+                  {collapsed ? null : (
+                    <span className="row-tail">
+                      <span className="row-time">{relTime({ created_at: c.updated_at || c.created_at })}</span>
+                    </span>
+                  )}
+                </div>
+              );
+            }
             const active = String(t.id) === String(taskId);
             const isHover = hover === t.id;
             return (

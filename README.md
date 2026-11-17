@@ -112,6 +112,22 @@ docker run -d -p 8787:8787 -e ARTEX_PG_DSN="postgres://..." artex-harness
 - **设置** 覆盖：供应商与模型 / MCP / 技能 / 权限与审批 / 会话日志 / 运行环境 / 外观。
 - 每个控件背后都是真实端点；后端没有的能力，界面**禁用并写明原因**，不做假开关。
 
+### 真实截图
+
+| | |
+|---|---|
+| ![工作区](docs/screenshots/harness/harness-02-home-light.png) | ![事件流与就地审批](docs/screenshots/harness/harness-03-conversation-light.png) |
+| 工作区：侧栏（对话 + 置顶运行）、事件流、composer | 事件流：思考块、`Bash × N` 合并卡、就地审批卡片 |
+| ![工作台 DIFF](docs/screenshots/harness/harness-07-workbench-diff-file.png) | ![子代理](docs/screenshots/harness/harness-09-subagents.png) |
+| 工作台 → DIFF：相对基线的 unified diff | 子代理：后台委派、状态与耗时（可单独停止） |
+| ![浏览器 F12](docs/screenshots/harness/harness-11-browser-f12.png) | ![系统就绪](docs/screenshots/harness/harness-12-system-ready.png) |
+| 浏览器 → F12：console 错误分级 + 最近动作 | 系统 → 就绪：四项自检，各自给出原因与下一步 |
+
+全部 17 张（含深色与 900px 窄窗口）在 [`docs/screenshots/harness/`](docs/screenshots/harness/)，
+索引与**复算脚本**见 [`docs/screenshots/README.md`](docs/screenshots/README.md)。
+截图取自真实运行的服务（DOM 断言后才拍），演示数据由 `seed-demo.sh` 灌入——这一点在
+[`docs/17-REFERENCE-UI-MAPPING.md`](docs/17-REFERENCE-UI-MAPPING.md) 里写明了边界。
+
 ### 视觉：一套 CLAUDE 主题，没有第二个设计系统
 
 配色与排版只有一个来源：[`web/src/tokens.css`](web/src/tokens.css)（从参考产品截图逐像素采样：
@@ -167,15 +183,27 @@ ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema�
 
 ## 文档索引
 
+三份**主要阅读文档**（按"想知道什么"排序）：
+
+| 想知道什么 | 读这份 |
+|---|---|
+| 有哪些功能、每项怎么点、落到哪个端点 | [docs/15-FEATURES.md](docs/15-FEATURES.md) — 功能清单（行为 · 入口 · 使用方式） |
+| 代码分成哪些块、谁依赖谁、一次请求怎么流动 | [docs/16-ARCHITECTURE-DETAIL.md](docs/16-ARCHITECTURE-DETAIL.md) — 模块划分 / 依赖关系 / 数据流 |
+| 参考截图画了什么、我们做到哪、没做的为什么 | [docs/17-REFERENCE-UI-MAPPING.md](docs/17-REFERENCE-UI-MAPPING.md) — 界面逐项对照 |
+| 界面长什么样、这些图怎么复算 | [docs/screenshots/README.md](docs/screenshots/README.md) — 真实截图索引 + 种子/抓图脚本 |
+
+其余文档：
+
 | 文档 | 内容 |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 分层、目录职责、两条产品线、数据流、不变量 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 分层、目录职责、两条产品线、数据流、不变量（16 的快速版） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 环境、命令、提交约定、加接口/加界面步骤 |
 | [docs/03-ARCHITECTURE.md](docs/03-ARCHITECTURE.md) | 设计取舍 |
 | [docs/07-HARNESS-RUNTIME.md](docs/07-HARNESS-RUNTIME.md) | HARNESS 运行期 |
 | [docs/adr/](docs/adr/) | 已定型的决策（含"以 ARTEX 为执行底座"的由来） |
 | [docs/09-LONGSESSION-BROWSER-PROJECT.md](docs/09-LONGSESSION-BROWSER-PROJECT.md) | 长会话 / 浏览器 / 项目目录 |
 | [docs/13-CONSOLE-WIRING.md](docs/13-CONSOLE-WIRING.md) | 控制台接线、CLAUDE 主题统一、委派持久化与目录 TTL |
+| [docs/12-SPRINT4-WORKBENCH.md](docs/12-SPRINT4-WORKBENCH.md) | 工作台（文件 / DIFF / 终端）与窄窗口布局缺陷 |
 | [DISCLAIMER.md](DISCLAIMER.md) | 使用条款 |
 
 ## 来源与许可

@@ -2,6 +2,11 @@
 
 > 面向新加入的人（和 AI）。读完这一页应该能回答三个问题：**东西在哪、为什么这样分层、
 > 我要动的地方归谁管**。设计取舍的来龙去脉在 `docs/`，这里是地图不是论文。
+>
+> **配套三份主文档**（本页是快速版）：
+> - 功能清单（每项的行为 / 入口 / 使用方式）→ [`docs/15-FEATURES.md`](docs/15-FEATURES.md)
+> - 模块划分 / 依赖关系 / 数据流的展开版 → [`docs/16-ARCHITECTURE-DETAIL.md`](docs/16-ARCHITECTURE-DETAIL.md)
+> - 参考界面截图与本实现的逐项对照 → [`docs/17-REFERENCE-UI-MAPPING.md`](docs/17-REFERENCE-UI-MAPPING.md)
 
 ## 一句话
 
@@ -12,7 +17,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  web/            React 19 + Vite 控制台（约 6.7k 行）          │
+│  web/            React 19 + Vite 控制台（约 6.8k 行）          │
 │                  构建产物 → server/console-app/ → go:embed     │
 ├──────────────────────────────────────────────────────────────┤
 │  server/         HTTP 层：路由、鉴权、DTO、SSE/AG-UI、引擎调度  │
@@ -105,6 +110,10 @@
 
 ## 相关文档
 
+- [docs/15-FEATURES.md](docs/15-FEATURES.md) — 功能清单：行为 · 入口 · 使用方式
+- [docs/16-ARCHITECTURE-DETAIL.md](docs/16-ARCHITECTURE-DETAIL.md) — 模块划分 / 依赖关系 / 数据流
+- [docs/17-REFERENCE-UI-MAPPING.md](docs/17-REFERENCE-UI-MAPPING.md) — 参考界面逐项对照
+- [docs/screenshots/](docs/screenshots/) — 控制台真实截图（可脚本复算）+ 参考图说明
 - `docs/03-ARCHITECTURE.md` — 设计取舍
 - `docs/07-HARNESS-RUNTIME.md` — HARNESS 运行期
 - `docs/adr/` — 已定型的决策（含"以 ARTEX 为执行底座"的由来）

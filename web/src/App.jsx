@@ -590,7 +590,7 @@ function Console({ theme, onLogout }) {
           <Text size="1" color="gray">{convId ? "对话 #" + convId : taskId ? "#" + taskId : "无选择"}</Text>
           <Text size="1" color="gray">·</Text>
           <Text size="1" color="gray">{rows.length} 条事件</Text>
-          {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {budget.compactions_observed?.total ?? budget.compactions ?? 0}</Text></>) : null}
+          {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {compactionCount(budget).n}</Text></>) : null}
           <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">artex-harness</Text></Box>
         </Flex>
 
@@ -785,12 +785,26 @@ function ContextRing({ pct, window, last }) {
  * day, weeks as columns, five levels mixed from the data blue. The figures under
  * it come from /api/harness/budget (already loaded for the top bar) and are
  * printed in the mono face, the reference's face for every number. */
+// 压缩次数有两个来源：SDK 的真实压缩事件（compactions_observed）与按「同一轮内
+// 输入 token 回落 ≥20%」推断出的次数（compactions）。
+// `observed.total ?? inferred` 是错的：0 不是 nullish，所以只要接口带了
+// compactions_observed（它总是带），推断值就永远显示不出来——界面永远报 0 次，
+// 而旁边那条竖虚线正是按推断画出来的，自相矛盾。先看真实事件，没有才用推断，
+// 并且把"推断"标出来。
+function compactionCount(budget) {
+  const observed = budget?.compactions_observed?.total ?? 0;
+  if (observed > 0) return { n: observed, inferred: false };
+  const inferred = budget?.compactions ?? 0;
+  return { n: inferred, inferred: inferred > 0 };
+}
+
 function UsageView({ budget, task, live }) {
+  const comp = compactionCount(budget);
   const stats = [
     { label: "最近输入", value: budget?.last_input ?? "—", unit: "tokens" },
     { label: "上下文窗口", value: budget?.window ?? "—", unit: "tokens" },
     { label: "占用", value: budget ? `${Math.round(budget.pct || 0)}%` : "—", unit: "" },
-    { label: "压缩", value: budget?.compactions_observed?.total ?? budget?.compactions ?? 0, unit: "次" },
+    { label: "压缩", value: comp.n, unit: comp.inferred ? "次（推断）" : "次" },
     { label: "轮次", value: budget?.series?.length ?? 0, unit: "轮" },
     { label: "运行预算", value: budget?.run_budget_seconds ? Math.round(budget.run_budget_seconds / 60) : "—", unit: "分钟" },
   ];
