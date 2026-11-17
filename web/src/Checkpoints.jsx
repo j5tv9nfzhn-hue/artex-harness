@@ -97,7 +97,7 @@ export default function Checkpoints({ taskId, onRestored }) {
               <PlanList title="不会回滚（保持现状）" items={[...(plan.skip || []), ...(plan.untracked || [])]} color="amber" />
               <Card size="1" style={{ borderColor: "var(--amber-7)" }}>
                 <Flex gap="2">
-                  <ShieldAlert size={14} color="var(--amber-9)" />
+                  <ShieldAlert size={14} color="var(--c-status-awaiting)" />
                   <Text size="2" style={{ flex: 1 }}>{plan.note}</Text>
                 </Flex>
               </Card>

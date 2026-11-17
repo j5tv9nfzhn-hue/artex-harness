@@ -37,7 +37,7 @@ export default function Workbench({ taskId, onClose, initialTab = "files" }) {
   const [tab, setTab] = useState(initialTab);
   return (
     <div className="subpanel">
-      <Flex align="center" gap="1" px="2" py="1" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+      <Flex align="center" gap="1" px="2" py="1" style={{ borderBottom: "1px solid var(--c-divider)" }}>
         {TABS.map((t) => {
           const Icon = t.icon;
           return (

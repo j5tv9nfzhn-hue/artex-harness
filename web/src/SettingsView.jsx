@@ -101,7 +101,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
       {/* 弹窗内的右栏：分区表单 */}
       <div className="settings-main">
-        <Flex align="center" gap="2" px="5" py="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+        <Flex align="center" gap="2" px="5" py="3" style={{ borderBottom: "1px solid var(--c-divider)" }}>
           <Text size="3" weight="medium">{SECTIONS.find((s) => s.id === section)?.label}</Text>
         </Flex>
         <ScrollArea style={{ flex: 1 }}>

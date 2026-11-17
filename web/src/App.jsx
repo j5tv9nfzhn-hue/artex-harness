@@ -21,10 +21,11 @@ import Trajectory from "./Trajectory.jsx";
 import Checkpoints from "./Checkpoints.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import Workbench from "./Workbench.jsx";
+import HeatGrid from "./HeatGrid.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
-  Activity, Bot, BrainCircuit, CheckCircle2, ChevronRight, CircleDot, Command as CommandIcon,
+  Activity, CheckCircle2, ChevronRight, CircleDot, Command as CommandIcon,
   Search, ShieldAlert, SquareTerminal, Users, Wrench, XCircle,
 } from "lucide-react";
 
@@ -60,11 +61,38 @@ export default function App() {
   // 登录门：没有令牌就渲染 LoginGate，拿到令牌后才挂载整个工作台。
   // 之前控制台根本没有登录入口，首次部署打开 /app/ 只会看到满屏 401。
   const [authed, setAuthed] = useState(() => tokenCandidates().length > 0);
-  if (!authed) return <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large"><LoginGate onAuthed={() => setAuthed(true)} /></Theme>;
-  return <Console onLogout={() => { clearToken(); setAuthed(false); }} />;
+  // main.jsx owns the `data-theme` attribute; this mirrors it into React so the
+  // Radix Theme (and every Radix component inside it) re-renders on a flip.
+  // Without it the wrapper keeps the class it first rendered with — Radix's own
+  // scale stayed light while the token ladder had already gone dark.
+  const [theme, setTheme] = useState(themeAppearance);
+  useEffect(() => {
+    const onTheme = () => setTheme(themeAppearance());
+    window.addEventListener("artex:theme", onTheme);
+    return () => window.removeEventListener("artex:theme", onTheme);
+  }, []);
+
+  if (!authed) {
+    return (
+      <Theme appearance={theme} accentColor="tomato" grayColor="sand" radius="large">
+        <LoginGate onAuthed={() => setAuthed(true)} />
+      </Theme>
+    );
+  }
+  return <Console theme={theme} onLogout={() => { clearToken(); setAuthed(false); }} />;
 }
 
-function Console({ onLogout }) {
+/* The token ladder in tokens.css is switched by `data-theme` on <html> (set in
+ * main.jsx). Radix Themes keeps its own appearance prop, so it is told the same
+ * answer; "inherit" means the OS decides, which is also what the attribute does
+ * while the reader has not picked a scheme. */
+function themeAppearance() {
+  const choice = document.documentElement.dataset.themeChoice || "inherit";
+  if (choice === "light" || choice === "dark") return choice;
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function Console({ theme, onLogout }) {
   const [tasks, setTasks] = useState([]);
   const [taskId, setTaskId] = useState(null);
   const [rows, setRows] = useState([]);
@@ -81,7 +109,13 @@ function Console({ onLogout }) {
   const [version, setVersion] = useState("");
   const [health, setHealth] = useState(null);
   const [appearance, setAppearance] = useState(() => { try { return localStorage.getItem("artex.appearance") || "inherit"; } catch { return "inherit"; } });
-  const changeAppearance = (v) => { setAppearance(v); try { localStorage.setItem("artex.appearance", v); } catch {} };
+  const changeAppearance = (v) => {
+    setAppearance(v);
+    try { localStorage.setItem("artex.appearance", v); } catch { /* ignore */ }
+    // main.jsx owns the `data-theme` attribute; tell it the choice changed so the
+    // token ladder flips without a reload, and it answers with "artex:theme".
+    try { window.dispatchEvent(new CustomEvent("artex:appearance", { detail: v })); } catch { /* ignore */ }
+  };
   const [profiles, setProfiles] = useState([]);
   const abort = useRef(null);
   const scroller = useRef(null);
@@ -395,7 +429,7 @@ function Console({ onLogout }) {
   const series = (budget && budget.series) || [];
 
   return (
-    <Theme appearance={appearance} accentColor="tomato" grayColor="sand" radius="large">
+    <Theme appearance={theme} accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
       <SettingsView open={view === "settings"} onOpenChange={(o) => setView(o ? "settings" : "chat")}
                     appearance={appearance} onAppearance={changeAppearance}
@@ -415,21 +449,32 @@ function Console({ onLogout }) {
           <WorkspaceTabs open={tabs} active={convId ? { type: "conv", id: convId } : taskId ? { type: "task", id: taskId } : null}
                          onPick={pickTab} onClose={closeTab} onNew={newConversation}
                          pendingByTask={pendingCount ? { [String(taskId)]: pendingCount } : {}} />
-          <Flex align="center" gap="3" px="4" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
-            <Activity size={15} />
-            <Text size="2" weight="medium" truncate style={{ maxWidth: "34vw" }}>
+          <Flex align="center" gap="3" px="4" py="2" className="topband">
+            <Activity size={15} color="var(--c-ink-3)" />
+            <Text className="title" truncate style={{ maxWidth: "26vw", flex: "0 1 auto", minWidth: 0 }}>
               {convId ? (convTitle || "对话")
                 : cur ? (cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
             </Text>
             <Box style={{ marginLeft: "auto" }}>
-              <Flex gap="2" align="center">
+              <Flex gap="1" align="center" className="topband-controls">
+                {/* The inspector lives where the reference puts it: a column that
+                    opens from the right edge, not a button that fights the band
+                    for width. These two are its launchers. */}
+                {!convId ? (<>
+                <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
+                  <IconButton size="1" variant={subOpen ? "soft" : "ghost"} aria-label="子代理"
+                              onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}><Users size={13} /></IconButton>
+                </Tooltip>
+                <Tooltip content="工作台：文件树、DIFF 审阅、终端">
+                  <IconButton size="1" variant={benchOpen ? "soft" : "ghost"} aria-label="工作台"
+                              onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}><Wrench size={13} /></IconButton>
+                </Tooltip>
+                <Separator orientation="vertical" size="1" />
+                </>) : null}
                 <SegmentedView view={view} onChange={setView} disabled={convId || !taskId} />
                 <Tooltip content="搜索本会话正文（summary + 完整 detail）">
-                  <Button size="1" variant={searchOpen ? "solid" : "soft"} disabled={!taskId || !!convId}
-                          onClick={() => setSearchOpen((v) => !v)}><Search size={12} /> 搜索</Button>
-                </Tooltip>
-                <Tooltip content="新建对话（⌘N）——不设目标，发第一条消息才开始">
-                  <Button size="1" variant="soft" onClick={newConversation}><Plus size={13} /> 新建对话</Button>
+                  <IconButton size="1" variant="ghost" aria-label="搜索" disabled={!taskId || !!convId}
+                              onClick={() => setSearchOpen((v) => !v)}><Search size={13} /></IconButton>
                 </Tooltip>
                 {!convId ? (<>
                 <Tooltip content="暂停任务（含正在跑的轮次）">
@@ -445,27 +490,18 @@ function Console({ onLogout }) {
                     <Badge size="1" color="amber"><ShieldAlert size={11} /> {pendingCount}</Badge>
                   </Tooltip>
                 ) : null}
-                <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
-                  <Button size="1" variant={subOpen ? "solid" : "soft"} onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}>
-                    <Users size={12} /> 子代理
-                  </Button>
-                </Tooltip>
-                <Tooltip content="工作台：文件树、DIFF 审阅、终端">
-                  <Button size="1" variant={benchOpen ? "solid" : "soft"} onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}>
-                    <Wrench size={12} /> 工作台
-                  </Button>
-                </Tooltip>
                 <StatusBadge status={cur && cur.status} />
                 </>) : null}
-                {!convId ? <Badge size="1" variant="outline" color="gray">AG-UI</Badge>
-                          : <Badge size="1" variant="outline" color="gray">对话</Badge>}
+                {/* The transport and live state are one fact; the status bar at
+                    the bottom already repeats it in words, so the band keeps a
+                    single dot instead of two badges. */}
                 <LiveBadge live={live} />
               </Flex>
             </Box>
           </Flex>
 
           {searchOpen && !convId ? (
-            <Flex align="center" gap="2" px="4" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+            <Flex align="center" gap="2" px="4" py="2" style={{ borderBottom: "1px solid var(--c-divider)" }}>
               <Search size={13} />
               <RTextField.Root placeholder="搜索本会话的活动正文…" value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
@@ -476,9 +512,9 @@ function Console({ onLogout }) {
             </Flex>
           ) : null}
           {searchOpen && searchHits.length ? (
-            <Box px="4" py="2" style={{ maxHeight: 180, overflow: "auto", borderBottom: "1px solid var(--gray-a5)" }}>
+            <Box px="4" py="2" style={{ maxHeight: 180, overflow: "auto", borderBottom: "1px solid var(--c-divider)" }}>
               {searchHits.map((h) => (
-                <Flex key={h.id} gap="2" py="1" align="start" style={{ borderBottom: "1px solid var(--gray-a3)" }}>
+                <Flex key={h.id} gap="2" py="1" align="start" style={{ borderBottom: "1px solid var(--c-hover-plate)" }}>
                   <Badge size="1" variant="soft">{h.kind}</Badge>
                   <Text size="1" className="mono" style={{ flex: 1, whiteSpace: "pre-wrap" }}>
                     {h.summary || h.detail?.slice(0, 160) || "(无正文)"}
@@ -493,6 +529,8 @@ function Console({ onLogout }) {
             <Trajectory taskId={taskId} onClose={() => setView("chat")} onLocate={() => setView("chat")} />
           ) : view === "checkpoints" && taskId && !convId ? (
             <Box style={{ flex: 1, minHeight: 0 }}><Checkpoints taskId={taskId} onRestored={() => setRetryNonce((n) => n + 1)} /></Box>
+          ) : view === "usage" ? (
+            <UsageView budget={budget} task={cur} live={live} />
           ) : (
           <>
           <div className="stream" ref={scroller} onScroll={onStreamScroll}>
@@ -545,7 +583,7 @@ function Console({ onLogout }) {
           <Text size="1" color="gray">·</Text>
           <Text size="1" color="gray">{rows.length} 条事件</Text>
           {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {budget.compactions_observed?.total ?? budget.compactions ?? 0}</Text></>) : null}
-          <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">Radix Themes · lucide · motion · cmdk · recharts</Text></Box>
+          <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">artex-harness · Claude-style tokens</Text></Box>
         </Flex>
 
         {stale ? (
@@ -569,7 +607,7 @@ function Row({ row }) {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }}>
         <Flex align="center" gap="3" mt="3">
-          <CircleDot size={12} color="var(--gray-8)" />
+          <CircleDot size={12} color="var(--c-status-running)" />
           <Text size="1" color="gray" style={{ letterSpacing: ".08em" }}>{row.label}</Text>
           <Box style={{ flex: 1 }}><Separator size="4" /></Box>
         </Flex>
@@ -591,9 +629,9 @@ function Row({ row }) {
         <Card size="1">
           <Flex direction="column" gap="2">
             <Flex align="center" gap="2">
-              <Wrench size={13} color="var(--accent-11)" />
+              <Wrench size={13} color="var(--c-accent)" />
               <Text size="1" weight="medium">{row.name}</Text>
-              {row.done ? <CheckCircle2 size={12} color="var(--green-9)" /> : <Badge size="1" variant="soft" color="amber">running</Badge>}
+              {row.done ? <CheckCircle2 size={12} color="var(--c-status-ok)" /> : <Badge size="1" variant="soft" color="amber">running</Badge>}
             </Flex>
             {row.args ? (
               <Code size="1" variant="ghost" className="mono">{row.args}</Code>
@@ -644,7 +682,7 @@ function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
     <div className="cmdk-overlay" onClick={onClose}>
       <div className="cmdk-box" onClick={(e) => e.stopPropagation()}>
         <Command label="命令面板">
-          <Flex align="center" gap="2" px="3" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+          <Flex align="center" gap="2" px="3" style={{ borderBottom: "1px solid var(--c-divider)" }}>
             <Search size={14} />
             <Command.Input placeholder="搜索任务…（↑↓ 选择，Enter 打开，Esc 关闭）" autoFocus />
           </Flex>
@@ -679,7 +717,7 @@ function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
               ))}
             </Command.Group>
           </Command.List>
-          <Flex px="3" py="2" gap="3" style={{ borderTop: "1px solid var(--gray-a5)" }}>
+          <Flex px="3" py="2" gap="3" style={{ borderTop: "1px solid var(--c-divider)" }}>
             <Text size="1" color="gray">⌘K 打开</Text><Text size="1" color="gray">Esc 关闭</Text>
           </Flex>
         </Command>
@@ -693,13 +731,14 @@ function SegmentedView({ view, onChange, disabled }) {
     { key: "chat", label: "对话" },
     { key: "trajectory", label: "轨迹" },
     { key: "checkpoints", label: "检查点" },
+    { key: "usage", label: "用量" },
   ];
   return (
     <Flex gap="1" className="view-seg" role="tablist" aria-label="工作区视图">
       {items.map((it) => (
         <button key={it.key} role="tab" aria-selected={view === it.key}
                 className={"view-seg-btn" + (view === it.key ? " active" : "")}
-                disabled={disabled && it.key !== "chat"}
+                disabled={disabled && it.key !== "chat" && it.key !== "usage"}
                 onClick={() => onChange(it.key)}>{it.label}</button>
       ))}
     </Flex>
@@ -709,30 +748,108 @@ function SegmentedView({ view, onChange, disabled }) {
 // ContextRing：上下文占用环。颜色分级与后端 budget.pct 一致（≥70 琥珀、≥90 红）。
 function ContextRing({ pct, window, last }) {
   const v = Math.max(0, Math.min(100, Math.round(pct || 0)));
-  const color = v >= 90 ? "var(--red-9)" : v >= 70 ? "var(--amber-9)" : "var(--green-9)";
+  // Amber at ≥70, red at ≥90 — the same thresholds the backend's budget.pct uses.
+  const color = v >= 90 ? "var(--c-status-bad)" : v >= 70 ? "var(--c-status-awaiting)" : "var(--c-status-ok)";
   const deg = v * 3.6;
   return (
     <Tooltip content={`上下文占用 ${v}% · 窗口 ${window || "?"} · 最近输入 ${last || 0} tokens`}>
-      <Box className="ctx-ring" style={{ background: `conic-gradient(${color} ${deg}deg, var(--gray-a4) 0)` }}
+      <Box className="ctx-ring" style={{ background: `conic-gradient(${color} ${deg}deg, var(--c-border-1) 0)` }}
            title={`${v}%`}>
-        <span>{v}</span>
+        <span style={{ position: "relative", zIndex: 1 }}>{v}</span>
       </Box>
     </Tooltip>
   );
 }
 
+/* Usage — the reader's daily token heat grid plus the run's budget figures.
+ *
+ * The grid is the reference's home heat grid (see HeatGrid.jsx): one square per
+ * day, weeks as columns, five levels mixed from the data blue. The figures under
+ * it come from /api/harness/budget (already loaded for the top bar) and are
+ * printed in the mono face, the reference's face for every number. */
+function UsageView({ budget, task, live }) {
+  const stats = [
+    { label: "最近输入", value: budget?.last_input ?? "—", unit: "tokens" },
+    { label: "上下文窗口", value: budget?.window ?? "—", unit: "tokens" },
+    { label: "占用", value: budget ? `${Math.round(budget.pct || 0)}%` : "—", unit: "" },
+    { label: "压缩", value: budget?.compactions_observed?.total ?? budget?.compactions ?? 0, unit: "次" },
+    { label: "轮次", value: budget?.series?.length ?? 0, unit: "轮" },
+    { label: "运行预算", value: budget?.run_budget_seconds ? Math.round(budget.run_budget_seconds / 60) : "—", unit: "分钟" },
+  ];
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "16px 22px 40px" }}>
+      <div style={{ maxWidth: 720, display: "flex", flexDirection: "column", gap: 20 }}>
+        <HeatGrid weeks={26} days={182} />
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 4 }}>
+          {stats.map((s) => (
+            <div key={s.label} style={{
+              background: "var(--c-surface-2)",
+              border: "1px solid var(--c-border-1)",
+              borderRadius: 8,
+              padding: "10px 12px",
+            }}>
+              <div style={{ fontSize: 11, color: "var(--c-ink-4)", letterSpacing: ".04em" }}>{s.label}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, marginTop: 2, color: "var(--c-ink)" }}>
+                {s.value}
+                <span style={{ fontSize: 11, color: "var(--c-ink-4)", marginLeft: 4 }}>{s.unit}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {budget?.series?.length ? (
+          <div>
+            <div style={{ fontFamily: "var(--font-serif)", fontSize: 13, marginBottom: 8 }}>每轮输入 token</div>
+            <div style={{ height: 120 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={budget.series.map((v, i) => ({ i, v }))}
+                           margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--c-accent)" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="var(--c-accent)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="v" stroke="var(--c-accent)" strokeWidth={1.5}
+                        fill="url(#usageFill)" isAnimationActive={false} />
+                  <ReTooltip contentStyle={{
+                    background: "var(--c-surface-1)", border: "1px solid var(--c-border-1)",
+                    borderRadius: 8, fontFamily: "var(--font-mono)", fontSize: 11,
+                  }} labelFormatter={(i) => `第 ${i + 1} 轮`} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: "var(--c-ink-4)" }}>
+            {task ? "本轮尚无用量记录（任务未运行或模型未配置）。" : "选择任务后显示该任务的上下文预算。"}
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: "var(--c-ink-4)", lineHeight: 1.7 }}>
+          热力格按 UTC 日历日聚合全部任务的 result 活动（input + output + cache_read）。
+          上下文占用取最近一条 usage 行，不是累加 —— 累加会高估当前窗口。
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BudgetSpark({ data, pct }) {
   if (!data || data.length < 2) return null;
-  const points = data.map((v, i) => ({ i, v }));
+  // The last 48 rounds only: a 121-point series in 84px paints a dense scribble
+  // that reads as noise rather than as a trend.
+  const points = data.slice(-48).map((v, i) => ({ i, v }));
+  // Fixed width and height: ResponsiveContainer inside a flex row measured the
+  // parent after the row had already squeezed it, so the spark rendered as a
+  // one-pixel red smear on narrow windows.
   return (
     <Tooltip content={`上下文占用 ${Math.round(pct || 0)}% · ${data.length} 轮`}>
-      <Box style={{ width: 84, height: 22 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-            <Area type="monotone" dataKey="v" stroke="var(--accent-9)" fill="var(--accent-4)" strokeWidth={1.5} isAnimationActive={false} />
-            <ReTooltip content={() => null} />
-          </AreaChart>
-        </ResponsiveContainer>
+      <Box style={{ width: 84, height: 22, flex: "none" }}>
+        <AreaChart width={84} height={22} data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+          <Area type="monotone" dataKey="v" stroke="var(--c-accent)" fill="var(--c-accent-tint)" strokeWidth={1.5} isAnimationActive={false} />
+        </AreaChart>
       </Box>
     </Tooltip>
   );
@@ -774,7 +891,7 @@ function ApprovalCard({ row }) {
       <Card size="1" style={{ borderColor: "var(--amber-7)", background: "var(--amber-a2)" }}>
         <Flex direction="column" gap="2">
           <Flex align="center" gap="2">
-            <ShieldAlert size={14} color="var(--amber-9)" />
+            <ShieldAlert size={14} color="var(--c-status-awaiting)" />
             <Text size="2" weight="medium">需要审批：{row.tool || "工具"}</Text>
             <Badge size="1" color="amber">#{row.pendingId}</Badge>
             <Box style={{ marginLeft: "auto" }} />
@@ -809,7 +926,7 @@ function ToolGroup({ row }) {
       <Card size="1">
         <button className="toolgroup-head" onClick={() => setOpen((v) => !v)}>
           <ChevronRight size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-          <Wrench size={13} color="var(--accent-11)" />
+          <Wrench size={13} color="var(--c-accent)" />
           <Text size="1" weight="medium">{row.name || "工具"} × {n}</Text>
           {failed ? <Badge size="1" color="red">有失败</Badge> : null}
           <Box style={{ marginLeft: "auto" }} />
@@ -948,9 +1065,12 @@ const LiveDot = ({ live }) => (
     animate={live === "streaming" ? { opacity: [1, 0.35, 1] } : live === "reconnecting" ? { opacity: [1, 0.2, 1] } : { opacity: 1 }}
     transition={{ duration: live === "reconnecting" ? 0.9 : 2, repeat: live === "streaming" || live === "reconnecting" ? Infinity : 0 }}
     style={{ width: 6, height: 6, borderRadius: 99, display: "inline-block",
-             background: live === "streaming" ? "var(--green-9)"
-                       : live === "reconnecting" ? "var(--amber-9)"
-                       : live === "error" ? "var(--red-9)" : "var(--gray-8)" }} />
+             // Status dots are literal colours in the reference, never the brand
+             // accent: running is a muted neutral, waiting is the amber, failure
+             // is the brick red.
+             background: live === "streaming" ? "var(--c-status-ok)"
+                       : live === "reconnecting" ? "var(--c-status-awaiting)"
+                       : live === "error" ? "var(--c-status-bad)" : "var(--c-status-running)" }} />
 );
 
 const liveLabel = (s) => ({

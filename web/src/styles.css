@@ -1,203 +1,471 @@
-/* 只保留布局；视觉全部来自 Radix Themes / cmdk / recharts 自身样式 */
+/* ─────────────────────────────────────────────────────────────────────────
+ * Console layout & surfaces.
+ *
+ * Metrics follow dsh-claude-style's `theme/sidebar.css` and `docs/STYLE.md`:
+ *   • sidebar 264px; a row is 28px tall, 6px radius, 8px inline padding, a 16px
+ *     glyph in a 20px box, label 13px at a 6px gap (text starts at
+ *     padding + 20 + 6);
+ *   • the collapsed rail is 56px with 36px icon buttons at 12px radius;
+ *   • separators are 0.5px; cards and fields keep a 1px outline so an outline
+ *     always reads heavier than a separator inside it;
+ *   • spacing runs on a 4px rhythm; radius is the 4/8/16 ladder.
+ *
+ * Colour comes only from tokens.css. No literal colour is written here.
+ * ───────────────────────────────────────────────────────────────────────── */
+
 html, body, #root { height: 100%; margin: 0; }
-.app { display: grid; grid-template-columns: 304px minmax(0,1fr); grid-template-rows: minmax(0,1fr) auto; height: 100%; }
-@media (max-width: 900px) { .app { grid-template-columns: 1fr; } .rail { display: none; } }
-.rail { border-right: 1px solid var(--gray-a5); display: flex; flex-direction: column; min-height: 0; }
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.stream { flex: 1; overflow: auto; padding: 16px 22px 56px; display: flex; flex-direction: column; gap: 10px; }
-.statusbar { grid-column: 1 / -1; padding: 0 14px; height: 30px; border-top: 1px solid var(--gray-a5); }
-.mono { font-family: var(--default-mono-font-family, ui-monospace); white-space: pre-wrap; word-break: break-word; }
-.ghost-btn { background: none; border: 0; cursor: pointer; color: var(--gray-11); display: inline-flex; padding: 4px; border-radius: 6px; }
-.ghost-btn:hover { background: var(--gray-a3); }
-
-/* markdown 正文：只做排版约束，字号与颜色来自 Radix 的 --default-font-family 与主题 */
-.md { max-width: 78ch; line-height: 1.62; }
-.md > *:first-child { margin-top: 0; }
-.md > *:last-child { margin-bottom: 0; }
-.md p { margin: 0 0 .6em; }
-.md ul, .md ol { margin: 0 0 .6em; padding-left: 1.4em; }
-.md code { font-family: var(--default-mono-font-family, ui-monospace); font-size: .92em; background: var(--gray-a3); padding: .1em .35em; border-radius: 4px; }
-.md pre { background: var(--gray-a3); padding: 10px 12px; border-radius: 8px; overflow: auto; }
-.md pre code { background: none; padding: 0; }
-.md.thinking { color: var(--gray-10); font-style: italic; }
-
-/* cmdk 面板：容器样式自写，条目样式由 cmdk 的 [cmdk-item][data-selected] 驱动 */
-.cmdk-overlay { position: fixed; inset: 0; background: rgba(20,18,16,.32); backdrop-filter: blur(3px); display: flex; justify-content: center; padding-top: 12vh; z-index: 100; }
-.cmdk-box { width: min(560px, 92vw); background: var(--color-panel-solid); border: 1px solid var(--gray-a6); border-radius: var(--radius-4); box-shadow: var(--shadow-6); overflow: hidden; }
-.cmdk-box [cmdk-input] { flex: 1; border: 0; outline: none; background: transparent; padding: 12px 4px; font: inherit; color: inherit; }
-.cmdk-box [cmdk-list] { max-height: 46vh; overflow: auto; padding: 6px; }
-.cmdk-box [cmdk-group-heading] { padding: 6px 10px 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--gray-11); }
-.cmdk-box [cmdk-item] { display: flex; align-items: center; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
-.cmdk-box [cmdk-item][data-selected="true"] { background: var(--accent-a4); }
-.cmdk-box [cmdk-empty] { padding: 14px; }
-
-/* 会话列表：紧凑单行，视觉仍来自 Radix 的排版与颜色令牌 */
-.group-head { display:flex; align-items:center; gap:8px; padding:6px 12px 2px; }
-.row { display:flex; align-items:center; gap:8px; padding:0 10px; margin:0 6px; border-radius:6px; cursor:pointer; }
-.row:hover { background: var(--gray-a3); }
-.row.active { background: var(--accent-a4); }
-.row .dot { width:6px; height:6px; border-radius:99px; flex:0 0 auto; }
-.row .row-title { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.row .row-tail { flex:0 0 auto; display:flex; align-items:center; }
-
-/* Radix 的 Theme 会插一层 div：不给它高度，内部的 100% 就撑不开，
- * composer 会被挤到可视区下方（实测就是这样丢的）。 */
-.radix-themes { height: 100%; }
-
-/* 浮动"回到底部"：跟随粘底状态出现，不遮挡输入区 */
-.jump-bottom { position: absolute; right: 28px; bottom: 118px; z-index: 5;
-  border: 1px solid var(--gray-a6); background: var(--color-panel-solid); color: var(--gray-12);
-  border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; box-shadow: var(--shadow-3); }
-.jump-bottom:hover { background: var(--gray-a3); }
-.main { position: relative; }
-
-/* 消息级操作：悬停出现，不占版式 */
-.msg-wrap { position: relative; }
-.msg-copy { position: absolute; top: -2px; right: -4px; opacity: 0; transition: opacity .12s ease; }
-.msg-wrap:hover .msg-copy { opacity: 1; }
-
-/* @ 提及列表 */
-.mention-list { position: absolute; bottom: 6px; left: 0; right: 0; z-index: 20; max-height: 220px; overflow: auto;
-  background: var(--color-panel-solid); border: 1px solid var(--gray-a6); border-radius: 10px; box-shadow: var(--shadow-4); padding: 4px; }
-.mention-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; }
-.mention-item:hover { background: var(--accent-a4); }
-
-/* 侧栏收窄 + 底部条：成熟产品的左栏不会占掉四分之一屏幕 */
-.app { grid-template-columns: 264px minmax(0,1fr); }
-@media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
-.rail-foot { background: var(--color-panel-solid); }
-.notif-dot { position: absolute; top: -6px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
-  border-radius: 99px; background: var(--red-9); color: #fff; font-size: 9px; line-height: 14px; text-align: center; }
-
-/* 侧栏折叠：只留图标列（:has 让父级 grid 跟着子元素状态变） */
-.app:has(.rail.collapsed) { grid-template-columns: 56px minmax(0,1fr); }
-/* 收起态由组件条件渲染负责，这里只管尺寸与居中 */
-.rail.collapsed .row { justify-content: center; padding: 0; gap: 0; margin: 0 6px; border-radius: 8px; }
-.rail.collapsed .row:hover { background: var(--gray-a4); }
-.rail.collapsed .row.active { background: var(--accent-a4); }
-.rail.collapsed .dot { width: 8px; height: 8px; }
-.avatar-btn { background: none; border: 0; padding: 2px; cursor: pointer; border-radius: 999px; line-height: 0; }
-.avatar-btn:hover { background: var(--gray-a4); }
-.rail.collapsed .group-head { display: none; }
-.rail.collapsed .rail-foot { border-top: 0; }
-
-/* ContextMenu.Trigger 默认渲染成 inline：行需要保持块级定位 */
-.rail [data-radix-popper-content-wrapper] { z-index: 90; }
-
-/* 设置：内容区固定高（460px）自带滚动，标签切换不改变对话框尺寸 */
-[role="dialog"] [role="tablist"] { flex-wrap: wrap; }
-
-/* 设置弹窗：弹窗内左导航 + 右表单（DSH 的形态，但为居中弹窗而非整页） */
-.settings-grid { display: grid; grid-template-columns: 216px minmax(0,1fr); height: 100%; }
-.settings-rail { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--gray-a5); background: var(--gray-a2); }
-.settings-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.settings-dialog { padding: 0; }
-@media (max-width: 760px) { .settings-grid { grid-template-columns: 1fr; } .settings-rail { display: none; } }
-.set-nav { display:flex; align-items:center; gap:8px; padding:7px 10px; border:0; background:transparent;
-  border-radius:8px; cursor:pointer; color:var(--gray-11); font:inherit; text-align:left; width:100%; }
-.set-nav:hover { background: var(--gray-a3); color: var(--gray-12); }
-.set-nav.active { background: var(--accent-a4); color: var(--gray-12); font-weight:550; }
-@media (max-width: 900px) { .settings-app { grid-template-columns: 1fr; } }
-
-/* ── 子代理侧栏（三栏布局的第三列）─────────────────────────────────────
- * 只在面板挂载时把网格撑成三列；收起时回到两列，主区不变形。 */
-.subpanel { border-left: 1px solid var(--gray-a5); display: flex; flex-direction: column;
-  min-height: 0; min-width: 0; background: var(--color-panel-solid); }
-.app:has(.subpanel) { grid-template-columns: 264px minmax(0,1fr) 340px; }
-.app:has(.rail.collapsed):has(.subpanel) { grid-template-columns: 56px minmax(0,1fr) 340px; }
-@media (max-width: 1200px) { .app:has(.subpanel) { grid-template-columns: 264px minmax(0,1fr) 300px; } }
-@media (max-width: 900px) {
-  .app:has(.subpanel) { grid-template-columns: 1fr; }
-  .subpanel { display: none; } /* 窄屏不硬塞第三列，信息仍在事件流里 */
+body {
+  font-family: var(--font-sans);
+  color: var(--c-ink);
+  background: var(--c-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 旋转图标（加载中 / 重连中） */
-@keyframes artex-spin { to { transform: rotate(360deg); } }
-.spin { animation: artex-spin 0.9s linear infinite; }
+/* Radix's Theme inserts a wrapper div; without a height the inner 100% cannot
+   stretch and the composer is pushed below the viewport. */
+.radix-themes { height: 100%; background: var(--c-canvas); }
 
-/* 有新构建时的提示：固定右下角，点一下整页刷新 */
-.stale-pill { position: fixed; right: 18px; bottom: 44px; z-index: 60; cursor: pointer;
-  border: 1px solid var(--accent-7); background: var(--accent-3); color: var(--accent-11);
-  border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 12px; box-shadow: var(--shadow-3); }
+/* ── shell ───────────────────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+}
+@media (max-width: 900px) { .app { grid-template-columns: 1fr; } .rail { display: none; } }
+.app:has(.rail.collapsed) { grid-template-columns: 56px minmax(0, 1fr); }
 
-/* 对话里用户自己说的话：右对齐气泡，和 agent 的正文区分开 */
-.user-row { display: flex; justify-content: flex-end; padding: 2px 0; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 
-/* 思考块：和正文视觉上分开（灰、缩进、左边线），否则推理和回答糊成一片，
-   看起来就像"话没说完"。折叠态只留一行。 */
-.md.thinking { color: var(--gray-10); font-size: 12.5px; line-height: 1.6;
-  border-left: 2px solid var(--gray-a6); padding-left: 10px; margin-left: 2px;
-  max-height: 168px; overflow: auto; }
+/* ── sidebar ─────────────────────────────────────────────────────────────── */
+.rail {
+  background: var(--c-sidebar);
+  border-right: 0.5px solid var(--c-divider);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-3) var(--s-2);
+  min-height: 60px;
+}
+.rail-brand {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--c-ink);
+}
+.rail-ver { font-family: var(--font-mono); font-size: 11px; color: var(--c-ink-4); }
 
-/* ── Sprint 2：多会话标签 ─────────────────────────────────────────────── */
-.wtabs { border-bottom: 1px solid var(--gray-a5); min-height: 34px; }
-.wtab { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
-  border: 1px solid var(--gray-a5); border-radius: 7px 7px 0 0; background: var(--gray-a2);
-  color: var(--gray-11); font: inherit; font-size: 12px; cursor: pointer; max-width: 220px; }
-.wtab:hover { background: var(--gray-a3); }
-.wtab.active { background: var(--color-panel-solid); color: var(--gray-12); border-bottom-color: transparent; }
-.wtab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wtab-x { display: inline-flex; opacity: 0; }
-.wtab:hover .wtab-x { opacity: 1; }
-.wtab-live { width: 6px; height: 6px; border-radius: 99px; background: var(--green-9); flex: 0 0 auto; }
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  margin: 0 6px;
+  border-radius: var(--r-row);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--c-ink-2);
+}
+.row:hover { background: var(--c-hover-plate); color: var(--c-ink); }
+.row.active { background: var(--c-accent-tint); color: var(--c-ink); }
+.row.active .row-title { font-weight: 550; }
+.row .dot { width: 6px; height: 6px; border-radius: var(--r-pill); flex: 0 0 auto; }
+.row .row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .row-tail { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 
-/* 视图切换 */
-.view-seg { border: 1px solid var(--gray-a5); border-radius: 7px; padding: 2px; gap: 2px; }
-.view-seg-btn { border: 0; background: transparent; color: var(--gray-11); font: inherit; font-size: 12px;
-  padding: 3px 9px; border-radius: 5px; cursor: pointer; }
-.view-seg-btn:hover:not(:disabled) { background: var(--gray-a3); }
-.view-seg-btn.active { background: var(--accent-a4); color: var(--accent-12); }
-.view-seg-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* Collapsed: the host re-seats every row as a 36px icon button at 12px radius. */
+.rail.collapsed .row {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+  margin: 0 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+.rail.collapsed .row:hover { background: var(--c-hover-plate); }
+.rail.collapsed .row.active { background: var(--c-accent-tint); }
+.rail.collapsed .dot { width: 8px; height: 8px; }
+.rail.collapsed .group-head { display: none; }
 
-/* 上下文占用环 */
-.ctx-ring { width: 26px; height: 26px; border-radius: 99px; display: grid; place-items: center; flex: 0 0 auto; }
-.ctx-ring span { width: 20px; height: 20px; border-radius: 99px; background: var(--color-panel-solid);
-  display: grid; place-items: center; font-size: 9px; color: var(--gray-12); }
+.rail-foot {
+  border-top: 0.5px solid var(--c-divider);
+  background: transparent;
+}
+.rail.collapsed .rail-foot { border-top: 0; }
 
-/* ── Sprint 2：轨迹视图 ───────────────────────────────────────────────── */
-.traj { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.traj-head { border-bottom: 1px solid var(--gray-a5); flex: 0 0 auto; }
-.traj-minimap { border-bottom: 1px solid var(--gray-a5); flex: 0 0 auto; }
-.lane { flex: 1; min-width: 4px; max-width: 40px; border: 0; border-radius: 2px 2px 0 0;
-  background: var(--accent-8); cursor: pointer; opacity: .75; }
-.lane:hover { opacity: 1; }
-.traj-body { flex: 1; min-height: 0; display: flex; }
-.traj-list { flex: 1; min-width: 0; overflow: auto; }
-.traj-detail { width: min(420px, 40%); border-left: 1px solid var(--gray-a5); display: flex; flex-direction: column; min-height: 0; background: var(--gray-a1); }
-.traj-turn { height: 34px; padding: 0 10px; background: var(--gray-a2); border-bottom: 1px solid var(--gray-a4); }
-.traj-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 10px;
-  border: 0; border-bottom: 1px solid var(--gray-a3); background: transparent; color: inherit;
-  font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.traj-row:hover { background: var(--gray-a2); }
-.traj-row.active { background: var(--accent-a3); }
-.traj-kind { flex: 0 0 46px; text-align: center; border-radius: 4px; padding: 1px 0; font-size: 10px; }
-.traj-label { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--default-mono-font-family, ui-monospace); }
-.traj-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gray-11); }
-.traj-foot { border-top: 1px solid var(--gray-a5); flex: 0 0 auto; }
-@media (max-width: 900px) { .traj-detail { display: none; } }
+.avatar-btn {
+  background: none; border: 0; padding: 2px;
+  cursor: pointer; border-radius: var(--r-pill); line-height: 0;
+}
+.avatar-btn:hover { background: var(--c-hover-plate); }
+.notif-dot {
+  position: absolute; top: -6px; right: -7px;
+  min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--c-status-awaiting);
+  color: #161616; font-size: 9px; line-height: 14px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
-/* ── Sprint 4：工作台（文件 / DIFF / 终端）──────────────────────────────── */
-.bench-tab { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
-  color: var(--gray-11); font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
-.bench-tab:hover { background: var(--gray-a3); }
-.bench-tab.active { background: var(--accent-a4); color: var(--accent-12); }
+/* ── top band ────────────────────────────────────────────────────────────── */
+.topband {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  border-bottom: 0.5px solid var(--c-divider);
+  min-height: 44px;
+  /* The control cluster is wider than the band on narrow windows; it keeps its
+     own width and the title gives way, rather than every control shrinking. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topband::-webkit-scrollbar { display: none; }
+.topband > * { flex: none; }
+.topband-controls { flex-wrap: nowrap; white-space: nowrap; }
+.topband .title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  flex: 0 1 auto;
+  min-width: 0;
+}
 
-.file-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 26px; padding: 0 10px;
-  border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.file-row:hover { background: var(--gray-a2); }
-.file-row.dir { cursor: default; color: var(--gray-11); }
-.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-size { color: var(--gray-9); font-size: 10px; font-variant-numeric: tabular-nums; }
-.diff-add { color: var(--green-11); font-size: 11px; font-variant-numeric: tabular-nums; }
-.diff-del { color: var(--red-11); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* ── stream ──────────────────────────────────────────────────────────────── */
+.stream {
+  flex: 1;
+  overflow: auto;
+  padding: var(--s-4) 22px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mono {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
 
-.diff-body { margin: 0; padding: 8px 0; font-family: var(--default-mono-font-family, ui-monospace);
-  font-size: 11.5px; line-height: 1.5; white-space: pre; overflow: auto; }
-.diff-line { padding: 0 10px; }
-.diff-line.add { background: var(--green-a3); color: var(--green-11); }
-.diff-line.del { background: var(--red-a3); color: var(--red-11); }
-.diff-line.hunk { color: var(--accent-11); background: var(--accent-a2); }
+.ghost-btn {
+  background: none; border: 0; cursor: pointer;
+  color: var(--c-ink-3);
+  display: inline-flex; padding: var(--s-1);
+  border-radius: var(--r-row);
+}
+.ghost-btn:hover { background: var(--c-hover-plate); color: var(--c-ink); }
 
-.toolgroup-head { display: flex; align-items: center; gap: 7px; width: 100%; border: 0;
-  background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; text-align: left; }
+/* ── markdown prose ──────────────────────────────────────────────────────── */
+.md {
+  max-width: 78ch;
+  line-height: 1.62;
+  font-family: var(--font-prose);
+  font-size: 15px;
+  color: var(--c-ink);
+}
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4 { font-family: var(--font-serif); letter-spacing: -0.01em; }
+.md p { margin: 0 0 .6em; }
+.md ul, .md ol { margin: 0 0 .6em; padding-left: 1.4em; }
+.md code {
+  font-family: var(--font-mono);
+  font-size: .92em;
+  background: var(--c-code-block);
+  color: var(--c-code);
+  padding: .1em .35em;
+  border-radius: var(--r-1);
+}
+.md pre {
+  background: var(--c-code-block);
+  border: 1px solid var(--c-border-1);
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  overflow: auto;
+}
+.md pre code { background: none; padding: 0; }
+.md a { color: var(--c-link); text-decoration-color: color-mix(in srgb, var(--c-link) 60%, transparent); }
+.md.thinking { color: var(--c-ink-3); font-style: italic; font-family: var(--font-sans); }
 
+/* ── command palette ─────────────────────────────────────────────────────── */
+.cmdk-overlay {
+  position: fixed; inset: 0;
+  background: color-mix(in srgb, var(--c-canvas-ink) 32%, transparent);
+  backdrop-filter: blur(3px);
+  display: flex; justify-content: center;
+  padding-top: 12vh; z-index: var(--z-overlay);
+}
+.cmdk-box {
+  width: min(560px, 92vw);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border-1);
+  border-radius: var(--r-popover);
+  box-shadow: 0 16px 48px -12px rgba(0, 0, 0, .28);
+  overflow: hidden;
+}
+.cmdk-box [cmdk-input] {
+  flex: 1; border: 0; outline: none; background: transparent;
+  padding: 12px 4px; font: inherit; font-size: 14px; color: var(--c-ink);
+}
+.cmdk-box [cmdk-list] { max-height: 46vh; overflow: auto; padding: 6px; }
+.cmdk-box [cmdk-group-heading] {
+  padding: 6px 10px 2px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--c-ink-4);
+}
+.cmdk-box [cmdk-item] {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: 7px 10px; border-radius: var(--r-row);
+  cursor: pointer; font-size: 13px;
+}
+.cmdk-box [cmdk-item][data-selected="true"] { background: var(--c-accent-tint); }
+.cmdk-box [cmdk-empty] { padding: 14px; color: var(--c-ink-3); }
+
+/* ── message actions ─────────────────────────────────────────────────────── */
+.msg-wrap { position: relative; }
+.msg-copy {
+  position: absolute; top: -2px; right: -4px;
+  opacity: 0;
+  transition: opacity var(--d-feedback) var(--e-standard);
+}
+.msg-wrap:hover .msg-copy { opacity: 1; }
+
+/* ── jump to bottom ──────────────────────────────────────────────────────── */
+.jump-bottom {
+  position: absolute; right: 28px; bottom: 118px; z-index: 5;
+  border: 1px solid var(--c-border-1);
+  background: var(--c-surface-1);
+  color: var(--c-ink);
+  border-radius: var(--r-pill);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px -6px rgba(0, 0, 0, .24);
+}
+.jump-bottom:hover { background: var(--c-hover-plate); }
+
+/* ── @ mentions ──────────────────────────────────────────────────────────── */
+.mention-list {
+  position: absolute; bottom: 6px; left: 0; right: 0; z-index: var(--z-sticky);
+  max-height: 220px; overflow: auto;
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border-1);
+  border-radius: var(--r-popover);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, .22);
+  padding: var(--s-1);
+}
+.mention-item {
+  padding: 6px 10px; border-radius: var(--r-row); cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.mention-item:hover { background: var(--c-accent-tint); }
+
+/* ── status bar ──────────────────────────────────────────────────────────── */
+.statusbar {
+  grid-column: 1 / -1;
+  padding: 0 14px;
+  height: 30px;
+  border-top: 0.5px solid var(--c-divider);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-ink-4);
+}
+.stale-pill {
+  position: fixed; bottom: 44px; left: 50%; transform: translateX(-50%);
+  border: 1px solid var(--c-border-1);
+  background: var(--c-surface-1);
+  color: var(--c-ink);
+  border-radius: var(--r-pill);
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  z-index: var(--z-sticky);
+}
+
+/* ── settings ────────────────────────────────────────────────────────────── */
+.settings-grid { display: grid; grid-template-columns: 216px minmax(0,1fr); height: 100%; }
+.settings-rail {
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 0.5px solid var(--c-divider);
+  background: var(--c-sidebar);
+  padding: var(--s-2);
+}
+.set-nav {
+  display: flex; align-items: center; gap: var(--s-2);
+  height: 30px; padding: 0 10px;
+  border-radius: var(--r-row);
+  cursor: pointer; font-size: 13px; color: var(--c-ink-2);
+}
+.set-nav:hover { background: var(--c-hover-plate); }
+.set-nav.active { background: var(--c-accent-tint); color: var(--c-ink); font-weight: 550; }
+
+/* ── segmented view switch ───────────────────────────────────────────────── */
+.view-seg {
+  display: inline-flex; gap: 2px;
+  background: var(--c-chip);
+  border-radius: var(--r-2);
+  padding: 2px;
+  flex: none;
+}
+.view-seg-btn {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--c-ink-2);
+  white-space: nowrap;   /* the band squeezes its cluster; a label must not wrap */
+  flex: none;
+  transition: background var(--d-feedback) var(--e-standard);
+}
+.view-seg-btn:hover:not(:disabled) { color: var(--c-ink); }
+.view-seg-btn.active { background: var(--c-surface-1); color: var(--c-ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.view-seg-btn:disabled { opacity: .45; cursor: default; }
+
+/* ── context ring (budget) ───────────────────────────────────────────────── */
+.ctx-ring {
+  width: 24px; height: 24px;
+  border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--c-ink);
+  position: relative;
+}
+.ctx-ring::after {
+  content: ""; position: absolute; inset: 3px;
+  border-radius: var(--r-pill);
+  background: var(--c-canvas);
+}
+
+/* ── trajectory / checkpoints / workbench tables ─────────────────────────── */
+.traj-row { border-bottom: 0.5px solid var(--c-divider); }
+.traj-row.active { background: var(--c-accent-tint); }
+.bench-tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 10px; border-radius: var(--r-row);
+  font-size: 12px; color: var(--c-ink-2);
+}
+.bench-tab.active { background: var(--c-accent-tint); color: var(--c-ink); font-weight: 550; }
+.diff-line { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+.diff-line.add { color: var(--c-status-ok); background: color-mix(in srgb, var(--c-status-ok) 8%, transparent); }
+.diff-line.del { color: var(--c-status-bad); background: color-mix(in srgb, var(--c-status-bad) 8%, transparent); }
+.diff-line.hunk { color: var(--c-accent); background: var(--c-accent-tint); }
+
+/* ── heat grid: Claude Code's blue day ramp ──────────────────────────────────
+ * One cell per day, weeks as columns, Sunday first. The empty cell IS the zero
+ * step, so the skeleton and the data look like one grid and nothing shifts when
+ * the numbers arrive. Cells are square and share the panel's inner width; the
+ * gap is 3px and the corner 3px, exactly as the reference's
+ * `.dsh-claude-home-heat-cell`.
+ *
+ * The five levels mix the data blue into the empty tone by HOME_HEAT_RAMP
+ * (24/44/64/82/100%), so the faintest level reads as a tinted empty cell and
+ * never as a hole — the bug the reference fixed in 0.21.x.                       */
+.heat {
+  --heat-ink: var(--c-data-ink);
+  --heat-empty: color-mix(in srgb, var(--c-ink) 11%, transparent);
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-columns: 1fr;
+  gap: 3px;
+  align-content: start;
+  position: relative;
+  contain: layout style;
+}
+.heat-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--heat-empty);
+}
+.heat-cell[data-level="1"] { background: color-mix(in srgb, var(--heat-ink) 24%, var(--heat-empty)); }
+.heat-cell[data-level="2"] { background: color-mix(in srgb, var(--heat-ink) 44%, var(--heat-empty)); }
+.heat-cell[data-level="3"] { background: color-mix(in srgb, var(--heat-ink) 64%, var(--heat-empty)); }
+.heat-cell[data-level="4"] { background: color-mix(in srgb, var(--heat-ink) 82%, var(--heat-empty)); }
+.heat-cell[data-level="5"] { background: color-mix(in srgb, var(--heat-ink) 100%, var(--heat-empty)); }
+.heat-cell:hover { outline: 1px solid var(--c-border-3); outline-offset: 1px; }
+
+/* The day tip: one pill the grid carries, naming the day the pointer is on. */
+.heat-hint {
+  position: absolute;
+  top: 0; left: 0;
+  z-index: 2;
+  background: var(--c-ink);
+  color: var(--c-canvas);
+  border-radius: var(--r-row);
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(.96);
+  transform-origin: top left;
+  transition: opacity var(--d-hint-exit, 50ms) var(--e-standard),
+              transform var(--d-hint-exit, 50ms) var(--e-standard);
+}
+.heat-hint[data-shown="true"] {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity var(--d-surface) var(--e-standard),
+              transform var(--d-surface) var(--e-enter);
+}
+
+/* ── heat legend: the five rungs as a scale ──────────────────────────────── */
+.heat-legend { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--c-ink-4); }
+.heat-legend i {
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  background: var(--heat-empty);
+  display: inline-block;
+}
+
+/* ── sidebar hover plate & peek ──────────────────────────────────────────── */
+.rail [data-radix-popper-content-wrapper] { z-index: var(--z-popover); }
+
+/* ── scrollbars: the reference's scrollbar rung ──────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--c-border-2) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--c-border-2);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--c-border-3); background-clip: content-box; }
+
+/* ── focus: the reference never strokes focus with the accent ─────────────── */
+:where(button, [role="tab"], a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-ink-3);
+  outline-offset: 2px;
+}
+
+/* ── reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

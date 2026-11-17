@@ -150,7 +150,7 @@ export default function LoginGate({ onAuthed }) {
             </form>
           )}
 
-          <Box style={{ borderTop: "1px solid var(--gray-a5)", paddingTop: 10 }}>
+          <Box style={{ borderTop: "1px solid var(--c-divider)", paddingTop: 10 }}>
             <Text size="1" color="gray">
               仅限已获明确书面授权的系统使用。完整条款见仓库 DISCLAIMER.md。
             </Text>

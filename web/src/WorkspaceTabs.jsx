@@ -7,6 +7,13 @@ import { Plus, X, CircleDot, TriangleAlert } from "lucide-react";
  * 待处理审批 / 运行中的状态点让长任务在别的标签里也不丢。 */
 
 const statusDot = (s) => s === "running" ? "amber" : s === "failed" || s === "timeout" ? "red" : s === "done" ? "green" : "gray";
+/** The status ladder is literal, never the brand accent: waiting amber, done
+ *  green, failure brick, everything else the muted running neutral. */
+const statusColor = (s) =>
+  s === "running" ? "var(--c-status-awaiting)"
+    : s === "done" || s === "achieved" ? "var(--c-status-ok)"
+    : s === "failed" || s === "timeout" ? "var(--c-status-bad)"
+    : "var(--c-status-running)";
 
 export default function WorkspaceTabs({ open, active, onPick, onClose, onNew, pendingByTask = {} }) {
   const list = useMemo(() => open || [], [open]);
@@ -23,7 +30,7 @@ export default function WorkspaceTabs({ open, active, onPick, onClose, onNew, pe
                       className={"wtab" + (isActive ? " active" : "")}
                       onClick={() => onPick(tab)}
                       title={`${tab.title || id} · ${tab.type === "conv" ? "对话" : "HARNESS 运行"}`}>
-                {n > 0 ? <TriangleAlert size={11} color="var(--amber-9)" /> : <CircleDot size={10} color={`var(--${statusDot(tab.status)}-9)`} />}
+                {n > 0 ? <TriangleAlert size={11} color="var(--c-status-awaiting)" /> : <CircleDot size={10} color={statusColor(tab.status)} />}
                 <span className="wtab-title">{tab.title || (tab.type === "conv" ? "对话 " : "运行 #") + id}</span>
                 {tab.type === "task" && tab.status === "running" ? <span className="wtab-live" /> : null}
                 <span className="wtab-x" role="button" aria-label="关闭标签"

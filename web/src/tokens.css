@@ -1,0 +1,249 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Design tokens — ported from dsh-claude-style (MIT) `theme/tokens.json`.
+ *
+ * The reference's model, kept intact:
+ *   • every colour is a **tone** of one of five seeds (accent / canvas / text /
+ *     code / link), and the ladder is shared by every card;
+ *   • a canvas pair (light/dark) is read as one family — the canvas, its
+ *     sidebar, its borders and every ink step derive from the same seed;
+ *   • in **dark**, borders are not a colour but a highlight (translucent white
+ *     at .09 / .18 / .30) so an edge reads as a chamfer catching the top light;
+ *   • separators sit one rung below the lightest border, at 0.5px;
+ *   • accent stays under ~10% of visible elements.
+ *
+ * We cannot ship their `tokens.json` build step (it resolves oklch deltas into
+ * literals at build time), so the ladder is written out as literal colours for
+ * the two schemes we support — light and dark — and every surface token names
+ * the rung it reads. Editing one rung here repaints every surface that reads it.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── seeds ───────────────────────────────────────────────────────────── */
+  --c-accent: #d97757;          /* the single accent: Claude's terracotta   */
+  --c-canvas: #ffffff;
+  --c-text: #161616;
+  --c-link: #184f95;
+  --c-code: #161616;
+
+  /* ── canvas family (light: an opaque warm ladder) ────────────────────── */
+  --c-canvas: #ffffff;
+  --c-surface-1: #ffffff;                       /* Δl 0                       */
+  --c-surface-2: #fbfbfa;                       /* Δl ≈ .006                  */
+  --c-surface-3: #f7f7f5;                       /* Δl ≈ .014                  */
+  --c-overlay: #fbfbfa;                         /* Δl +.01 · C 0              */
+  --c-code-block: #fbfbfa;                      /* Δl +.01 · C 0              */
+  --c-inset: #fbfbfa;
+  --c-card: #ffffff;
+  --c-table-head: #f2f2ef;                      /* Δl −.034                   */
+  --c-hover-plate: #f2f2ef;
+  --c-selector: #fbfbf9;                        /* Δl −.004                   */
+  --c-chip: #f5f5f2;                            /* Δl −.019                   */
+  --c-sidebar: #fafafa;                         /* Δl −.002 · ΔC +.002        */
+
+  /* ── ink ladder ──────────────────────────────────────────────────────── */
+  --c-ink: #161616;
+  --c-ink-2: #5f5c57;                           /* Δl +.327 · ΔC +.010        */
+  --c-ink-3: #8b8880;                           /* Δl +.436 · ΔC +.011        */
+  --c-ink-4: #b3afa6;                           /* Δl +.550 · ΔC +.007        */
+  --c-canvas-ink: #2f2f2d;                      /* Δl −.801 from canvas       */
+
+  /* ── borders: light = warm opaque ladder, dark = one highlight ───────── */
+  --c-border-1: #e9e9e5;                        /* Δl −.067                   */
+  --c-border-2: #dcdcd7;                        /* Δl −.098                   */
+  --c-border-3: #c9c9c2;                        /* Δl −.144                   */
+  --c-divider: rgba(22, 22, 22, .05);
+
+  /* ── accent family ───────────────────────────────────────────────────── */
+  --c-accent-hover: #c96844;                    /* Δl −.063 · m 1.01          */
+  --c-accent-active: #e08d6f;                   /* Δl +.068 · m 1.10 · α .26  */
+  --c-accent-tint: #fbeae4;                     /* l .918 · c .028            */
+  --c-on-accent: #ffffff;
+
+  /* ── data colours (charts + heat grid; independent of the brand accent) ─ */
+  --c-data-ink: #3b6ecf;                        /* the heat grid's single blue */
+  --c-data-0: #3b7ddd;
+  --c-data-1: #ec7a2c;
+  --c-data-2: #25a06b;
+  --c-data-3: #8a63d8;
+  --c-data-4: #13a5bd;
+  --c-data-5: #df4d8f;
+  --c-data-6: #e0a514;
+  --c-data-7: #e2504f;
+  --c-data-8: #7aae24;
+  --c-data-9: #8b91a0;
+
+  /* ── status (literal, never derived from the accent) ─────────────────── */
+  --c-status-running: #898781;
+  --c-status-awaiting: #fab219;
+  --c-status-unread: #2a78d6;
+  --c-status-ok: #25a06b;
+  --c-status-bad: #d94f4a;
+
+  /* ── bubbles ─────────────────────────────────────────────────────────── */
+  --c-bubble: #f4f2f3;                          /* Δl −.037 · ΔC +.002        */
+
+  /* ── type ────────────────────────────────────────────────────────────── */
+  --font-serif: "Anthropic Serif Web Text", "Anthropic Serif", "Noto Serif SC",
+    "Source Han Serif SC", Georgia, "Songti SC", serif;
+  --font-sans: "Anthropic Sans Web Text", "Anthropic Sans", Inter,
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "Anthropic Mono Web", "Anthropic Mono", "JetBrains Mono",
+    ui-monospace, "SF Mono", "Fira Code", Consolas, "Liberation Mono",
+    Menlo, monospace;
+  /* Prose leads with the serif Latin face and lets CJK fall through to a sans
+     CJK: the serif Latin faces carry no CJK glyphs. */
+  --font-prose: var(--font-serif);
+
+  /* ── shapes: a 4 / 8 / 16 ladder, 12px popover card with 6px rows ─────── */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 16px;
+  --r-popover: 12px;
+  --r-row: 6px;
+  --r-pill: 999px;
+
+  /* ── spacing: 4px rhythm ─────────────────────────────────────────────── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* ── motion (roles, one value per role) ──────────────────────────────── */
+  --d-instant: 80ms;
+  --d-feedback: 120ms;
+  --d-reveal: 120ms;
+  --d-surface: 150ms;
+  --d-exit: 120ms;
+  --d-enter: 320ms;
+  --d-open: 250ms;
+  --e-standard: ease;
+  --e-out: ease-out;
+  --e-enter: cubic-bezier(.34, 1.3, .64, 1);
+  --e-settle: cubic-bezier(.22, 1, .36, 1);
+  --e-glide: cubic-bezier(.22, .61, .36, 1);
+
+  /* ── layers ──────────────────────────────────────────────────────────── */
+  --z-control: 10;
+  --z-sticky: 20;
+  --z-popover: 60;
+  --z-overlay: 100;
+}
+
+/* ── dark: the same ladder, read from a near-black canvas ───────────────── */
+:root[data-theme="dark"] {
+  --c-canvas: #191919;
+  --c-surface-1: #1e1e1e;                       /* Δl +.036 */
+  --c-surface-2: #232323;                       /* Δl +.065 */
+  --c-surface-3: #2c2c2c;                       /* Δl +.104 */
+  --c-overlay: #232323;
+  --c-code-block: #1e1e1e;
+  --c-inset: #151515;                           /* Δl −.024 */
+  --c-card: #212121;                            /* Δl +.044 */
+  --c-table-head: #232323;
+  --c-hover-plate: #2c2c2c;
+  --c-selector: #2c2c2c;
+  --c-chip: #191919;
+  --c-sidebar: #1f1f1f;
+
+  --c-ink: #fdfdfd;
+  --c-ink-2: #c9c7c2;                           /* Δl −.210 */
+  --c-ink-3: #a8a5a0;                           /* Δl −.323 */
+  --c-ink-4: #8f8c87;                           /* Δl −.445 */
+  --c-canvas-ink: #e6e5e1;
+
+  /* dark edges are a highlight, not a contour */
+  --c-border-1: rgba(255, 255, 255, .09);
+  --c-border-2: rgba(255, 255, 255, .18);
+  --c-border-3: rgba(255, 255, 255, .30);
+  --c-divider: rgba(255, 255, 255, .06);
+
+  --c-accent-hover: #e08d6f;                    /* Δl +.071 · m .91 · h 2 */
+  --c-accent-active: rgba(217, 119, 87, .30);
+  --c-accent-tint: #3a2620;                     /* l .31 · c .055 */
+  --c-on-accent: #191919;
+
+  --c-bubble: rgba(255, 255, 255, .06);
+
+  --c-data-ink: #3b6ecf;
+  --c-data-0: #6aa2ff;
+  --c-data-1: #ff9b55;
+  --c-data-2: #45c98c;
+  --c-data-3: #ac8cf7;
+  --c-data-4: #3dc6dc;
+  --c-data-5: #f77cb2;
+  --c-data-6: #f4c445;
+  --c-data-7: #ff7b78;
+  --c-data-8: #a1d45a;
+  --c-data-9: #a6acb8;
+
+  --c-status-ok: #45c98c;
+  --c-status-bad: #ff7b78;
+}
+
+/* Radix Themes reads its own scale; point the aliases the console uses at the
+   ladder so a Radix Button and a hand-styled row agree.
+ *
+ * These are declared on `.radix-themes` (the wrapper Radix renders) rather than
+ * on :root on purpose: Radix writes its palette variables on that same element,
+ * and a :root rule loses to it — the primary button stayed Radix's tomato
+ * instead of the ladder's terracotta until this moved down a level. */
+.radix-themes {
+  --accent-1: var(--c-accent-tint);
+  --accent-2: var(--c-accent-tint);
+  --accent-3: var(--c-accent-tint);
+  --accent-4: var(--c-accent-tint);
+  --accent-5: var(--c-accent-tint);
+  --accent-6: var(--c-accent-hover);
+  --accent-7: var(--c-accent-hover);
+  --accent-8: var(--c-accent);
+  --accent-9: var(--c-accent);
+  --accent-10: var(--c-accent-hover);
+  --accent-11: var(--c-accent);
+  --accent-12: var(--c-ink);
+  --accent-a2: var(--c-accent-tint);
+  --accent-a3: var(--c-accent-tint);
+  --accent-a4: var(--c-accent-tint);
+  --accent-a5: var(--c-accent-tint);
+  --accent-a11: var(--c-accent);
+  --accent-a12: var(--c-ink);
+
+  --gray-1: var(--c-canvas);
+  --gray-2: var(--c-surface-1);
+  --gray-3: var(--c-surface-2);
+  --gray-4: var(--c-surface-3);
+  --gray-5: var(--c-chip);
+  --gray-6: var(--c-border-1);
+  --gray-7: var(--c-border-2);
+  --gray-8: var(--c-status-running);
+  --gray-9: var(--c-ink-4);
+  --gray-10: var(--c-ink-3);
+  --gray-11: var(--c-ink-2);
+  --gray-12: var(--c-ink);
+  --gray-a2: var(--c-surface-1);
+  --gray-a3: var(--c-hover-plate);
+  --gray-a4: var(--c-selector);
+  --gray-a5: var(--c-divider);
+  --gray-a6: var(--c-border-1);
+  --gray-a7: var(--c-border-2);
+
+  --color-panel-solid: var(--c-surface-1);
+  --color-panel-translucent: var(--c-surface-1);
+  --color-surface: var(--c-canvas);
+  --color-background: var(--c-canvas);
+
+  --default-font-family: var(--font-sans);
+  --default-mono-font-family: var(--font-mono);
+  --heading-font-family: var(--font-serif);
+
+  --radius-1: var(--r-1);
+  --radius-2: 6px;
+  --radius-3: var(--r-2);
+  --radius-4: var(--r-2);
+  --radius-5: var(--r-popover);
+  --radius-6: var(--r-3);
+}

@@ -121,7 +121,7 @@ export default function Subagents({ taskId, live, onClose }) {
 
   return (
     <div className="subpanel">
-      <Flex align="center" gap="2" px="3" py="2" style={{ borderBottom: "1px solid var(--gray-a5)" }}>
+      <Flex align="center" gap="2" px="3" py="2" style={{ borderBottom: "1px solid var(--c-divider)" }}>
         {sel ? (
           <>
             <Tooltip content="返回子代理列表">
@@ -224,7 +224,7 @@ function SubagentList({ rows, err, busy, onRetry, onOpen, onStop }) {
                       {st.label}
                     </Badge>
                     <Flex align="center" gap="1" style={{ marginLeft: "auto" }}>
-                      <Clock size={11} color="var(--gray-8)" />
+                      <Clock size={11} color="var(--c-status-running)" />
                       <Text size="1" color="gray">{fmtDuration(r.duration_ms)}</Text>
                       {clickable ? <ChevronRight size={13} color="var(--gray-9)" /> : null}
                     </Flex>
@@ -262,13 +262,13 @@ function SubagentDetail({ row, detail, err, busy, onRetry }) {
         <Badge size="1" variant="soft" color="iris">{AGENT_LABEL[row.agent_type] || row.agent_type || "子代理"}</Badge>
         <Badge size="1" variant="soft" color={st.color}>{st.label}</Badge>
         <Flex align="center" gap="1" style={{ marginLeft: "auto" }}>
-          <Clock size={11} color="var(--gray-8)" />
+          <Clock size={11} color="var(--c-status-running)" />
           <Text size="1" color="gray">{fmtDuration(row.duration_ms)}</Text>
         </Flex>
       </Flex>
 
       {row.prompt ? (
-        <Box p="2" style={{ background: "var(--gray-a3)", borderRadius: 8 }}>
+        <Box p="2" style={{ background: "var(--c-hover-plate)", borderRadius: 8 }}>
           <Text size="1" color="gray" as="div" mb="1">派发提示词</Text>
           <Text size="1" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{row.prompt}</Text>
         </Box>

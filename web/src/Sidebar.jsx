@@ -25,7 +25,7 @@ function groupOf(t) {
 }
 
 const statusColor = (s) =>
-  s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
+  s === "running" ? "var(--c-status-awaiting)" : s === "done" || s === "achieved" ? "var(--c-status-ok)" : s === "failed" || s === "timeout" ? "var(--c-status-bad)" : "var(--c-status-running)";
 
 export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings, onLogout }) {
   const [hover, setHover] = useState(null);
@@ -112,8 +112,8 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
           </Tooltip>
         </Flex>
       ) : (
-        <Flex align="center" gap="2" px="3" pt="3" pb="2">
-          <Heading size="3" weight="medium">artex · harness</Heading>
+        <Flex align="center" gap="2" px="3" pt="3" pb="2" className="rail-head">
+          <Heading size="3" weight="medium" className="rail-brand">artex · harness</Heading>
           <Box style={{ marginLeft: "auto" }}>
             <Tooltip content="收起侧栏">
               <IconButton size="1" variant="ghost" color="gray" aria-label="收起侧栏" onClick={() => setCollapsed(true)}>
@@ -156,7 +156,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
                    title={c.title || "新对话"}
                    onClick={() => onPickConv(String(c.id))}
                    onKeyDown={(e) => { if (e.key === "Enter") onPickConv(String(c.id)); }}>
-                <span className="dot" style={{ background: "var(--accent-9)" }} />
+                <span className="dot" style={{ background: "var(--c-accent)" }} />
                 <Text size="2" className="row-title">{c.title || "新对话"}</Text>
               </div>
             );
@@ -287,7 +287,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
       <Separator size="4" />
       {collapsed ? (
         <Flex direction="column" align="center" gap="2" py="3" className="rail-foot"
-              style={{ flexShrink: 0, borderTop: "1px solid var(--gray-a5)" }}>
+              style={{ flexShrink: 0, borderTop: "1px solid var(--c-divider)" }}>
           <Tooltip content={pending.length ? `${pending.length} 个待审批` : "没有待审批"} side="right">
             <IconButton size="2" variant="ghost" color="gray" aria-label="通知" onClick={() => setNotif(true)}>
               <Box style={{ position: "relative", display: "inline-flex" }}>
@@ -392,7 +392,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
               <Card key={p.id} size="1">
                 <Flex direction="column" gap="1">
                   <Flex align="center" gap="2">
-                    <ShieldAlert size={13} color="var(--amber-9)" />
+                    <ShieldAlert size={13} color="var(--c-status-awaiting)" />
                     <Text size="1" weight="medium">{p.tool_name || p.tool || "工具调用"}</Text>
                     <Text size="1" color="gray">#{p.id}</Text>
                   </Flex>

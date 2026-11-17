@@ -178,7 +178,7 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
   }
 
   return (
-    <Box px="4" py="3" style={{ borderTop: "1px solid var(--gray-a5)" }}>
+    <Box px="4" py="3" style={{ borderTop: "1px solid var(--c-divider)" }}>
       <Flex direction="column" gap="2">
         {/* 多行输入：随内容自增高，到 200px 后内部滚动；Enter 发送、Shift+Enter 换行。
             单行 TextField 会把多行消息挤成一条，看不到自己写了什么。 */}
@@ -263,10 +263,10 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
               <Flex align="center" gap="2">
                 <Text size="1" color="gray">上下文</Text>
                 <Text size="1" weight="medium" color={pctColor(budget.pct)}>{Math.round(budget.pct || 0)}%</Text>
-                <Box style={{ width: 46, height: 4, borderRadius: 99, background: "var(--gray-a4)", overflow: "hidden" }}>
+                <Box style={{ width: 46, height: 4, borderRadius: 99, background: "var(--c-hover-plate)", overflow: "hidden" }}>
                   <Box style={{ width: Math.min(100, Math.round(budget.pct || 0)) + "%", height: "100%",
-                                background: pctColor(budget.pct) === "red" ? "var(--red-9)"
-                                          : pctColor(budget.pct) === "amber" ? "var(--amber-9)" : "var(--accent-9)" }} />
+                                background: pctColor(budget.pct) === "red" ? "var(--c-status-bad)"
+                                          : pctColor(budget.pct) === "amber" ? "var(--c-status-awaiting)" : "var(--c-accent)" }} />
                 </Box>
                 <Text size="1" color="gray">{fmtTokens(budget.last_input)} / {fmtTokens(budget.window)}</Text>
               </Flex>
