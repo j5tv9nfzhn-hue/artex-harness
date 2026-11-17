@@ -1,9 +1,9 @@
-import { authedFetch } from "./lib/auth.js";
+import { authedFetch, errorText } from "./lib/auth.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "./ui.jsx";
 import { motion } from "motion/react";
 import { ArrowLeft, ChevronRight, Clock, Loader2, RefreshCw, Square, Users, X, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "./toast.jsx";
 
 /* 子代理侧栏（对照 DSH packages/client/ui-subagent）：
  *   section.title / section.empty   —— 分节标题与空态
@@ -24,7 +24,7 @@ import { toast } from "sonner";
 
 async function jget(path) {
   const r = await authedFetch(path);
-  if (!r.ok) throw new Error(`HTTP ${r.status}：${(await r.text()).slice(0, 140)}`);
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 
@@ -113,7 +113,7 @@ export default function Subagents({ taskId, live, onClose }) {
   async function stopDelegation(did) {
     try {
       const r = await authedFetch(`/api/harness/delegations/${encodeURIComponent(taskId)}/${encodeURIComponent(did)}/stop`, { method: "POST" });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      if (!r.ok) throw new Error(await errorText(r));
       toast.success(`已停止后台委派 #${did}`);
       load(true);
     } catch (e) { toast.error("停止失败：" + e.message); }

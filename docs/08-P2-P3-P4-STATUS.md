@@ -76,12 +76,20 @@ ok  github.com/Autumn-27/artex/agent
 
 ## 四、仍未落实（明确列出，不含糊）
 
+> **更新（本轮）**：下表前三项已落实，控制台也已接线。详细状态见
+> [docs/13-CONSOLE-WIRING.md](13-CONSOLE-WIRING.md)。
+>
+> | 原项 | 现状 |
+> |---|---|
+> | 浏览器会话生命周期 | ✅ `harness/browser.Manager`：一任务一会话、崩溃重建、标签隔离、30 分钟 GC |
+> | 逐像素内嵌视图 | ✅ 内容寻址截图管线 + `/api/harness/shot/{hash}` + 控制台截图页 |
+> | 项目切换 | ✅ `tasks.project_dir` + `projectGuard` 目录互斥 + 控制台「工作台 → 项目」页 |
+> | F12 面板（console/network 结构化） | ⚠ **部分**：console 已按级别解析展示；**network 仍无结构化数据**，界面明说 |
+
 | 项 | 原因 | 下一步 |
 |---|---|---|
-| 浏览器**会话生命周期**（崩溃重建、多标签隔离、超时回收） | MCP client 目前每轮由 `AugmentTools` 创建，没有常驻会话管理器 | 引入 `harness/browser.Manager`：按任务持有 session，带 idle 超时与重建 |
-| **逐像素内嵌视图** | 需要图像管线（MCP 截图 → 存 blob → 前端渲染），当前事件只存文本 | 在工具结果路径识别 image block，落 `data/browser/`，前端 `<img>` 指向该端点 |
-| **项目切换** | 目前"一个任务=一个工作区目录"，没有"项目"这一层实体 | 增 `tasks.project_dir`（或 project 表），控制台左栏按项目分组，文件树/终端/DIFF 都以其为根 |
-| F12 面板（console/network 结构化展示） | 依赖上表第一条 + Chrome 侧条件 | 先做 `harness/browser.Manager`，再解析 devtools 工具输出 |
+| F12 的 **network** 结构化面板 | `chrome-devtools` 输出只按 console 级别解析；请求/响应表未建模 | 需要给 `list_network_requests` 输出定 schema 再投影；当前界面明确写出"不在这里"，不画空表格 |
+| 委派隔离目录的历史积累 | 已有 72h TTL 回收（`harness_delegation_retention_hours`，0 关闭）；结果正文与注册表记录永不删除 | 若需按任务配额，另加容量上限 |
 
 ## 五、历史任务核对
 

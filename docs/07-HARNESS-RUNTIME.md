@@ -105,11 +105,13 @@ harnessLoop (server/harness_loop.go)
 |---|---|
 | P3-1 默认启用 | ✅ `ensureBrowserEnabled()`：启动时把种子 `browser`（stdio, npx @playwright/mcp）启用；可用 `harness_browser=false` 关闭 |
 | P3-2 状态如实 | ✅ `GET /api/harness/browser`：configured/enabled/tools_cached/npx 存在性 + 最近 browser 动作 |
-| P3-3 会话生命周期 | ⚠ **未完成**：MCP client 每轮由 `AugmentTools` 创建，天然"每轮重连"，但没有崩溃后主动重建与多标签隔离 |
-| P3-4 F12 级能力 | ⚠ **未完成**：只有 Playwright MCP 的快照/点击/输入；console/network 需要 `chrome-devtools-mcp` 或 CDP 端点 |
-| 内嵌页面视图 | ⚠ **未完成**：控制台显示状态与最近动作，不渲染页面截图 |
+| P3-3 会话生命周期 | ✅ `harness/browser.Manager`：一任务一会话、`MarkBroken`+重建、标签隔离、30 分钟空闲 GC；端点 `/sessions`、`/restart`、`/tabs` |
+| P3-4 F12 级能力 | ✅ `chrome-devtools-mcp` 与 Playwright 同会话；console 错误按级别解析后展示（`console_errors`）；⚠ **network 面板仍未结构化** |
+| 内嵌页面视图 | ✅ 截图内容寻址存 `<data>/browser/<sha256>.png`，`GET /api/harness/shot/{hash}` 渲染；控制台「浏览器 → 截图」页 |
+| 控制台入口 | ✅ 顶栏「浏览器」按钮（本轮接线；此前后端就绪但界面无入口） |
 
-实测：`enabled=true, npx found, tools_cached=0` → 就绪面板如实报"已启用但尚未连通"，不假装可用。
+实测：`restart` 1.97s 内拉起 `browser` 与 `chrome-devtools` 两个服务器，均 `live`；
+就绪页报告 `connected · 25 个工具`。
 
 ### P4 会话接管（部分）
 
@@ -121,10 +123,24 @@ harnessLoop (server/harness_loop.go)
 
 ## 四、明确未做 / 已知缺口
 
-1. **P3 的会话生命周期与 F12**：需要引入 CDP 或 `chrome-devtools-mcp`，并给浏览器会话加
-   超时/重建/标签隔离。当前只保证"默认可用 + 状态如实"。
-2. **内嵌浏览器视图**：需要截图流式回传与渲染管线（MCP `browser_take_screenshot` → 前端 blob）。
-3. **多会话/项目切换**：控制台仍是"单任务视角"。
+> **更新（本轮）**：以下第 1、2、3、5 条已由代码补齐，控制台也已接线。原文保留作为
+> 当时的记录；当前状态以 [docs/13-CONSOLE-WIRING.md](13-CONSOLE-WIRING.md) 为准。
+>
+> | 原缺口 | 现状 |
+> |---|---|
+> | 1. 会话生命周期与 F12 | ✅ `harness/browser.Manager`（一任务一会话、重建、标签、GC）+ `chrome-devtools` 同会话 |
+> | 2. 内嵌浏览器视图 | ✅ 截图管线（内容寻址 `/api/harness/shot/{hash}`）+ 控制台「浏览器 → 截图」页 |
+> | 3. 多会话/项目切换 | ✅ `PUT /api/tasks/{id}/project` + 控制台「工作台 → 项目」页（目录互斥） |
+> | 4. 历史任务仍在旧管线 | 仍然成立（刻意）；`PUT /api/tasks/{id}/harness-mode` 逐个切换 |
+> | 5. 目标分解 | 仍然成立（harness 模式跳过；agent 可用 `set_goals` 自己写） |
+>
+> 仍属真实缺口的只有一条：**F12 的结构化 network 面板**——后端只按 console 级别解析
+> chrome-devtools 输出，没有请求/响应表，所以界面明说"不在这里"而不是画空表格。
+
+1. ~~P3 的会话生命周期与 F12~~：已引入 `chrome-devtools-mcp` 与 `harness/browser.Manager`
+   （一任务一会话、崩溃重建、标签隔离、30 分钟空闲回收）。
+2. ~~内嵌浏览器视图~~：截图经 stdio 直取 → 内容寻址落盘 → `/api/harness/shot/{hash}` 渲染。
+3. ~~多会话/项目切换~~：`tasks.project_dir` + `projectGuard` 目录互斥；控制台可改绑。
 4. **历史任务仍在规划者/执行者管线**：这是刻意的（升级不改行为）；可用
    `PUT /api/tasks/{id}/harness-mode {"harness_mode":true}` 逐个切换，切换在下一轮生效。
 5. **目标分解**：harness 模式直接跳过；如果希望 agent 得到"子目标"，它可以用 `set_goals` 自己写。

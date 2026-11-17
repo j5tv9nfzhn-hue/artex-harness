@@ -222,7 +222,14 @@ func (s *Server) harnessReady(w http.ResponseWriter, _ *http.Request) {
 		var enabled bool
 		var tools int
 		_ = s.m.pg.QueryRow(`SELECT COALESCE(enabled,false) FROM mcp_servers WHERE name='browser'`).Scan(&enabled)
-		_ = s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache WHERE server='browser'`).Scan(&tools)
+		// mcp_tools_cache keys on server_id (bigint), not on a "server" name column —
+		// that column does not exist. The old query errored and the error was
+		// discarded, so this block always reported 0 cached tools and the readiness
+		// page told the operator "browser MCP 尚未连通" while the tools were in fact
+		// cached and usable (same defect class as harness_browser.go, fixed there).
+		if err := s.m.pg.QueryRow(`SELECT count(*) FROM mcp_tools_cache c JOIN mcp_servers s ON s.id = c.server_id WHERE s.name = 'browser'`).Scan(&tools); err != nil {
+			log.Printf("[harness/ready] 统计 browser 工具缓存失败: %v", err)
+		}
 		br = block{OK: enabled && tools > 0, Enabled: enabled, Count: tools}
 		switch {
 		case !enabled:

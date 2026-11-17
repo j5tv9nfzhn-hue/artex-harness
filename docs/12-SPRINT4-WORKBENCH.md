@@ -72,6 +72,53 @@
 | 语法高亮文件预览 | 只做纯文本预读，避免引入新的前端依赖与体积 |
 | 二进制 / 超大文件内联 | 明确拒绝并说明，不做截断假装成功 |
 
+## 四之二、右栏在窄窗口下的布局缺陷（已修）
+
+**现象**：文件 / DIFF / 终端面板在窗口变窄（≤900px）后，或侧栏折叠后，格子被压成
+一条极窄的竖条、内容竖排换行，看起来像整块被"透视/倾斜"压扁；主区与状态栏被挤到
+别的行，视觉顺序变成「侧栏 → 面板 → 状态栏 → 主区」。它只改渲染，不改数据，
+所以刷新、切换页签都复现，但接口返回一直是对的。
+
+**根因（两处，都是 CSS 层叠顺序与优先级问题，不是几何计算错）**：
+
+1. **窄窗口隐藏侧栏的规则写在组件定义之前。**
+   `@media (max-width:900px) { .rail { display:none } }` 原本与 `.app`
+   的网格声明挤在 shell 一节（文件第 42 行），而 `.rail { display:flex }`
+   在第 100 行。两条规则优先级相同（0,1,0），由**源码顺序**决定胜负，
+   于是 `flex` 赢——侧栏在 ≤900px 时根本没有被隐藏，仍占满一整行。
+   多出来的那一行让 `.app` 从 2 行变 4 行：`rail / subpanel / statusbar / main`。
+
+2. **窄窗口的一列声明压不住 `:has()` 选择器。**
+   修好第 1 点后侧栏确实消失了，但
+   `.app:has(.rail.collapsed) { grid-template-columns: 56px minmax(0,1fr) }`
+   （0,2,0）与 `.app:has(.rail.collapsed):has(.subpanel)`（0,3,0）依旧比
+   窄窗口里的 `.app { grid-template-columns: 1fr }`（0,1,0）优先级高。
+   侧栏虽然 `display:none`，网格仍留着一列 **56px 的空槽**，主区白窄一截。
+
+**修复**（`web/src/styles.css`，只动这三处，无其它行为变化）：
+
+| 位置 | 改动 |
+|---|---|
+| shell 一节 | 把 `.rail{display:none}` 从第 42 行的媒体查询里**移走**，该行只留 `.app` 的列声明 |
+| `.rail` 定义之后 | 新增 `@media (max-width:900px){ .rail{display:none} }`，保证它排在 `display:flex` 之后 |
+| 窄窗口媒体查询 | 列声明覆盖 `.app` / `.app:has(.rail.collapsed)` / `.app:has(.subpanel)` / 两者兼有，统一成 `minmax(0,1fr)` |
+
+**验证方式（可复算，不靠肉眼）**：用 CDP 起 headless Chrome，遍历
+`宽度 × 侧栏展开/折叠 × 面板开/关` 矩阵，读 `getBoundingClientRect()` 与
+`getComputedStyle()` 的 `gridTemplateColumns/Rows`、各子元素的 `grid-row` 与
+实际 `x/y/w/h`。判据只有两条：**侧栏在 ≤900px 的 `display` 必须是 `none`**，
+以及**视觉顺序必须是「主区 → 面板 → 状态栏」且面板宽度等于视口宽度**。
+
+| 宽度 | 修复前（折叠 + 面板打开） | 修复后 |
+|---|---|---|
+| 1440 | `cols=56px 1384px`，面板落在 `x=56 w=56`（侧栏列竖条） | `cols=56px 1044px 340px`，面板 `x=1100 w=340` |
+| 900 | `cols=56px 844px`，`rows` 4 条，顺序 `rail/main/subpanel/statusbar` | `cols=900px`，`rows=708/124/28`，顺序 `main/subpanel/statusbar`，侧栏 `display:none` |
+
+>900px 的全部组合在修复前后**数值完全一致**（1440/1200/1100/901 × 展开/折叠 × 开关），
+所以这次改动只影响窄窗口，常规宽度下没有任何视觉变化。
+
+**别把那条媒体查询挪回文件开头**——它和 `.rail` 基础规则的优先级相同，位置就是它的正确性。
+
 ## 五、验证环境说明
 
 - 云电脑内存 3.8G，`make build-all`（npm+vite+go）会 OOM；改用 `vite build` +

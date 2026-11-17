@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Select, Separator, Text, TextField } from "./ui.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeft, ChevronRight, Clock, Coins, Copy, Search, Wrench, X } from "lucide-react";
-import { toast } from "sonner";
-import { authedFetch } from "./lib/auth.js";
+import { toast } from "./toast.jsx";
+import { authedFetch, errorText } from "./lib/auth.js";
 
 /* 轨迹视图（Sprint 2）：把 /api/harness/trajectory 的按轮次行模型渲染成流水表。
  * 与对话流分开：对话回答"说了什么"，轨迹回答"按什么顺序发生了什么、花了多少"。
@@ -11,7 +11,7 @@ import { authedFetch } from "./lib/auth.js";
 
 async function api(path) {
   const r = await authedFetch(path, { credentials: "include" });
-  if (!r.ok) throw new Error((await r.text()).slice(0, 160) || r.statusText);
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 

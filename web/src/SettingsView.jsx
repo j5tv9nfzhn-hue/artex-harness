@@ -1,4 +1,4 @@
-import { authedFetch } from "./lib/auth.js";
+import { authedFetch, errorText } from "./lib/auth.js";
 import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Table, Text, TextField, Tooltip } from "./ui.jsx";
 import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
 
@@ -12,7 +12,7 @@ import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw
 // 与 api 层的键不一致时设置页的请求会全部 401）。
 const jfetch = (p, o = {}) =>
   authedFetch(p, { credentials: "include", ...o, headers: { ...(o.body ? { "Content-Type": "application/json" } : {}) } })
-    .then(async (r) => { if (!r.ok) throw new Error((await r.text()).slice(0, 180)); return r.headers.get("content-type")?.includes("json") ? r.json() : null; });
+    .then(async (r) => { if (!r.ok) throw new Error(await errorText(r)); return r.headers.get("content-type")?.includes("json") ? r.json() : null; });
 
 const SECTIONS = [
   { id: "models", label: "供应商与模型", icon: Cpu },

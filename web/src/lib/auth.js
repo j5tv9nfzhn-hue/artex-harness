@@ -52,3 +52,23 @@ export async function authedFetch(url, opts = {}) {
   }
   return last;
 }
+
+/**
+ * errorText 把后端错误信封解析成一句人话。
+ *
+ * 服务端统一返回 {"error": "..."}。各处面板此前是 (await r.text()).slice(...)，
+ * 于是界面把 {"error":"目录不存在或不是目录: /tmp/x"} 整串原始 JSON（带引号、
+ * 花括号、转义）显示给操作者。这里只取那句话；解析不出来才退回原文——那种情况
+ * 说明返回的确实不是 JSON（例如反向代理的 HTML 错误页），原文对排查才有用。
+ */
+export async function errorText(r) {
+  let raw = "";
+  try { raw = await r.text(); } catch { return r.statusText || `HTTP ${r.status}`; }
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j.error === "string" && j.error) return j.error;
+    if (j && typeof j.message === "string" && j.message) return j.message;
+    if (typeof j === "string" && j) return j;
+  } catch { /* not JSON — fall through */ }
+  return raw.slice(0, 200) || r.statusText || `HTTP ${r.status}`;
+}

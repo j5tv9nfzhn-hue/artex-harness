@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Box, Button, Card, Checkbox, Dialog, Flex, IconButton, ScrollArea, Separator, Text } from "./ui.jsx";
 import { RotateCcw, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
-import { authedFetch } from "./lib/auth.js";
+import { toast } from "./toast.jsx";
+import { authedFetch, errorText } from "./lib/auth.js";
 
 /* 检查点与回滚（Sprint 2）。
  * 每次轮次开始时后端对工作区做哈希快照；这里列出还原点、预览影响范围、
@@ -11,7 +11,7 @@ import { authedFetch } from "./lib/auth.js";
 
 async function api(path, init) {
   const r = await authedFetch(path, { credentials: "include", ...(init || {}) });
-  if (!r.ok) throw new Error((await r.text()).slice(0, 200) || r.statusText);
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 

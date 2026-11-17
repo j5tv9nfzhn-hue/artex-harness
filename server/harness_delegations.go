@@ -13,10 +13,13 @@ package server
 // feature existed, so historical tasks still show their Agent tool calls.
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/Autumn-27/artex/harness/delegation"
 )
@@ -28,6 +31,49 @@ func (s *Server) delegationRegistry(taskID string) *delegation.Registry {
 
 func (s *Server) delegationOutputDir(taskID int64) string {
 	return filepath.Join(s.m.dir, "delegations", strconv.FormatInt(taskID, 10))
+}
+
+// settingDelegationRetentionHours is how long a finished background delegation's
+// isolated scratch directory is kept. 0 disables the sweep. The result body and
+// the registry record are kept regardless — only the directory goes.
+const settingDelegationRetentionHours = "harness_delegation_retention_hours"
+
+const defaultDelegationRetention = 72 * time.Hour
+
+// delegationRetention reads the retention window. Missing/zero means "sweep
+// disabled" only when the operator explicitly set 0; an absent setting uses the
+// 72h default so a stock install does not accumulate directories forever.
+func (s *Server) delegationRetention() time.Duration {
+	if s.m == nil || s.m.pg == nil {
+		return defaultDelegationRetention
+	}
+	raw := s.m.pg.GetInt(settingDelegationRetentionHours, int(defaultDelegationRetention/time.Hour))
+	if raw <= 0 {
+		return 0
+	}
+	return time.Duration(raw) * time.Hour
+}
+
+// startDelegationGC runs the delegation retention sweep (Sprint 3 listed
+// "isolated directories have no TTL" as a known gap). Hourly is enough: the
+// window is measured in days.
+func (s *Server) startDelegationGC(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			win := s.delegationRetention()
+			if win <= 0 {
+				continue
+			}
+			if n := delegation.Global.SweepAll(time.Now(), win); n > 0 {
+				log.Printf("[delegation] 回收 %d 个过期委派目录（保留 %s）", n, win)
+			}
+		}
+	}
 }
 
 func (s *Server) harnessDelegations(w http.ResponseWriter, r *http.Request) {

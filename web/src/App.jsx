@@ -1,14 +1,13 @@
-import { authedFetch, authHeaders, tokenCandidates } from "./lib/auth.js";
+import { authHeaders, authedFetch, errorText, tokenCandidates } from "./lib/auth.js";
 import LoginGate, { clearToken } from "./LoginGate.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Box, Button, Card, Code, Dialog, Flex, Heading, IconButton, ScrollArea, Separator, Switch, Text, TextArea, TextField as RTextField, Theme, Tooltip } from "./ui.jsx";
 import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Command } from "cmdk";
-import { Toaster, toast } from "sonner";
-import rehypeHighlight from "rehype-highlight";
-import "highlight.js/styles/github.css";
+import { Toaster, toast } from "./toast.jsx";
+import Sparkline from "./Sparkline.jsx";
+import Palette from "./Palette.jsx";
 import { Copy, Pause, Play, Plus } from "lucide-react";
 import Sidebar from "./Sidebar.jsx";
 import Composer from "./Composer.jsx";
@@ -18,23 +17,25 @@ import Trajectory from "./Trajectory.jsx";
 import Checkpoints from "./Checkpoints.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import Workbench from "./Workbench.jsx";
+import Browser from "./Browser.jsx";
+import System from "./System.jsx";
 import HeatGrid from "./HeatGrid.jsx";
 import { BrandMark } from "./ui.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
   Activity, CheckCircle2, ChevronRight, CircleDot, Command as CommandIcon,
-  Search, ShieldAlert, SquareTerminal, Users, Wrench, XCircle,
+  Globe, Search, ShieldAlert, ShieldCheck, SquareTerminal, Users, Wrench, XCircle,
 } from "lucide-react";
 
-/* 视觉层全部来自库：
- *   组件/排版/配色  → Radix Themes
- *   图标            → lucide-react
- *   动画            → motion
- *   Markdown        → react-markdown + remark-gfm
- *   命令面板        → cmdk
- *   图表            → recharts
- * 我们只负责布局与数据接线（AG-UI 事件流 + /api/tasks + /api/harness/budget）。 */
+/* 视觉层只有一个来源：tokens.css（Claude 主题：五种子色 + 一条色阶）。
+ *   · 组件与排版：web/src/ui.jsx 的手写原语，只读 tokens，不自带调色板
+ *   · 图标：lucide-react（几何图形，不带设计系统）
+ *   · Markdown：react-markdown + remark-gfm + 本仓库的代码高亮规则
+ *   · 动画：motion（仅过渡与位移，不定义颜色/圆角/阴影）
+ *   · 图表：Sparkline.jsx（内联 SVG，用 --c-accent）
+ *   · 命令面板 / 通知：Palette.jsx / toast.jsx（自有，样式在 styles.css）
+ * 其余库（Radix / cmdk / sonner / recharts / highlight.js 主题）已移除——
+ * 它们各自带着一套设计系统，与本仓库的令牌互相打架。 */
 
 // Token handling lives in lib/auth.js so every panel agrees on which keys exist
 // and on the 401-retry order. Reading a single key here used to leave whole
@@ -51,7 +52,7 @@ function notifyUnauthorized() {
 async function api(path) {
   const r = await authedFetch(path, { headers: authHeaders(), credentials: "include" });
   if (r.status === 401) notifyUnauthorized();
-  if (!r.ok) throw new Error((await r.text()).slice(0, 160) || r.statusText);
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 
@@ -131,8 +132,13 @@ function Console({ theme, onLogout }) {
   const [showJump, setShowJump] = useState(false);
   const sinceRef = useRef(0);          // AG-UI 续传游标（= 最后一条事件的活动 id）
   const [retryNonce, setRetryNonce] = useState(0);
-  const [subOpen, setSubOpen] = useState(false);
-  const [benchOpen, setBenchOpen] = useState(false);
+  // 右栏是互斥的单一面板：子代理 / 工作台 / 浏览器 / 系统。
+  // 用一张表而不是四个布尔量——四个布尔量能同时为 true，之前的代码就得在每个
+  // 按钮的 onClick 里手动关掉另一个，漏一处就出现两个面板叠在一起。
+  const [aside, setAside] = useState("");          // "" | subagents | workbench | browser | system
+  const toggleAside = useCallback((name) => setAside((cur) => (cur === name ? "" : name)), []);
+  const subOpen = aside === "subagents";
+  const benchOpen = aside === "workbench";
   const [newOpen, setNewOpen] = useState(false);   // 新建对话：侧栏/标题栏/命令面板共用一个
   const [stale, setStale] = useState(false);       // 页面跑的是旧包 → 提示刷新
   const [convs, setConvs] = useState([]);          // 对话（无目标，首条消息才开跑）
@@ -339,7 +345,7 @@ function Console({ theme, onLogout }) {
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      if (!r.ok) throw new Error(await errorText(r));
       toast.success(action === "pause" ? "已暂停" : "已恢复");
     } catch (e) { toast.error(e.message); }
   }
@@ -377,7 +383,7 @@ function Console({ theme, onLogout }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agent_key: "harness" }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      if (!r.ok) throw new Error(await errorText(r));
       const c = await r.json();
       setConvs((prev) => [c, ...prev.filter((x) => String(x.id) !== String(c.id))]);
       setConvId(String(c.id)); setConvTitle(c.title || "新对话"); setTaskId(null); setView("chat");
@@ -400,7 +406,7 @@ function Console({ theme, onLogout }) {
     const tick = async () => {
       try {
         const r = await authedFetch(`/api/conversations/${encodeURIComponent(convId)}/messages?since=${cursor}`);
-        if (!r.ok) throw new Error(`事件流不可用（HTTP ${r.status}）${(await r.text()).slice(0, 100)}`);
+        if (!r.ok) throw new Error(`事件流不可用（HTTP ${r.status}）${await errorText(r)}`);
         const d = await r.json();
         if (dead) return;
         if (Array.isArray(d.items) && d.items.length) {
@@ -468,11 +474,19 @@ function Console({ theme, onLogout }) {
                 {!convId ? (<>
                 <Tooltip content="子代理：模型自己派出的 Agent 及其结果">
                   <IconButton aria-label="子代理" variant={subOpen ? "soft" : "ghost"}
-                              onClick={() => { setBenchOpen(false); setSubOpen((v) => !v); }}><Users size={13} /></IconButton>
+                              onClick={() => toggleAside("subagents")}><Users size={13} /></IconButton>
                 </Tooltip>
                 <Tooltip content="工作台：文件树、DIFF 审阅、终端">
                   <IconButton aria-label="工作台" variant={benchOpen ? "soft" : "ghost"}
-                              onClick={() => { setSubOpen(false); setBenchOpen((v) => !v); }}><Wrench size={13} /></IconButton>
+                              onClick={() => toggleAside("workbench")}><Wrench size={13} /></IconButton>
+                </Tooltip>
+                <Tooltip content="浏览器：会话 / 标签 / F12（DevTools） / 截图">
+                  <IconButton aria-label="浏览器" variant={aside === "browser" ? "soft" : "ghost"}
+                              onClick={() => toggleAside("browser")}><Globe size={13} /></IconButton>
+                </Tooltip>
+                <Tooltip content="系统：就绪自检 / 能力注册表 / 证据完整性">
+                  <IconButton aria-label="系统" variant={aside === "system" ? "soft" : "ghost"}
+                              onClick={() => toggleAside("system")}><ShieldCheck size={13} /></IconButton>
                 </Tooltip>
                 <Separator orientation="vertical" />
                 <Tooltip content="暂停任务（含正在跑的轮次）">
@@ -565,8 +579,10 @@ function Console({ theme, onLogout }) {
           )}
         </div>
 
-        {subOpen ? <Subagents taskId={taskId} live={live} onClose={() => setSubOpen(false)} /> : null}
-        {benchOpen ? <Workbench taskId={taskId} onClose={() => setBenchOpen(false)} /> : null}
+        {subOpen ? <Subagents taskId={taskId} live={live} onClose={() => setAside("")} /> : null}
+        {benchOpen ? <Workbench taskId={taskId} onClose={() => setAside("")} projectDir={cur?.project_dir || ""} onProjectDir={loadTasks} /> : null}
+        {aside === "browser" ? <Browser taskId={taskId} onClose={() => setAside("")} /> : null}
+        {aside === "system" ? <System taskId={taskId} onClose={() => setAside("")} /> : null}
 
         <Flex className="statusbar" align="center" gap="3">
           <Flex align="center" gap="1"><LiveDot live={live} /><Text size="1" color="gray">{liveLabel(live)}</Text></Flex>
@@ -586,7 +602,7 @@ function Console({ theme, onLogout }) {
         ) : null}
 
         {palette ? (
-          <Palette tasks={harnessRuns} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
+          <CommandPalette tasks={harnessRuns} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
                    onNew={newConversation} onNewTask={() => setNewOpen(true)} onClose={() => setPalette(false)} />
         ) : null}
       </div>
@@ -661,7 +677,7 @@ function Row({ row }) {
         <Copy size={12} />
       </IconButton>
       <Box className={"md " + (row.role === "thinking" ? "thinking" : "")}>
-        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: CodeBlock }}>
+        <Markdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
           {row.text || ""}
         </Markdown>
       </Box>
@@ -669,52 +685,62 @@ function Row({ row }) {
   );
 }
 
-function Palette({ tasks, onPick, onNew, onNewTask, onClose }) {
+/* 命令面板的调用适配层：把任务列表映射成 Palette 需要的 sections。
+ * 原来这里是 cmdk 的 <Command>；行为（↑↓/Enter/Esc/过滤）现在由 Palette.jsx
+ * 自己实现，这里只负责数据形状，避免 App 里散落一地的 render 细节。 */
+function CommandPalette({ tasks, onPick, onNew, onNewTask, onClose }) {
+  const sections = [
+    {
+      label: "操作",
+      items: [
+        {
+          label: "新建对话", keywords: "新建会话 聊天 new chat 无目标",
+          render: () => (
+            <Flex align="center" gap="2" style={{ width: "100%" }}>
+              <Plus size={13} />
+              <Text size="2">新建对话</Text>
+              <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N · 不设目标</Text></Box>
+            </Flex>
+          ),
+          onSelect: () => onNew?.(),
+        },
+        {
+          label: "新建运行（带目标）", keywords: "长任务 渗透 goal 目标",
+          render: () => (
+            <Flex align="center" gap="2" style={{ width: "100%" }}>
+              <SquareTerminal size={13} />
+              <Text size="2">新建运行（带目标）</Text>
+              <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">长任务 / 渗透</Text></Box>
+            </Flex>
+          ),
+          onSelect: () => onNewTask?.(),
+        },
+      ],
+    },
+    {
+      label: "任务",
+      items: tasks.map((t) => ({
+        key: "task-" + t.id,
+        label: clip(t.goal || t.description || "task " + t.id, 70),
+        keywords: `${t.id} ${t.status || ""} ${t.goal || ""} ${t.description || ""}`,
+        render: () => (
+          <Flex align="center" gap="2" style={{ width: "100%" }}>
+            <SquareTerminal size={13} />
+            <Text size="2" truncate>{clip(t.goal || t.description || "task " + t.id, 70)}</Text>
+            <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">#{t.id} · {t.status}</Text></Box>
+          </Flex>
+        ),
+        onSelect: () => onPick(String(t.id)),
+      })),
+    },
+  ];
   return (
-    <div className="cmdk-overlay" onClick={onClose}>
-      <div className="cmdk-box" onClick={(e) => e.stopPropagation()}>
-        <Command label="命令面板">
-          <Flex align="center" gap="2" px="3" style={{ borderBottom: "1px solid var(--c-divider)" }}>
-            <Search size={14} />
-            <Command.Input placeholder="搜索任务…（↑↓ 选择，Enter 打开，Esc 关闭）" autoFocus />
-          </Flex>
-          <Command.List>
-            <Command.Empty><Text size="2" color="gray">没有匹配项</Text></Command.Empty>
-            <Command.Group heading="操作">
-              <Command.Item value="新建对话 新建会话 聊天 new chat" onSelect={() => { onClose(); onNew?.(); }}>
-                <Flex align="center" gap="2" style={{ width: "100%" }}>
-                  <Plus size={13} />
-                  <Text size="2">新建对话</Text>
-                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">⌘N · 不设目标</Text></Box>
-                </Flex>
-              </Command.Item>
-              <Command.Item value="新建运行 长任务 渗透 目标 goal" onSelect={() => { onClose(); onNewTask?.(); }}>
-                <Flex align="center" gap="2" style={{ width: "100%" }}>
-                  <SquareTerminal size={13} />
-                  <Text size="2">新建运行（带目标）</Text>
-                  <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">长任务 / 渗透</Text></Box>
-                </Flex>
-              </Command.Item>
-            </Command.Group>
-            <Command.Group heading="任务">
-              {tasks.map((t) => (
-                <Command.Item key={t.id} value={`${t.id} ${t.goal || ""} ${t.description || ""}`}
-                              onSelect={() => onPick(String(t.id))}>
-                  <Flex align="center" gap="2" style={{ width: "100%" }}>
-                    <SquareTerminal size={13} />
-                    <Text size="2" truncate>{clip(t.goal || t.description || "task " + t.id, 70)}</Text>
-                    <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">#{t.id} · {t.status}</Text></Box>
-                  </Flex>
-                </Command.Item>
-              ))}
-            </Command.Group>
-          </Command.List>
-          <Flex px="3" py="2" gap="3" style={{ borderTop: "1px solid var(--c-divider)" }}>
-            <Text size="1" color="gray">⌘K 打开</Text><Text size="1" color="gray">Esc 关闭</Text>
-          </Flex>
-        </Command>
-      </div>
-    </div>
+    <Palette
+      sections={sections}
+      placeholder="搜索任务…（↑↓ 选择，Enter 打开，Esc 关闭）"
+      onClose={onClose}
+      footer={<><Text size="1" color="gray">⌘K 打开</Text><Text size="1" color="gray">Esc 关闭</Text></>}
+    />
   );
 }
 
@@ -793,25 +819,15 @@ function UsageView({ budget, task, live }) {
         {budget?.series?.length ? (
           <div>
             <div style={{ fontFamily: "var(--font-serif)", fontSize: 13, marginBottom: 8 }}>每轮输入 token</div>
-            <div style={{ height: 120 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={budget.series.map((v, i) => ({ i, v }))}
-                           margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--c-accent)" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="var(--c-accent)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="v" stroke="var(--c-accent)" strokeWidth={1.5}
-                        fill="url(#usageFill)" isAnimationActive={false} />
-                  <ReTooltip contentStyle={{
-                    background: "var(--c-surface-1)", border: "1px solid var(--c-border-1)",
-                    borderRadius: 8, fontFamily: "var(--font-mono)", fontSize: 11,
-                  }} labelFormatter={(i) => `第 ${i + 1} 轮`} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            <Sparkline
+              values={budget.series}
+              height={120}
+              width={360}
+              label="每轮输入 token"
+              drops={budget.series
+                .map((v, i) => (i > 0 && budget.series[i - 1] > 0 && v < budget.series[i - 1] * 0.8 ? i : -1))
+                .filter((i) => i >= 0)}
+            />
           </div>
         ) : (
           <div style={{ fontSize: 12, color: "var(--c-ink-4)" }}>
@@ -832,16 +848,14 @@ function BudgetSpark({ data, pct }) {
   if (!data || data.length < 2) return null;
   // The last 48 rounds only: a 121-point series in 84px paints a dense scribble
   // that reads as noise rather than as a trend.
-  const points = data.slice(-48).map((v, i) => ({ i, v }));
-  // Fixed width and height: ResponsiveContainer inside a flex row measured the
+  const points = data.slice(-48);
+  // Fixed width and height: a responsive chart inside a flex row measured the
   // parent after the row had already squeezed it, so the spark rendered as a
-  // one-pixel red smear on narrow windows.
+  // one-pixel smear on narrow windows. The inline SVG keeps the same contract.
   return (
     <Tooltip content={`上下文占用 ${Math.round(pct || 0)}% · ${data.length} 轮`}>
-      <Box style={{ width: 84, height: 22, flex: "none" }}>
-        <AreaChart width={84} height={22} data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-          <Area type="monotone" dataKey="v" stroke="var(--c-accent)" fill="var(--c-accent-tint)" strokeWidth={1.5} isAnimationActive={false} />
-        </AreaChart>
+      <Box className="budget-spark" style={{ width: 84, height: 22, flex: "none" }}>
+        <Sparkline values={points} width={84} height={22} label="上下文占用" />
       </Box>
     </Tooltip>
   );
@@ -870,7 +884,7 @@ function ApprovalCard({ row }) {
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ decision }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      if (!r.ok) throw new Error(await errorText(r));
       setDone(choice === "allow" ? "已允许" : "已拒绝");
       toast.success(choice === "allow" ? "已允许执行" : "已拒绝执行");
     } catch (e) { toast.error("审批失败：" + e.message); }
@@ -1000,7 +1014,7 @@ function NewTaskDialog({ open: openProp, onOpenChange, onCreated }) {
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ goal: goal.trim(), description: desc.trim(), harness_mode: harness }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+      if (!r.ok) throw new Error(await errorText(r));
       const t = await r.json();
       toast.success("任务已创建 #" + t.id);
       setOpen(false); setGoal(""); setDesc("");

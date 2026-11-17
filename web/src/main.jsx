@@ -16,9 +16,10 @@ function applyTheme(choice) {
     || (choice !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.documentElement.dataset.themeChoice = choice || "inherit";
-  // React owns the Radix `Theme` appearance prop; it has to be told the answer
-  // changed, or the wrapper keeps the class it rendered with and Radix's own
-  // scale stays on the old scheme while the token ladder has already flipped.
+  // The console's own Theme primitive (ui.jsx) mirrors the scheme for the few
+  // places that need it as a prop rather than as a CSS variable — it has to be
+  // told the answer changed, or it keeps the value it rendered with while the
+  // token ladder has already flipped.
   window.dispatchEvent(new CustomEvent("artex:theme", { detail: dark ? "dark" : "light" }));
 }
 

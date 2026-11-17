@@ -1,23 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Box, Button, Checkbox, Code, Flex, IconButton, ScrollArea, Separator, Text, TextField, Tooltip } from "./ui.jsx";
-import { ChevronRight, FileText, GitCompare, Play, RefreshCw, SquareTerminal, X, XCircle } from "lucide-react";
-import { toast } from "sonner";
-import { authedFetch } from "./lib/auth.js";
+import { ChevronRight, FileText, FolderTree, GitCompare, Play, RefreshCw, SquareTerminal, X, XCircle } from "lucide-react";
+import { toast } from "./toast.jsx";
+import { authedFetch, errorText } from "./lib/auth.js";
 
-/* 工作台（Sprint 4）：右栏三件套——文件树、DIFF 审阅、终端。
+/* 工作台：右栏面板——项目目录、文件树、DIFF 审阅、终端。
  *
  * 数据来源都是任务工作区（project_dir 或 <data>/tasks/<id>）：
- *   GET /api/harness/files/{id}            文件树 + 变更标记
- *   GET /api/harness/file/{id}?path=       单文件正文（1 MiB 上限、二进制拒绝）
- *   GET /api/harness/diff/{id}[?path=]     与基线对比的 unified diff
+ *   PUT  /api/tasks/{id}/project           绑定/解绑项目目录（互斥，冲突 409 并点名占用者）
+ *   GET  /api/harness/files/{id}            文件树 + 变更标记
+ *   GET  /api/harness/file/{id}?path=       单文件正文（1 MiB 上限、二进制拒绝）
+ *   GET  /api/harness/diff/{id}[?path=]     与基线对比的 unified diff
  *   POST /api/tasks/{id}/exec              在工作区执行一条命令（可交给 agent）
  *
  * 不做假控件：没有基线时 DIFF 明确显示 baseline=false 并说明原因；
  * 文件过大/二进制不内联，直接说明。 */
 
+/* 错误信封的解析统一在 lib/auth.js 的 errorText：这里只需要 import，
+ * 不要各面板各写一份——之前正是因为每处都自己 (await r.text()).slice()，
+ * 才出现整套界面把 {"error":"..."} 这串原始 JSON 显示给操作者。 */
+
 async function api(path, init) {
   const r = await authedFetch(path, { credentials: "include", ...(init || {}) });
-  if (!r.ok) throw new Error((await r.text()).slice(0, 200) || r.statusText);
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 
@@ -28,12 +33,13 @@ const CHANGE = {
 };
 
 const TABS = [
+  { key: "project", label: "项目", icon: FolderTree },
   { key: "files", label: "文件", icon: FileText },
   { key: "diff", label: "DIFF", icon: GitCompare },
   { key: "terminal", label: "终端", icon: SquareTerminal },
 ];
 
-export default function Workbench({ taskId, onClose, initialTab = "files" }) {
+export default function Workbench({ taskId, onClose, initialTab = "files", projectDir = "", onProjectDir }) {
   const [tab, setTab] = useState(initialTab);
   return (
     <div className="subpanel">
@@ -52,10 +58,106 @@ export default function Workbench({ taskId, onClose, initialTab = "files" }) {
           <IconButton size="1" variant="ghost" aria-label="关闭工作台" onClick={onClose}><X size={13} /></IconButton>
         </Tooltip>
       </Flex>
+      {tab === "project" ? <ProjectPane taskId={taskId} projectDir={projectDir} onChanged={onProjectDir} /> : null}
       {tab === "files" ? <FilesPane taskId={taskId} /> : null}
       {tab === "diff" ? <DiffPane taskId={taskId} /> : null}
       {tab === "terminal" ? <TerminalPane taskId={taskId} /> : null}
     </div>
+  );
+}
+
+/* ── 项目目录 ───────────────────────────────────────────────────────────
+ * 后端一直支持 tasks.project_dir（文件树/DIFF/终端都以它为根），但控制台只在
+ * 输入框旁显示一个只读 chip——没有任何设置入口。这里接上 PUT /api/tasks/{id}/project。
+ *
+ * 互斥由后端保证（projectGuard：一个目录只归一个活任务，冲突 409 并点名占用者），
+ * 前端不复制这套判断，只把后端的拒绝原样显示出来。 */
+function ProjectPane({ taskId, projectDir, onChanged }) {
+  // draft 是输入框，projectDir 是**已生效**的绑定值。两者必须分开：
+  // 之前共用一份 state，输入到一半点「绑定」失败时，"当前根目录"就把那个
+  // 没被接受的路径显示成了事实——界面在撒谎。
+  const [draft, setDraft] = useState(projectDir || "");
+  const [busy, setBusy] = useState(false);
+  // err 拆成两条：消息本体与状态码。原来把 r.text() 整个塞进 <Text>，
+  // 用户看到的是 {"error":"目录不存在..."} 这串原始 JSON，而不是那句话。
+  const [err, setErr] = useState("");
+  const [conflict, setConflict] = useState(false);
+
+  useEffect(() => { setDraft(projectDir || ""); }, [projectDir]);
+
+  const save = useCallback(async (next) => {
+    if (!taskId) return;
+    setBusy(true); setErr(""); setConflict(false);
+    try {
+      const r = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/project`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_dir: next }),
+      });
+      if (!r.ok) {
+        setConflict(r.status === 409);
+        throw new Error(await errorText(r));
+      }
+      const d = await r.json();
+      setDraft(d.project_dir || "");
+      toast.success(d.project_dir ? "项目目录已绑定" : "已改回任务自有目录");
+      onChanged?.();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }, [taskId, onChanged]);
+
+  if (!taskId) {
+    return <Box px="3" py="3"><Text size="1" color="gray">先选择一个运行（任务）。</Text></Box>;
+  }
+
+  return (
+    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+      <Box px="3" py="2">
+        <Text size="1" weight="medium" style={{ display: "block", marginBottom: 6 }}>当前根目录</Text>
+        <Code size="1" variant="ghost" className="mono"
+              style={{ display: "block", padding: "6px 8px", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+          {projectDir || "(任务自有目录 <data>/tasks/" + taskId + ")"}
+        </Code>
+        <Text size="1" color="gray" style={{ display: "block", marginTop: 6, lineHeight: 1.6 }}>
+          文件树、DIFF、终端都以它为根。绑定项目目录后，基线不再写进你的目录，
+          改放 <span className="mono">&lt;data&gt;/baselines/&lt;taskID&gt;</span>，所以 DIFF 里不会多出隐藏文件。
+        </Text>
+
+        <Separator size="4" style={{ margin: "12px 0" }} />
+
+        <Text size="1" weight="medium" style={{ display: "block", marginBottom: 6 }}>改绑到一个绝对路径</Text>
+        <TextField.Root size="1" value={draft} placeholder="/home/user/project 或 D:\\work\\target"
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") save(draft.trim()); }} />
+        <Flex gap="2" mt="2">
+          <Button size="1" variant="solid" disabled={busy} onClick={() => save(draft.trim())}>
+            {busy ? "保存中…" : "绑定"}
+          </Button>
+          <Button size="1" variant="soft" disabled={busy || !projectDir} onClick={() => save("")}>
+            改回任务自有目录
+          </Button>
+        </Flex>
+
+        {err ? (
+          <Box mt="2">
+            <Text size="1" color="red">{err}</Text>
+            {conflict ? (
+              <Text size="1" color="gray" style={{ display: "block", marginTop: 4, lineHeight: 1.6 }}>
+                这个目录已经被另一个活任务占用（一个目录只能归一个任务，避免两个 agent 同时改同一份文件）。
+                关掉那个任务，或换一个目录。
+              </Text>
+            ) : null}
+          </Box>
+        ) : null}
+
+        <Separator size="4" style={{ margin: "12px 0" }} />
+        <Text size="1" color="gray" style={{ display: "block", lineHeight: 1.7 }}>
+          路径由服务端校验：必须是绝对路径、必须存在且是目录、不能含 <span className="mono">..</span>。
+          前端不做路径猜测，直接显示服务端的拒绝原因。
+        </Text>
+      </Box>
+    </ScrollArea>
   );
 }
 

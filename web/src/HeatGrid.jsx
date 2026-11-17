@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { authedFetch } from "./lib/auth.js";
+import { authedFetch, errorText } from "./lib/auth.js";
 
 /* 用量热力图 —— 移植自 dsh-claude-style 的首页热力格（MIT，见
  * `packages/client/src/features/home/home-figures.ts` 与 `home-overview.css`）。
@@ -75,7 +75,7 @@ export default function HeatGrid({ weeks = 26, days = 182, height }) {
   const load = useCallback(async () => {
     try {
       const r = await authedFetch(`/api/tokens/daily?days=${days}`, { credentials: "include" });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 120) || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await errorText(r));
       const rows = await r.json();
       const map = new Map();
       for (const row of Array.isArray(rows) ? rows : []) {

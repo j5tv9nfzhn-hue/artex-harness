@@ -127,6 +127,10 @@
   --h-row: 30px;                /* measured: selected plate 249×30 at x=13 */
   --pad-row: 10px;
   --w-content: 760px;           /* the conversation column */
+  /* 右栏（第三列）：足以放下文件树路径、DIFF 行与终端输出。
+   * 主区在 1200px 以下保持可读，所以中等窗口用窄值。 */
+  --w-panel: 340px;
+  --w-panel-narrow: 300px;
 
   /* ── motion: one value per role ──────────────────────────────────────── */
   --d-instant: 80ms;

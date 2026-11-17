@@ -84,8 +84,12 @@
 | 观测采集（usage 行、预算） | ✅ 实测 `run_budget_seconds=1200`、`series` 有值 |
 | 观测传递（budget 拉取） | ✅ 实测 JSON |
 | 压缩事件 | ⚠ 仍为推断；尚未造出跨阈值真实任务（`compactions=0`） |
-| F12 面板渲染 | ✅ 代码就位（会话/观测/F12 列表）；⚠ 未在真实 DevTools 动作上截屏确认 |
+| F12 面板渲染 | ✅ 控制台「浏览器 → F12」页渲染 console 错误（按级别）+ 最近动作；⚠ 未在真实 DevTools 动作上截屏确认 |
 | 截图管线 | ✅ 假 MCP 端到端；⚠ 未对真实 Playwright 取图 |
+
+> **更新（本轮）**：F12 面板已从"只有最近动作列表"提升为按 console 级别解析后的结构化列表
+> （`getBrowserStatus.console_errors`），并在控制台有了入口。**network 仍未结构化**——
+> 后端没有请求/响应表，界面如实写明，不画空表格。压缩事件（`compactions=0`）状态未变。
 
 ## 五、下一步建议（按性价比）
 
@@ -94,5 +98,6 @@
 2. **制造一次真实压缩**：把某个 profile 的窗口临时调到 8K，或让任务连续跑 30+ 轮，观察
    `compactions>0` 与"压缩后是否失忆"。取舍：调窗口=验机制快、失真；长跑=真实但慢。
    我倾向**先调窗口验机制**，再用一次真实长跑复核。
-3. **F12 结构化**：现在只是"最近动作列表"。要做成面板，需要按工具名解析
-   （`list_console_messages` / `list_network_requests` 的固定输出），并区分错误与普通日志。
+3. **F12 的 network 结构化**：console 侧已完成（按 `list_console_messages` 的输出解析级别与正文）。
+   剩下的 network 需要为 `list_network_requests` 的输出定义 schema 再投影成表格——
+   这是当前唯一还没有数据形状的一块，不要先画界面。

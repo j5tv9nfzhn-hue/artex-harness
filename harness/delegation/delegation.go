@@ -18,9 +18,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,10 @@ type Record struct {
 	Error       string    `json:"error,omitempty"`
 	WorkDir     string    `json:"work_dir,omitempty"`
 	AgentID     string    `json:"agent_id,omitempty"` // sidechain transcript id
+	// Reclaimed marks a delegation whose isolated work directory was removed by
+	// the retention sweep (TTL). The record itself is kept — it is the audit
+	// trail and the console still lists it; only the scratch directory is gone.
+	Reclaimed bool `json:"reclaimed,omitempty"`
 }
 
 type entry struct {
@@ -84,6 +90,11 @@ func (n Notification) String() string {
 }
 
 // Registry owns the delegations for ONE task. Safe for concurrent use.
+//
+// Durability: records are journaled to <outputDir>/delegations.jsonl so that a
+// process restart keeps the audit trail. Live cancel functions cannot survive a
+// restart (there is no process to cancel into), so a restored record is always
+// terminal — see Restore.
 type Registry struct {
 	mu      sync.Mutex
 	entries map[string]*entry
@@ -97,6 +108,197 @@ type Registry struct {
 // written; it is created lazily on the first background delegation.
 func New(outputDir string) *Registry {
 	return &Registry{entries: map[string]*entry{}, dir: outputDir}
+}
+
+// journalPath is where this registry's records are persisted for restart
+// recovery. It lives beside the result bodies so deleting a task's data
+// directory also drops its journal.
+func (r *Registry) journalPath() string {
+	if r.dir == "" {
+		return ""
+	}
+	return filepath.Join(r.dir, "delegations.jsonl")
+}
+
+// persistLocked appends the current snapshot of ONE record. The journal is a
+// line-per-version log (not a rewrite): a crash mid-write loses at most the last
+// line, and Restore keeps the last version of each id. Caller holds r.mu.
+//
+// Best-effort by design: a read-only or full disk must not break delegation
+// execution, so the failure is reported to the caller, not fatal.
+func (r *Registry) persistLocked(id string) {
+	path := r.journalPath()
+	if path == "" {
+		return
+	}
+	e, ok := r.entries[id]
+	if !ok {
+		return
+	}
+	if err := os.MkdirAll(r.dir, 0o755); err != nil {
+		return
+	}
+	line, err := json.Marshal(e.rec)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(line, '\n'))
+}
+
+// Restore loads journaled records for this task. Records that were still
+// "running" when the process died are rewritten as "failed" with an explicit
+// reason: nothing is running now, and silently keeping them "running" would make
+// the panel lie forever (there is no goroutine left to finish them).
+//
+// Idempotent: calling it twice does not duplicate records.
+func (r *Registry) Restore() (int, error) {
+	path := r.journalPath()
+	if path == "" {
+		return 0, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	type kv struct {
+		id  string
+		rec Record
+	}
+	var seqRecs []kv
+	seen := map[string]int{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec Record
+		if err := json.Unmarshal([]byte(line), &rec); err != nil || rec.ID == "" {
+			continue // torn or foreign line: skip rather than fail the whole restore
+		}
+		if i, ok := seen[rec.ID]; ok {
+			seqRecs[i].rec = rec // last version wins
+			continue
+		}
+		seen[rec.ID] = len(seqRecs)
+		seqRecs = append(seqRecs, kv{id: rec.ID, rec: rec})
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	restored := 0
+	for _, item := range seqRecs {
+		rec := item.rec
+		if _, exists := r.entries[rec.ID]; exists {
+			continue
+		}
+		if !rec.Status.Terminal() {
+			rec.Status = StatusFailed
+			rec.Error = "进程重启：该委派已中断（历史记录已保留，无法再停止）"
+			if rec.EndedAt.IsZero() {
+				rec.EndedAt = rec.StartedAt
+			}
+			rec.DurationMS = rec.EndedAt.Sub(rec.StartedAt).Milliseconds()
+		}
+		r.entries[rec.ID] = &entry{rec: rec}
+		r.order = append(r.order, rec.ID)
+		if n, err := strconv.Atoi(strings.TrimPrefix(rec.ID, "d")); err == nil && n > r.seq {
+			r.seq = n
+		}
+		restored++
+	}
+	sort.SliceStable(r.order, func(i, j int) bool { return seqOf(r.order[i]) < seqOf(r.order[j]) })
+	return restored, nil
+}
+
+func seqOf(id string) int {
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "d"))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// SweepStats reports what a retention pass did.
+type SweepStats struct {
+	Scanned   int `json:"scanned"`
+	Reclaimed int `json:"reclaimed"`
+	Kept      int `json:"kept"`
+	Failed    int `json:"failed"`
+}
+
+// Sweep removes isolated work directories of TERMINAL delegations older than
+// olderThan. This is the retention policy the Sprint 3 notes listed as missing:
+// a long-running task used to accumulate one directory per delegation forever.
+//
+// Rules (deliberate, so the operator can predict it):
+//   - running delegations are never touched;
+//   - the result body (content-addressed, in the parent dir) is never touched —
+//     only the scratch directory under <outputDir>/<id>/;
+//   - the record stays in the registry (marked Reclaimed) so the panel keeps
+//     showing what happened;
+//   - olderThan <= 0 disables the sweep.
+func (r *Registry) Sweep(now time.Time, olderThan time.Duration) SweepStats {
+	var st SweepStats
+	if olderThan <= 0 || r.dir == "" {
+		return st
+	}
+	type victim struct {
+		id  string
+		dir string
+	}
+	var victims []victim
+	r.mu.Lock()
+	for id, e := range r.entries {
+		if !e.rec.Status.Terminal() {
+			continue
+		}
+		st.Scanned++
+		if e.rec.Reclaimed {
+			continue
+		}
+		if e.rec.WorkDir == "" {
+			continue
+		}
+		ended := e.rec.EndedAt
+		if ended.IsZero() {
+			ended = e.rec.StartedAt
+		}
+		if now.Sub(ended) < olderThan {
+			st.Kept++
+			continue
+		}
+		victims = append(victims, victim{id: id, dir: e.rec.WorkDir})
+	}
+	r.mu.Unlock()
+
+	for _, v := range victims {
+		// Refuse to walk outside the delegation store: WorkDir is registry data and
+		// must never be able to point the sweep at the task workspace or "/".
+		if clean := filepath.Clean(v.dir); !strings.HasPrefix(clean, filepath.Clean(r.dir)+string(os.PathSeparator)) {
+			continue
+		}
+		if err := os.RemoveAll(v.dir); err != nil {
+			st.Failed++
+			continue
+		}
+		r.mu.Lock()
+		if e, ok := r.entries[v.id]; ok {
+			e.rec.Reclaimed = true
+			e.rec.WorkDir = ""
+			r.persistLocked(v.id)
+		}
+		r.mu.Unlock()
+		st.Reclaimed++
+	}
+	return st
 }
 
 // Start registers a delegation before its goroutine begins. The returned id is
@@ -114,6 +316,7 @@ func (r *Registry) Start(agentType, prompt, description, workDir string, backgro
 		Status: StatusRunning, Background: background, StartedAt: started, WorkDir: workDir,
 	}}
 	r.order = append(r.order, id)
+	r.persistLocked(id)
 	return id
 }
 
@@ -149,6 +352,7 @@ func (r *Registry) Finish(id string, status Status, result, errText string) {
 			OutputPath: e.rec.OutputPath, Summary: clip(result, 200),
 		})
 	}
+	r.persistLocked(id)
 }
 
 // Kill terminates a running delegation. Returns false if unknown/terminal.
@@ -174,6 +378,7 @@ func (r *Registry) SetOutputPath(id, path string) {
 	defer r.mu.Unlock()
 	if e, ok := r.entries[id]; ok {
 		e.rec.OutputPath = path
+		r.persistLocked(id)
 	}
 }
 
@@ -186,6 +391,7 @@ func (r *Registry) SetWorkDir(id, dir string) {
 	defer r.mu.Unlock()
 	if e, ok := r.entries[id]; ok {
 		e.rec.WorkDir = dir
+		r.persistLocked(id)
 	}
 }
 
@@ -195,6 +401,7 @@ func (r *Registry) SetAgentID(id, agentID string) {
 	defer r.mu.Unlock()
 	if e, ok := r.entries[id]; ok {
 		e.rec.AgentID = agentID
+		r.persistLocked(id)
 	}
 }
 
@@ -299,16 +506,42 @@ type global struct {
 }
 
 // For returns (creating if needed) the registry for a task. outputDir is used
-// only on first creation.
+// only on first creation. A newly created registry is seeded from its on-disk
+// journal, so a restarted process still lists the delegations it had (they come
+// back terminal — see Restore).
 func (g *global) For(taskID, outputDir string) *Registry {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if r, ok := g.regs[taskID]; ok {
+		g.mu.Unlock()
 		return r
 	}
 	r := New(outputDir)
 	g.regs[taskID] = r
+	g.mu.Unlock()
+
+	// Do the file IO outside the global lock: restoring one task must not block
+	// every other task's registry lookup.
+	if _, err := r.Restore(); err != nil {
+		log.Printf("[delegation] 任务 %s 的委派journal恢复失败: %v", taskID, err)
+	}
 	return r
+}
+
+// SweepAll applies the retention policy to every known task registry. Returns
+// the number of isolated directories removed.
+func (g *global) SweepAll(now time.Time, olderThan time.Duration) int {
+	g.mu.Lock()
+	regs := make([]*Registry, 0, len(g.regs))
+	for _, r := range g.regs {
+		regs = append(regs, r)
+	}
+	g.mu.Unlock()
+
+	removed := 0
+	for _, r := range regs {
+		removed += r.Sweep(now, olderThan).Reclaimed
+	}
+	return removed
 }
 
 // Drop removes a task's registry (task deleted / shutdown).

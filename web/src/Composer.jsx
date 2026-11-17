@@ -1,4 +1,4 @@
-import { authedFetch, authHeaders } from "./lib/auth.js";
+import { authHeaders, authedFetch, errorText } from "./lib/auth.js";
 import { useEffect, useRef, useState } from "react";
 import { Box, Flex, IconButton, Select, Text, TextArea, Tooltip } from "./ui.jsx";
 import { ArrowUp, FolderClosed, Plus, ShieldCheck, SlidersHorizontal, Square, Zap } from "lucide-react";
@@ -85,7 +85,7 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 180) || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await errorText(r));
       setText("");
       try { if (draftKey) localStorage.removeItem(draftKey); } catch { /* ignore */ }
       onSent?.();
@@ -102,7 +102,7 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ llm_profile_id: Number(id) }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      if (!r.ok) throw new Error(await errorText(r));
       onTuned?.();
     } catch (e) { setErr("切换模型失败：" + e.message); }
   }
@@ -116,7 +116,7 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ reasoning_effort: v === "inherit" ? "" : v }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      if (!r.ok) throw new Error(await errorText(r));
       onTuned?.();
     } catch (e) { setErr("设置思考等级失败：" + e.message); }
   }

@@ -12,7 +12,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  web/            React 19 + Vite 控制台（约 3.8k 行）          │
+│  web/            React 19 + Vite 控制台（约 6.7k 行）          │
 │                  构建产物 → server/console-app/ → go:embed     │
 ├──────────────────────────────────────────────────────────────┤
 │  server/         HTTP 层：路由、鉴权、DTO、SSE/AG-UI、引擎调度  │
@@ -39,7 +39,10 @@
 | `db/` | `schema.sql`、迁移（`ALTER ... IF NOT EXISTS` 追加在尾部）、各 store | HTTP 概念 |
 | `agent/` | provider 构建、提示词、压缩策略、工具装配 | 路由、鉴权 |
 | `harness/` | 运行期能力：浏览器会话、diff 基线、gate | 数据库 schema |
-| `web/` | 控制台（React + Radix Themes） | 业务规则 |
+| `web/` | React 19 + Vite 控制台，产物写 `server/console-app/` 由 `go:embed` 进二进制 |
+| `web/src/tokens.css` | **唯一视觉来源**：CLAUDE 主题令牌（浅/深两套，从参考截图测量） |
+| `web/src/ui.jsx` | 手写原语层：只读令牌，不自带调色板/半径/阴影 |
+| `web/src/{toast,Palette,Sparkline}.jsx` | 自有通知 / 命令面板 / 折线图（替代 sonner / cmdk / recharts） |
 | `docs/` | 设计与 ADR（`docs/adr/NNNN-*.md`） | 教程 |
 | `eval/ evidence/` | 评测与取证相关 | 运行时代码 |
 
@@ -72,7 +75,27 @@
 2. **上下文是工作台，不是档案柜**：资产/事实/发现落图谱，每轮 `graph_overview` 重新注入；
    压缩阈值按窗口比例（默认 auto 0.7 / micro 0.5），不是固定 token 数。
 3. **失败必须可见**：不允许静默吞异常；前端每个失败态都要有原因 + 重试入口。
+   错误信封统一由 `web/src/lib/auth.js` 的 `errorText` 解析成一句话——**不要把
+   `{"error":"…"}` 原始 JSON 直接显示给操作者**。
 4. **不做假控件**：后端没有的能力，界面上禁用并写明原因，不要伪造开关。
+   典型例子：F12 的 network 表后端没有建模，面板就直接写"不在此版本"，不画空表格。
+5. **界面只有一个视觉来源**：`web/src/tokens.css`。新控件从这里取令牌，不要再引入
+   带自己调色板/半径/阴影的组件库——每一次引入都要在 `styles.css` 里逐条打回去，
+   这也是"零散库观感"的来源。
+6. **进程内状态要么落盘、要么标注**：委派注册表现在有 journal（重启仍可审计），
+   但仍不可跨进程停止；浏览器会话是纯内存（重启即失）。新增这类状态时二选一。
+
+## 运行期子系统（`harness/browser`）
+
+浏览器不是"调一个 MCP 工具"那么简单，它有自己的生命周期，因此单独成包：
+
+| 关注点 | 做法 |
+|---|---|
+| 一会话一任务 | `Manager.Ensure(taskID)` 幂等；Playwright 与 chrome-devtools **同条目**，所以 F12 连的是同一上下文 |
+| 崩溃恢复 | 工具调用失败 → `MarkBroken` → 下次 `Ensure` 只重建那一个服务器；两者互不牵连 |
+| 标签 | `OpenTab/CloseTab`，`MaxTabs` 上限，标签之间导航互不覆盖 |
+| 回收 | `GC(now)` 关掉空闲超 30 分钟的会话；截图另有 24h TTL + 2000 张上限 |
+| 截图 | SDK 的 content union 没有 image 类型 → `rawclient.go` 用最小 stdio JSON-RPC 直取 PNG → 内容寻址存 `<data>/browser/<sha256>.png` → `/api/harness/shot/{hash}` |
 
 ## 构建与产物
 

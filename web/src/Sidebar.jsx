@@ -7,7 +7,7 @@ import {
   Pencil, Pin, Plus, Search, Settings, ShieldAlert, SlidersHorizontal, FolderPlus,
 } from "lucide-react";
 import { Avatar, Badge, Box, Button, ContextMenu, Dialog, DropdownMenu, Flex, IconButton, Separator, BrandMark, Text, TextField, Tooltip } from "./ui.jsx";
-import { authedFetch, authHeaders } from "./lib/auth.js";
+import { authHeaders, authedFetch, errorText } from "./lib/auth.js";
 
 /* 会话列表。
  *
@@ -83,7 +83,7 @@ export default function Sidebar({
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ decision: body }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+      if (!r.ok) throw new Error(await errorText(r));
       toast?.(decision === "allow" ? "已允许" : "已拒绝");
       loadPending();
     } catch (e) { toast?.(e.message, true); }
@@ -94,7 +94,7 @@ export default function Sidebar({
       method: "PATCH", credentials: "include",
       headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error((await r.text()).slice(0, 140));
+    if (!r.ok) throw new Error(await errorText(r));
     onReload?.();
   }
 
