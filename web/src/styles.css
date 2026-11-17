@@ -48,7 +48,7 @@ a { color: var(--c-link); }
   min-height: 0;
 }
 
-/* Brand row: the starburst mark and the serif wordmark, 20px apart. */
+/* Brand row: the product mark and the serif wordmark, 10px apart. */
 .rail-head {
   display: flex;
   align-items: center;
@@ -66,7 +66,6 @@ a { color: var(--c-link); }
   color: var(--c-ink);
   line-height: 1;
 }
-.rail-brand svg { width: 20px; height: 20px; flex: none; }
 .rail-ver { font-family: var(--font-mono); font-size: 10px; color: var(--c-ink-4); }
 
 /* A row: 30px tall, 6px corner, 10px inline padding. Measured off the selected
@@ -683,7 +682,7 @@ a { color: var(--c-link); }
 .diff-line.del { color: var(--c-status-bad); background: color-mix(in srgb, var(--c-status-bad) 8%, transparent); }
 .diff-line.hunk { color: var(--c-accent); background: var(--c-accent-tint); }
 
-/* ── heat grid: Claude Code's blue day ramp ──────────────────────────────────
+/* ── heat grid: the blue day ramp ────────────────────────────────────────────
  * Measured off the reference screenshot: 7 rows, 3px gap, 3px corner, square
  * cells filling the panel's inner width. The empty cell IS the zero step, so
  * the skeleton and the data are the same grid and nothing shifts when a value
@@ -842,9 +841,8 @@ a { color: var(--c-link); }
 
 .composer-err { padding: 4px 8px 2px; font-size: 11px; color: var(--c-status-bad); }
 
-/* The header's own mark: the starburst at the reference's 15px, in the ink. */
+/* The header's own mark, in the ink. */
 .topband-mark { display: inline-flex; color: var(--c-ink-2); flex: none; }
-.topband-mark svg { width: 15px; height: 15px; }
 
 /* ── workspace tab strip ───────────────────────────────────────────────────
  * One row of 28px tabs under the header, the active one on the panel tone.

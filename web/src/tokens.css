@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Claude design tokens — measured, not approximated.
+ * Console design tokens — measured, not approximated.
  *
  * Every value below was read off the reference product's own screenshots
  * (`dsh-claude-style/docs/screenshots/claude-{home,conversation}-{light,dark}.png`,
@@ -85,18 +85,15 @@
   --c-bubble: #f4f2f3;
 
   /* ── type ────────────────────────────────────────────────────────────────
-   * Three faces, each with a look-alike fallback matched in x-height so a
-   * swap does not rewrap text (the reference does the same with its shipped
-   * OFL cuts). The Anthropic faces themselves are not redistributable; a
-   * reader who has them installed gets them through the first name in each
-   * stack. */
-  --font-serif: "Anthropic Serif Web Text", "Anthropic Serif",
-    "Noto Serif", "Source Han Serif SC", Georgia, "Songti SC", serif;
-  --font-sans: "Anthropic Sans Web Text", "Anthropic Sans", "Inter",
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --font-mono: "Anthropic Mono Web", "Anthropic Mono", "JetBrains Mono",
-    ui-monospace, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+   * Three faces, each an open-licensed look-alike chosen for the same
+   * proportions (serif display / sans UI / mono data). No vendor face is named
+   * here: the families this interface is modelled on are not redistributable,
+   * and naming them would be a brand reference the product does not need. */
+  --font-serif: "Noto Serif", "Source Han Serif SC", Georgia, "Songti SC", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas,
+    "Liberation Mono", Menlo, monospace;
   --font-prose: var(--font-serif);   /* conversation prose leads serif */
 
   /* Type scale, measured off the screenshots (cap heights ÷ 0.7). */

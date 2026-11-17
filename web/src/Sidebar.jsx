@@ -6,7 +6,7 @@ import {
   Archive, Bell, Copy, Info, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen,
   Pencil, Pin, Plus, Search, Settings, ShieldAlert, SlidersHorizontal, FolderPlus,
 } from "lucide-react";
-import { Avatar, Badge, Box, Button, ContextMenu, Dialog, DropdownMenu, Flex, IconButton, Separator, Starburst, Text, TextField, Tooltip } from "./ui.jsx";
+import { Avatar, Badge, Box, Button, ContextMenu, Dialog, DropdownMenu, Flex, IconButton, Separator, BrandMark, Text, TextField, Tooltip } from "./ui.jsx";
 import { authedFetch, authHeaders } from "./lib/auth.js";
 
 /* 会话列表。
@@ -133,7 +133,7 @@ export default function Sidebar({
 
   return (
     <aside className={"rail" + (collapsed ? " collapsed" : "")}>
-      {/* Brand row: starburst + serif wordmark. Collapsed keeps only the mark. */}
+      {/* Brand row: the ARTEX mark + serif wordmark. Collapsed keeps only the mark. */}
       <div className="rail-head">
         {collapsed ? (
           <Tooltip content="展开侧栏" side="right">
@@ -143,7 +143,7 @@ export default function Sidebar({
           </Tooltip>
         ) : (
           <>
-            <span className="rail-brand"><Starburst />artex</span>
+            <span className="rail-brand"><BrandMark size={20} />artex</span>
             <Box style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
               <Tooltip content="命令面板 ⌘K">
                 <IconButton size="1" aria-label="命令面板" onClick={onPalette}><Search size={14} /></IconButton>

@@ -19,7 +19,7 @@ import Checkpoints from "./Checkpoints.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import Workbench from "./Workbench.jsx";
 import HeatGrid from "./HeatGrid.jsx";
-import { Starburst } from "./ui.jsx";
+import { BrandMark } from "./ui.jsx";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Area, AreaChart, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import {
@@ -448,10 +448,10 @@ function Console({ theme, onLogout }) {
                          onPick={pickTab} onClose={closeTab} onNew={newConversation}
                          pendingByTask={pendingCount ? { [String(taskId)]: pendingCount } : {}} />
           <Flex align="center" gap="3" px="4" py="2" className="topband">
-            {/* The reference's header: the starburst mark before the title, and a
-                quiet cluster of icon controls on the right. Nothing here carries a
-                word label — the band is chrome, the words live in the tooltips. */}
-            <span className="topband-mark"><Starburst /></span>
+            {/* Header: the product mark before the title, and a quiet cluster of icon
+                controls on the right. Nothing here carries a word label — the band is
+                chrome, the words live in the tooltips. */}
+            <span className="topband-mark"><BrandMark size={15} /></span>
             <Text className="title" truncate style={{ maxWidth: "34vw", flex: "0 1 auto", minWidth: 0 }}>
               {convId ? (convTitle || "对话")
                 : cur ? (cur.name || cur.goal || cur.description || "task " + cur.id) : "未选择对话或任务"}
@@ -575,7 +575,7 @@ function Console({ theme, onLogout }) {
           <Text size="1" color="gray">·</Text>
           <Text size="1" color="gray">{rows.length} 条事件</Text>
           {budget ? (<><Text size="1" color="gray">·</Text><Text size="1" color="gray">{series.length} 轮 · 压缩 {budget.compactions_observed?.total ?? budget.compactions ?? 0}</Text></>) : null}
-          <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">artex-harness · Claude-style tokens</Text></Box>
+          <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">artex-harness</Text></Box>
         </Flex>
 
         {stale ? (

@@ -477,18 +477,37 @@ export const useAnchorRect = () => {
 
 export { useMemo, useId };
 
-/* ── Starburst ───────────────────────────────────────────────────────────────
- * The brand mark: twelve tapered rays around a centre, drawn as SVG so no image
- * asset ships. Used by the sidebar's wordmark row and the conversation header. */
-export function Starburst({ size = 18 }) {
+/* ── BrandMark ───────────────────────────────────────────────────────────────
+ * ARTEX's own mark — the interlocking rings from `web/public/logo.png`, cut to
+ * the glyph and shipped as `web/public/artex-mark.png`.
+ *
+ * Why not the reference project's starburst: that mark is Anthropic's brand
+ * identity, and drawing it in our own product would be a trademark use we have
+ * no licence for. The reference project says the same of Clawd in its LICENSE —
+ * "all rights in it remain with Anthropic". The visual language we took from it
+ * (palette, geometry, type) is design, not identity; the mark is identity.
+ *
+ * The PNG is used as a CSS mask so the mark takes whatever ink the surrounding
+ * text does, in either appearance. */
+export function BrandMark({ size = 18 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: "none" }}>
-      <g fill="currentColor">
-        {Array.from({ length: 12 }, (_, i) => (
-          <path key={i} d="M12 1.8l1 8.05a1 1 0 01-2 0L12 1.8z"
-                transform={`rotate(${i * 30} 12 12)`} />
-        ))}
-      </g>
-    </svg>
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        flex: "none",
+        background: "currentColor",
+        WebkitMaskImage: "url(/app/artex-mark.png)",
+        maskImage: "url(/app/artex-mark.png)",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+      }}
+    />
   );
 }
