@@ -32,34 +32,39 @@
 
 ## 三、三层选型与理由
 
-### 3.1 前端：Next.js 15（App Router）+ TypeScript + Tailwind + 自研主题
+### 3.1 前端：React 19 + Vite 7 + Radix Themes（自研控制台）
+
+> 本节原方案是 Next.js 15 静态导出；实现时改为 Vite SPA（`web/`），并已下线上游两套前端
+> （`/console/` 零构建页与 `/legacy/` Next 静态导出）。下面记录现状与理由。
 
 **选它**：
 
-- **静态导出可内嵌单二进制**。上游已跑通 `NEXT_EXPORT=1 next build` → `web/out` →
-  `go:embed all:webui/dist`（`server/webui_embed.go`）→ `-tags embedui` 单文件分发。
-  这条链路直接决定 P5（裸机）能否成立：**没有 Node 运行时也能提供 UI**。
-- **流式优先**。SSE + React 19 的 `use`/流式渲染天然适配"事件流即界面"；
-  AG-UI 这类"agent→前端事件标准"生态也在这一侧。
-- **组件生态**。图/表格/时间线（探索图、资产树、事件流）需要成熟表格与可视化库；
-  上游已用 `@tanstack/react-table` + `@antv/g6` + `@xyflow/react`，可选择性沿用其**实现**
-  而不沿用其**排版**。
+- **构建产物可直接 `go:embed`**。`web/` 用 `vite build` 输出到 `server/console-app/`，
+  由 `server/console_app_embed.go` 的 `go:embed all:console-app` 无条件嵌入 ——
+  **不需要 build tag、不需要 Node 运行时**，裸机 `go build` 即自带 UI（P5 成立）。
+- **零构建链依赖**。Vite 只有一条 `npm run build`，产物提交进仓库，纯 Go 环境也能出二进制；
+  上游那套 Next 静态导出（`web/out` + `-tags embedui`）已随前端下线移除。
+- **流式优先**。SSE（AG-UI 事件流）+ React 19 天然适配"事件流即界面"。
+- **组件生态**。Radix Themes + lucide + motion + cmdk + recharts + react-markdown，
+  长列表用 `@tanstack/react-virtual` 虚拟化。
 
-**不选**：Vite+React SPA（丢失内嵌单二进制路径，需额外静态服务器）；Electron/Tauri
-（裸机部署场景不需要，且增加跨平台打包负担）。
+**不选**：Electron/Tauri（裸机部署场景不需要，且增加跨平台打包负担）；Next.js
+（静态导出链路更重，且需要 `-tags embedui` 才能内嵌，反而增加构建分支）。
 
-**主题与信息架构（重做的部分）**：四个一等公民 + 一个只读面——
+**信息架构**：控制台走 `/app/`（`/`、`/console`、`/legacy` 一律 302 过去），
+一等视图是 **对话 / 轨迹 / 检查点 / 设置**，右栏按需展开**子代理**与**工作台（文件 / DIFF / 终端）**：
 
-| 页面 | 职责 | 解决的缺口 |
+| 视图 | 职责 | 解决的缺口 |
 |---|---|---|
-| **Run** | 实时事件流；就地 steer / 暂停 / 停止 / 编辑意图；审批与拦截**就地**呈现（非独立页） | ③ 干涉成本高、① 无确定性纠偏入口 |
-| **Plan** | frontier 列表：可编辑意图、可排序、可显式触发重规划；显示依赖链 | ① 意图不可编辑、不可排序 |
-| **Replay** | 按 revision 回放一次运行：命令、响应、LLM 原文、证据绑定 | P2；上游只能"翻日志" |
-| **Eval** | scenario 集运行、一致性指标、回归门禁结果 | P4；上游无此层 |
-| **Policies（只读优先）** | 原样呈现上游拦截规则与开关状态；**不新增强制门** | 决策 5：不新增强制 |
+| **对话（Run）** | 实时事件流按 revision 分组；就地 steer / 暂停 / 恢复；审批与拦截**就地**呈现 | ③ 干涉成本高、① 无确定性纠偏入口 |
+| **轨迹** | 按轮次的行模型：工具、耗时、token | P2 可观测 |
+| **检查点** | 每轮工作区快照，预览影响范围后显式回滚 | 无 git 环境下的可撤销 |
+| **工作台** | 文件树 / DIFF 审阅 / 终端（人执行的命令以 `human.sh` 入流） | 产出物可审阅 |
+| **子代理** | 委派列表与每一步明细 | P2 子代理可审计 |
 
-主题层面独立成 `web-console/`（与上游 `web/` 并存），避免"改一半上游 UI"导致的维护地狱：
-控制台走 `/console`，上游界面在替换完成前仍可访问。
+**登录门**：控制台首屏是登录 / 首次设置密码（`web/src/LoginGate.jsx`），令牌写
+`artex_token` localStorage 与同名 cookie（EventSource 用）。服务端连不上库时如实报错，
+不谎称"尚未设置密码"。
 
 ### 3.2 后端：Go 单二进制 + 新增控制面包
 
@@ -107,10 +112,15 @@
 
 | 表 | 用途 | 解决 |
 |---|---|---|
-| `harness_revisions` | `(task_id, revision, created_at, summary)`：一轮结束打点 | ④ 无版本一致性视图 |
-| `harness_events` | 事件信封索引（`activity` 的协议视图，可后置为分区表） | P2 回放 |
-| `harness_scenarios` / `harness_eval_runs` / `harness_metrics` | 评测集、运行、指标 | P4 |
-| `tasks.revision`（加列） | 乐观锁：写路径比较 revision，前端显示 stale | ④ 跨 agent 交错 |
+| `harness_revisions` | `(task_id, revision, turn_kind, turn_ref, summary)`：一轮结束打点 | ④ 无版本一致性视图 |
+| `harness_turn_items` | `(task_id, revision, activity_id)`：事件↔轮次映射的**旁表**（不动 `activity` 热路径） | P2 回放 |
+| `tasks.revision`（加列） | 任务当前版本：读一次即知是否 stale | ④ 跨 agent 交错 |
+
+> 实现说明：S3 的评测指标与场景集**没有**建 `harness_events` / `harness_scenarios` /
+> `harness_eval_runs` / `harness_metrics` 表——回放直接从 `harness_revisions` +
+> `harness_turn_items` + `activity` 重建，场景集是 `eval/scenarios/*.json` 文件，
+> 判定结果由 `harness-gate` 输出 JSON（`eval/reports/`）。`activity` 仍是唯一真值，
+> 再加一套表只会让"回放"和"预算"两个口径分叉。
 
 **不加**：`harness_approvals` / `harness_plan_reviews` / `harness_policies`。
 ——决策 5 明确不要全审批与计划预审，故**不引入新的强制门**。策略面只做上游规则的**呈现与开关**。
@@ -327,7 +337,7 @@ Windows 裸机：`start.bat` + 计划任务/服务包装（上游已处理 Git B
 ## 九、与上游的差异管理
 
 1. **差异越小越好**：本阶段相对上游仅 1 处代码改动（`selfupdate` 更新源，见 PROVENANCE）。
-2. **新增代码隔离**：控制面全部在新包 `harness/` 与新目录 `web-console/` `eval/`；
+2. **新增代码隔离**：控制面全部在新包 `harness/` 与新目录 `eval/`；前端是仓库自己的 `web/`；
    对上游包的修改必须**逐条记入 PROVENANCE**。
 3. **可合并**：module 路径保持 `github.com/Autumn-27/artex`，import 与 `go.sum` 未动，
    上游改动可按 git 三方合并引入；冲突集中在 `harness/` 之外的少量补丁点。

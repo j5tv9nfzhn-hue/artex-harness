@@ -2,18 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge, Box, Button, Card, Checkbox, Dialog, Flex, IconButton, ScrollArea, Separator, Text } from "@radix-ui/themes";
 import { RotateCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { authedFetch } from "./lib/auth.js";
 
 /* 检查点与回滚（Sprint 2）。
  * 每次轮次开始时后端对工作区做哈希快照；这里列出还原点、预览影响范围、
  * 再显式执行。刻意不做"一键撤销"：回滚会删掉快照之后新增的文件，
  * 必须让操作者先看到 deleted / untracked 列表。 */
 
-const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-};
 async function api(path, init) {
-  const r = await fetch(path, { headers: authHeaders(), credentials: "include", ...(init || {}) });
+  const r = await authedFetch(path, { credentials: "include", ...(init || {}) });
   if (!r.ok) throw new Error((await r.text()).slice(0, 200) || r.statusText);
   return r.json();
 }

@@ -85,9 +85,9 @@
 
 | 交付 | 说明 |
 |---|---|
-| `web-console/` 成为唯一 UI | 新主题、新信息架构（Run/Plan/Replay/Eval + 只读 Policies） |
-| 上游 `web/` 退场 | 替换完成后从 `go:embed` 链路移除；保留在 git 历史中 |
-| 内嵌单二进制链路复测 | `-tags embedui` 构建 + 裸机分发验证 |
+| 控制台成为唯一 UI（**实际落地为 `web/`**） | 原计划的新目录 `web-console/` 未采用：控制台直接长在 `web/`（React 19 + Vite），产物写入 `server/console-app/` 并提交进仓库 |
+| 上游 `web/`（Next.js）退场 | 已删除（提交 `60dfcf2` / `fdaa7e4`）；`/console/`、`/legacy/` 现在 302 到 `/app/` |
+| 内嵌单二进制链路复测 | 无条件 `go:embed`：`go build` 即自带 UI，不再需要 `-tags embedui` |
 
 ---
 

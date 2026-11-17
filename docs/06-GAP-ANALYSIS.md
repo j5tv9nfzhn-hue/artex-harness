@@ -50,7 +50,7 @@ HARNESS 当前不是"缺功能"，而是**三个层面没打通**：
 
 | # | 差距 | 证据 | 影响 |
 |---|---|---|---|
-| C1 | 现为"左任务列 + 中流 + 右干预坞"，**非**用户描述的三栏 | `server/console/index.html` 结构 | 左栏不是"对话 + 项目目录"；右栏只有干预，没有状态/文件/DIFF/TOKEN |
+| C1 | 现为"左任务列 + 中流 + 右干预坞"，**非**用户描述的三栏 | `web/src/App.jsx` 的三栏结构 | 左栏不是"对话 + 项目目录"；右栏只有干预，没有状态/文件/DIFF/TOKEN |
 | C2 | 无文件树（后端已有） | `[已证实]` `/api/workspace/{list,read,write,mkdir,delete,download,upload}` | 纯前端缺口 |
 | C3 | **无 DIFF** | `[已证实]` 无 diff 端点，也无前端 diff 视图 | 工作区文件是"脚本/字典/证据"，被 agent 改过之后**无法审阅** |
 | C4 | 无 token 预算面板（后端已有） | `[已证实]` `/api/exploration/tokens`、`/api/tokens/daily`、`/api/tokens/usage`、`/api/llm/records/by-model` | 上下文用完不可见；S1 已有 `env.item.usage` 但未渲染 |

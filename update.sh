@@ -56,15 +56,17 @@ update_local(){
   [ -f config.json ] || warn "未找到 config.json——若首次部署请改用 ./install.sh"
   ok "Go: $(go version)"
 
+  # 与 install.sh 同一套：控制台产物在 server/console-app/，go:embed 无条件嵌入。
+  # build:static / webui/dist / -tags embedui 都已随上游前端下线，不能再引用。
   if command -v npm >/dev/null 2>&1; then
-    info "重建前端静态产物…"
-    ( cd web && npm ci && npm run build:static )
-    rm -rf server/webui/dist && cp -r web/out server/webui/dist
-    info "重新编译内嵌单二进制…"
-    CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
+    info "重建控制台（产物写入 server/console-app）…"
+    ( cd web && npm ci --no-audit --no-fund && npm run build )
+    info "重新编译单二进制（控制台已内嵌）…"
+    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
   else
-    warn "未检测到 npm：编译**不内嵌前端**的后端（前端需另跑 npm run dev）"
-    CGO_ENABLED=0 go build -o artex ./cmd/artex
+    warn "未检测到 npm：沿用仓库里已提交的控制台产物编译"
+    [ -f server/console-app/index.html ] || die "server/console-app/index.html 不存在，且没有 npm 可重建"
+    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
   fi
   ok "编译完成 → ./artex"
   warn "请重启正在运行的 artex 进程以生效（重启时会自动迁移 schema）"

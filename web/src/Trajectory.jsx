@@ -3,17 +3,14 @@ import { Badge, Box, Button, Card, Code, Flex, IconButton, ScrollArea, Select, S
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeft, ChevronRight, Clock, Coins, Copy, Search, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
+import { authedFetch } from "./lib/auth.js";
 
 /* 轨迹视图（Sprint 2）：把 /api/harness/trajectory 的按轮次行模型渲染成流水表。
  * 与对话流分开：对话回答"说了什么"，轨迹回答"按什么顺序发生了什么、花了多少"。
  * 数据来自 replay 历史的只读投影，与 harness-gate 同源，不会和判定口径分叉。 */
 
-const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-};
 async function api(path) {
-  const r = await fetch(path, { headers: authHeaders(), credentials: "include" });
+  const r = await authedFetch(path, { credentials: "include" });
   if (!r.ok) throw new Error((await r.text()).slice(0, 160) || r.statusText);
   return r.json();
 }

@@ -1,4 +1,5 @@
-import { authedFetch } from "./lib/auth.js";
+import { authedFetch, authHeaders, tokenCandidates } from "./lib/auth.js";
+import LoginGate, { clearToken } from "./LoginGate.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge, Box, Button, Card, Code, Dialog, Flex, Heading, IconButton, ScrollArea, Separator,
@@ -36,19 +37,34 @@ import {
  *   图表            → recharts
  * 我们只负责布局与数据接线（AG-UI 事件流 + /api/tasks + /api/harness/budget）。 */
 
-// 与 lib/api.ts 同一个键；旧键兜底，避免升级后已登录的会话突然 401。
-const token = () => {
-  try { return localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch { return ""; }
-};
-const authHeaders = () => (token() ? { Authorization: "Bearer " + token() } : {});
+// Token handling lives in lib/auth.js so every panel agrees on which keys exist
+// and on the 401-retry order. Reading a single key here used to leave whole
+// screens unauthenticated when the session had logged in through the other one.
+const token = () => tokenCandidates()[0] || "";
+
+// 令牌失效时回到登录门：一处 401 就够，不要让每个面板各自报错。
+// 用 window 事件解耦：api() 是模块级函数，拿不到 Console 的 state。
+const UNAUTHORIZED_EVENT = "artex:unauthorized";
+function notifyUnauthorized() {
+  try { window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)); } catch { /* ignore */ }
+}
 
 async function api(path) {
   const r = await authedFetch(path, { headers: authHeaders(), credentials: "include" });
+  if (r.status === 401) notifyUnauthorized();
   if (!r.ok) throw new Error((await r.text()).slice(0, 160) || r.statusText);
   return r.json();
 }
 
 export default function App() {
+  // 登录门：没有令牌就渲染 LoginGate，拿到令牌后才挂载整个工作台。
+  // 之前控制台根本没有登录入口，首次部署打开 /app/ 只会看到满屏 401。
+  const [authed, setAuthed] = useState(() => tokenCandidates().length > 0);
+  if (!authed) return <Theme appearance="inherit" accentColor="tomato" grayColor="sand" radius="large"><LoginGate onAuthed={() => setAuthed(true)} /></Theme>;
+  return <Console onLogout={() => { clearToken(); setAuthed(false); }} />;
+}
+
+function Console({ onLogout }) {
   const [tasks, setTasks] = useState([]);
   const [taskId, setTaskId] = useState(null);
   const [rows, setRows] = useState([]);
@@ -91,12 +107,19 @@ export default function App() {
   const [convId, setConvId] = useState(null);
   const [convTitle, setConvTitle] = useState("");
 
+  // 任何面板拿到 401（令牌过期、jwt.key 被换过）都回到登录门，
+  // 而不是让每个面板各显示一遍"事件流不可用"。
+  useEffect(() => {
+    const onUnauthorized = () => onLogout?.();
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [onLogout]);
+
   const loadTasks = useCallback(async () => {
     try {
       const d = await api("/api/tasks");
         const list = Array.isArray(d) ? d : (d.tasks || d.items || []);
-        setTasks(list);
-      if (list.length && !taskId) setTaskId(String(list[0].id));
+        setTasks(list);      if (list.length && !taskId) setTaskId(String(list[0].id));
       // 把当前任务加入标签（只加不删，切换标签不中断运行）
       setTabs((prev) => {
         const next = [...prev];
@@ -196,7 +219,7 @@ export default function App() {
     let dead = false;
     const tick = async () => {
       try {
-        const r = await fetch("/api/intercept/pending", { headers: authHeaders(), credentials: "include" });
+        const r = await authedFetch("/api/intercept/pending", { headers: authHeaders(), credentials: "include" });
         if (r.ok && !dead) {
           const d = await r.json();
           const list = Array.isArray(d) ? d : (d.items || d.pending || []);
@@ -386,7 +409,7 @@ export default function App() {
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
                  toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
                  appearance={appearance} onAppearance={changeAppearance}
-                 onOpenSettings={() => setView("settings")} />
+                 onOpenSettings={() => setView("settings")} onLogout={onLogout} />
 
         <div className="main">
           <WorkspaceTabs open={tabs} active={convId ? { type: "conv", id: convId } : taskId ? { type: "task", id: taskId } : null}

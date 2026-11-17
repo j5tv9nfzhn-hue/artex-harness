@@ -112,7 +112,7 @@ docker run -d -p 8787:8787 -e ARTEX_PG_DSN="postgres://..." artex-harness
 ## 架构
 
 ```
-web/           React 19 + Vite 控制台（约 2.5k 行）→ 产物内嵌进二进制
+web/           React 19 + Vite 控制台（约 3.8k 行）→ 产物内嵌进二进制
     ↓ go:embed
 server/        HTTP 层：路由 / 鉴权 / DTO / AG-UI / 引擎调度
 agent/         LLM 接入与运行编排：provider、提示词、压缩钩子、工具装配

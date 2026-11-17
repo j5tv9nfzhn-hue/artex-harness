@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Box, Button, Checkbox, Code, Flex, IconButton, ScrollArea, Separator, Text, TextField, Tooltip } from "@radix-ui/themes";
 import { ChevronRight, FileText, GitCompare, Play, RefreshCw, SquareTerminal, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { authedFetch } from "./lib/auth.js";
 
 /* 工作台（Sprint 4）：右栏三件套——文件树、DIFF 审阅、终端。
  *
@@ -14,12 +15,8 @@ import { toast } from "sonner";
  * 不做假控件：没有基线时 DIFF 明确显示 baseline=false 并说明原因；
  * 文件过大/二进制不内联，直接说明。 */
 
-const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-};
 async function api(path, init) {
-  const r = await fetch(path, { headers: authHeaders(), credentials: "include", ...(init || {}) });
+  const r = await authedFetch(path, { credentials: "include", ...(init || {}) });
   if (!r.ok) throw new Error((await r.text()).slice(0, 200) || r.statusText);
   return r.json();
 }
@@ -279,7 +276,7 @@ function TerminalPane({ taskId }) {
     try {
       const d = await api(`/api/tasks/${encodeURIComponent(taskId)}/exec`, {
         method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command, inject, timeout_seconds: 60 }),
       });
       setOut(d);

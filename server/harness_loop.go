@@ -72,10 +72,6 @@ func (e *Engine) harnessLoop(ctx context.Context, t *Task) {
 		if e.IsPaused(t.ID) || e.IsDeleting(t.ID) {
 			return
 		}
-		if isTerminalStatus(e.m.TaskStatus(t.ID)) && !first {
-			// A done task re-enters only through Say(), which flips the status back
-			// to running before pushing the message.
-		}
 		if !e.beginTaskOperation(t.ID) {
 			return
 		}

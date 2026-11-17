@@ -43,7 +43,7 @@
 
 | job | 职责 |
 | --- | --- |
-| `frontend` | `npm ci` + `npm run build:static`，产出 `web/out`，作为 `webui-dist` 构件供六个编译 job 复用（只构建一次前端） |
+| `frontend` | `npm ci` + `npm run build`，产物直接写入 `server/console-app/`；随后用 `git status --porcelain -- server/console-app` 校验**提交的产物与源码一致**（不一致即失败） |
 | `build`（矩阵 6 个） | 各平台原生 runner 上 `./build.sh --target <os/arch>`：内嵌前端、打包 zip 到 `ACTION/`，做归档完整性与可执行引信校验 |
 | `finalize` | 汇总六个平台产物到 `ACTION/`，核对归档内容（二进制 / 启动脚本 / skills / 示例配置），生成统一 `SHA256SUMS`、`manifest.json`，有密钥时签名并回验签名 |
 

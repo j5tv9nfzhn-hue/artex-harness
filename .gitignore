@@ -76,3 +76,6 @@ Thumbs.db
 /web/out/
 # 交叉编译产物
 /dist/
+
+# 评测门禁的输出（harness-gate 每次运行都会重写；只保留场景规格，不提交运行产物）
+/eval/reports/

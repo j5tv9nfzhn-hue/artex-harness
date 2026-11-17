@@ -138,6 +138,49 @@ provider 会被调用 8 次而不是承诺的 5 次。新增独立布尔标志�
 `README.md`、`DISCLAIMER.md`、`PROVENANCE.md` 与 `docs/`（`docs/` 在上游 `.gitignore` 里被
 忽略，本仓库已取消该忽略，因为文档是本项目的交付物）。**纯文档改动，不触碰任何代码路径。**
 
+### 3.7 部署链路修复：脚本与 Dockerfile 不再引用已下线的 Next 前端
+
+**问题**：上游前端下线（提交 `60dfcf2` / `fdaa7e4`）后，控制台改为 `web/`（Vite）产物
+`server/console-app/` + 无条件 `go:embed`，`build.sh` 已同步，但 `install.sh`、`update.sh`
+与 `Dockerfile` 仍停留在旧链路，导致**按 README 部署会在半路失败**：
+
+| 文件 | 旧行为 | 后果 |
+|---|---|---|
+| `install.sh` / `update.sh` | `npm run build:static` + `cp web/out server/webui/dist` + `go build -tags embedui` | `build:static` 脚本已不存在，`set -euo pipefail` 下安装/更新直接中止；即使绕过也编不出内嵌 UI |
+| `Dockerfile` | `COPY dist/${TARGETARCH}/artex` | `build.sh` 的实际输出是 `dist/artex-linux-<arch>/artex`，镜像构建找不到文件 |
+
+**修复**：脚本改为 `npm ci && npm run build`（产物由 vite 直接写入 `server/console-app/`）+
+`go build -trimpath`（无需 build tag）；无 npm 时退回"沿用仓库里已提交的产物"并显式校验
+`server/console-app/index.html` 存在。Dockerfile 改为 `COPY dist/artex-linux-${TARGETARCH}/artex`。
+`.env.example` 的令牌说明同步改为 `artex-harness` 仓库。
+
+**不影响模型行为**：只改构建/部署路径，不触碰提示词、工具、拦截规则或运行时语义。
+
+### 3.8 控制台补登录门与统一令牌读取（本项目前端，非上游）
+
+- 新增 `web/src/LoginGate.jsx`：首次进入走 `/api/auth/init`（用户名固定 `ARTEX`，≥8 位），
+  之后走 `/api/auth/login`；令牌写 `artex_token` localStorage 与同名 cookie（EventSource 用）。
+  数据库不可用时如实报错，不谎称"尚未设置密码"（与 `server/auth.go` 的 `503` 契约一致）。
+- 所有面板统一经 `web/src/lib/auth.js` 读取令牌（此前 `Sidebar`/`Composer` 只读
+  `artex.harness.token`，另一枚键登录的会话在这些面板上全部 401）。
+- `Sidebar` 的审批决策改发 `allowed`/`denied`（后端契约），此前发 `allow`/`deny` 稳定 400。
+- 任一请求 401 时回到登录门，不再让每个面板各显示一遍"事件流不可用"。
+
+**不影响模型行为**：纯前端与展示层。
+
+### 3.9 其它一致性修正
+
+| 位置 | 修正 |
+|---|---|
+| `server/harness_loop.go` | 删除一个只剩注释的空 `if` 分支（状态机重构残留，无行为） |
+| `docs/03-ARCHITECTURE.md` | 前端选型改为实际实现（React 19 + Vite + Radix，产物 `server/console-app/`）；表清单改为实际的 `harness_revisions` / `harness_turn_items` / `tasks.revision` |
+| `docs/stages/S5.md`、`docs/04-ROADMAP.md`、`docs/adr/0002` | 入口改为 `/app/`；`web-console/` 计划未采用，控制台长在 `web/` |
+| `docs/adr/0004-harness-runtime-no-planner-worker.md` | 补上被三处引用却缺失的 ADR-0004（内容以 docs/07 为准） |
+| `.github/CI.md` | frontend job 描述改为 `npm run build` + 产物一致性校验 |
+| `eval/reports/` | 纳入 `.gitignore` 并取消跟踪（门禁运行产物，不该入库） |
+| `docker-compose.bench.yml` | 删除（引用不存在的 `bench/.env` 与 `Dockerfile.bench`） |
+| `README.md` / `ARCHITECTURE.md` | 控制台行数更正为约 3.8k |
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：

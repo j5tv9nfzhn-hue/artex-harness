@@ -13,6 +13,7 @@
 
 const KEYS = ["artex_token", "artex.harness.token"];
 
+// tokenCandidates returns every stored token, de-duplicated, in preference order.
 export function tokenCandidates() {
   const out = [];
   try {
@@ -22,6 +23,16 @@ export function tokenCandidates() {
     }
   } catch { /* 隐私模式下 localStorage 可能不可用 */ }
   return out;
+}
+
+// authHeaders builds the Authorization header from the SAME key list authedFetch
+// tries. Components that cannot use authedFetch (raw fetch, SSE) must call this
+// instead of reading a single key: reading only "artex.harness.token" left every
+// request unauthenticated for sessions that had logged in through the main key,
+// which surfaced as a wall of 401s in exactly the panels that use raw fetch.
+export function authHeaders() {
+  const [t] = tokenCandidates();
+  return t ? { Authorization: "Bearer " + t } : {};
 }
 
 export async function authedFetch(url, opts = {}) {

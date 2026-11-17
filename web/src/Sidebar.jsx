@@ -5,16 +5,12 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatDistanceToNowStrict, isThisWeek, isToday, isYesterday } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Archive, Bell, Command as CommandIcon, Copy, Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Settings, ShieldAlert } from "lucide-react";
+import { Archive, Bell, Command as CommandIcon, Copy, Info, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Settings, ShieldAlert } from "lucide-react";
+import { authedFetch, authHeaders } from "./lib/auth.js";
 
 /* 会话列表：紧凑单行 + 时间分组 + 悬停操作 + 虚拟滚动。
  * 组内行高固定 30px，113 条也只渲染可见的那十几行（@tanstack/react-virtual）。
  * 分组用 date-fns 判断（今天/昨天/本周/更早），文案由 date-fns 的 zhCN 提供。 */
-
-function authHeaders() {
-  let t = ""; try { t = localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-}
 
 const ROW_H = 30;
 const HEAD_H = 26;
@@ -31,7 +27,7 @@ function groupOf(t) {
 const statusColor = (s) =>
   s === "running" ? "var(--amber-9)" : s === "done" || s === "achieved" ? "var(--green-9)" : s === "failed" || s === "timeout" ? "var(--red-9)" : "var(--gray-8)";
 
-export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings }) {
+export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId, onPickConv, onPick, onNew, onPalette, onFilter, profiles = [], version, toast, appearance, onAppearance, onOpenSettings, onLogout }) {
   const [hover, setHover] = useState(null);
   const [about, setAbout] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("artex.rail") === "collapsed"; } catch { return false; } });
@@ -43,18 +39,22 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
   const scrollRef = useRef(null);
   const loadPending = useCallback(async () => {
     try {
-      const r = await fetch("/api/intercept/pending", { credentials: "include", headers: authHeaders() });
+      const r = await authedFetch("/api/intercept/pending", { credentials: "include", headers: authHeaders() });
       if (r.ok) { const d = await r.json(); setPending(Array.isArray(d) ? d : (d.items || d.pending || [])); }
     } catch { /* 通知不是关键路径 */ }
   }, []);
   useEffect(() => { loadPending(); const id = setInterval(loadPending, 15000); return () => clearInterval(id); }, [loadPending]);
 
   async function decide(id, decision) {
+    // The endpoint's vocabulary is "allowed" | "denied"; the buttons say
+    // allow/deny. Sending the button wording straight through returned 400 and
+    // left the run blocked (the same mismatch fixed earlier in App.jsx's card).
+    const body = decision === "allow" || decision === "allowed" ? "allowed" : "denied";
     try {
-      const r = await fetch(`/api/intercept/pending/${id}/decide`, {
+      const r = await authedFetch(`/api/intercept/pending/${encodeURIComponent(id)}/decide`, {
         method: "POST", credentials: "include",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision: body }),
       });
       if (!r.ok) throw new Error((await r.text()).slice(0, 140));
       toast?.(decision === "allow" ? "已允许" : "已拒绝");
@@ -63,7 +63,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
   }
 
   async function patchTask(id, body) {
-    const r = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
+    const r = await authedFetch(`/api/tasks/${encodeURIComponent(id)}`, {
       method: "PATCH", credentials: "include",
       headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -235,7 +235,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
                         <DropdownMenu.Item color="red"
                           onSelect={async () => {
                             try {
-                              const r = await fetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
+                              const r = await authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
                               if (!r.ok) throw new Error((await r.text()).slice(0, 140));
                               toast?.("已归档 #" + t.id); onReload?.();
                             } catch (e) { toast?.(e.message, true); }
@@ -270,7 +270,7 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
                   </ContextMenu.Item>
                   <ContextMenu.Item color="red" onSelect={async () => {
                     try {
-                      const r = await fetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
+                      const r = await authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() });
                       if (!r.ok) throw new Error((await r.text()).slice(0, 140));
                       toast?.("已归档 #" + t.id); onReload?.();
                     } catch (e) { toast?.(e.message, true); }
@@ -316,6 +316,10 @@ export default function Sidebar({ tasks, legacy = [], taskId, convs = [], convId
               <DropdownMenu.Separator />
               <DropdownMenu.Item onSelect={() => onOpenSettings?.()}>
                 <Settings size={12} /> 设置
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={() => onLogout?.()}>
+                <LogOut size={12} /> 退出登录
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>

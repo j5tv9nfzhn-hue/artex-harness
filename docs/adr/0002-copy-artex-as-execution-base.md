@@ -18,8 +18,11 @@
 **执行层选 A（复制底座），表现层选 B（UI 主题与排版完全重做）。**
 
 即：保留 `agent/` `db/` `server/` `traffic/` `guard/` `intercept/` `llmpool/` `llmrec/`
-`evidence/` `third_party/norma` 并尽量少改；`web/` 只作为过渡界面保留，新控制台（`web-console/`）
-另起、新主题、新信息架构。
+`evidence/` `third_party/norma` 并尽量少改；上游 `web/`（Next.js）作为过渡界面保留，
+新控制台另起、新主题、新信息架构。
+
+> 落地修正：新控制台没有另建 `web-console/`，而是替换了 `web/` 本身（React 19 + Vite，
+> 产物 `server/console-app/`）；上游 Next.js 前端已删除。
 
 ## 理由
 
@@ -46,7 +49,7 @@
    界面上没有入口；审批是独立页面而不是就地卡口。**换主题不解决这些，必须换 IA。**
 2. 换 IA 后要新增四个一等公民页面（Run / Plan / Replay / Eval），与上游的
    "仪表盘 + 任务列表 + 覆盖图"信息层级冲突，改造量大于重写量。
-3. 保留上游 `web/` 与新建 `web-console/` 并行，可以**分阶段替换**而不冻结开发。
+3. 新控制台与上游 `web/` 并行开发，可以**分阶段替换**而不冻结开发（实际：新控制台直接替换了 `web/`）。
 
 ## 后果
 

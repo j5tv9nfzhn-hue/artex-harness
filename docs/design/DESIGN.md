@@ -93,14 +93,14 @@
 > 所有控件都调**已存在的确定性 API**（`/api/harness/*`、`/api/tasks/{id}/intents/{iid}/steer`、
 > `/api/intercept/judge`），没有为了好看而虚构能力；改不动的就如实只读。
 
-## 六、静态演示为什么不手写
+## 六、静态演示（已移除）
 
-[`../demo/build.py`](../demo/build.py) 把 `server/console/app.css` 与 `app.js` **原样内联**，
-只用一个 mock 层替换 `fetch()` 与 `EventSource`。于是：
+早期曾有一个 `demo/build.py`，把零构建控制台的 `app.css` / `app.js` 原样内联成单文件演示。
+随着控制台迁到 `web/`（React + Vite）并删除 `server/console/`，该脚本与演示产物一并移除
+（提交 `fdaa7e4`）。现在的等价做法是：`cd web && npm run build` 后直接打开
+`server/console-app/index.html` 所在目录，或用 `make web && make build` 打包进二进制。
 
-- 演示走的是**生产渲染路径**——演示里的 bug 就是产品的 bug，不会出现"演示好看、真机拉胯"；
-- 界面实现在 `web/`，改完 `make web && make build` 打包进二进制，不存在手抄漂移；
-- 产物仍是单文件、零外部请求，可 `file://` 直接打开（裸机无 Node 也能看）。
+保留的设计原则不变：**演示走生产渲染路径**——界面只有 `web/` 一份实现，不存在手抄漂移。
 
 ## 七、可访问性与细节
 

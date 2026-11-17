@@ -1,4 +1,4 @@
-import { authedFetch } from "./lib/auth.js";
+import { authedFetch, authHeaders } from "./lib/auth.js";
 import { useEffect, useRef, useState } from "react";
 import { Badge, Box, Flex, IconButton, Select, Separator, Text, TextArea, Tooltip } from "@radix-ui/themes";
 import { ArrowUp, Gauge, Lock, SendHorizontal, Sparkles } from "lucide-react";
@@ -10,11 +10,6 @@ import { ArrowUp, Gauge, Lock, SendHorizontal, Sparkles } from "lucide-react";
  *   速度      运行时按输出字符/耗时实时估算；空闲时显示预算接口的累计
  *   权限      后端未暴露任务级开关 —— 明确禁用并说明，不做假控件
  */
-
-const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-};
 
 export default function Composer({ taskId, convId, live, budget, task, onSent, onTuned }) {
   const [profiles, setProfiles] = useState([]);

@@ -1,6 +1,5 @@
 import { authedFetch } from "./lib/auth.js";
-import { useEffect, useState } from "react";
-import {
+import { useEffect, useState } from "react";import {
   Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator,
   Dialog, Select, Table, Text, TextField, Tooltip,
 } from "@radix-ui/themes";
@@ -12,14 +11,10 @@ import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw
  *   右侧 = 选中分区的表单
  */
 
-// 与 lib/api.ts 保持同一个键：早先这里读的是 "artex.harness.token"，
-// 与 api 层的 "artex_token" 不是一回事，设置页的请求因此不带鉴权头。
-const authHeaders = () => {
-  let t = ""; try { t = localStorage.getItem("artex_token") || localStorage.getItem("artex.harness.token") || ""; } catch {}
-  return t ? { Authorization: "Bearer " + t } : {};
-};
+// 统一走 lib/auth.js：token 键与请求重试都由那一处决定（此前这里只读单个键，
+// 与 api 层的键不一致时设置页的请求会全部 401）。
 const jfetch = (p, o = {}) =>
-  authedFetch(p, { credentials: "include", ...o, headers: { ...authHeaders(), ...(o.body ? { "Content-Type": "application/json" } : {}) } })
+  authedFetch(p, { credentials: "include", ...o, headers: { ...(o.body ? { "Content-Type": "application/json" } : {}) } })
     .then(async (r) => { if (!r.ok) throw new Error((await r.text()).slice(0, 180)); return r.headers.get("content-type")?.includes("json") ? r.json() : null; });
 
 const SECTIONS = [

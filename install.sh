@@ -93,16 +93,18 @@ JSON
   command -v go >/dev/null 2>&1 || die "未检测到 Go，请先安装 Go（>=1.26）：https://go.dev/dl/"
   ok "Go: $(go version)"
 
-  # 内嵌前端需要 node 出静态产物
+  # 控制台是 web/（React + Vite），产物写进 server/console-app/，由 go:embed 无条件嵌入。
+  # 上游那套 Next.js 静态导出（build:static → web/out → -tags embedui）已随前端下线移除，
+  # 这里不能再调 build:static / webui/dist：那些目标在 web/package.json 里已不存在。
   if command -v npm >/dev/null 2>&1; then
-    info "构建前端静态产物…"
-    ( cd web && npm ci && npm run build:static )
-    rm -rf server/webui/dist && cp -r web/out server/webui/dist
-    info "编译内嵌单二进制…"
-    CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
+    info "构建控制台（产物写入 server/console-app）…"
+    ( cd web && npm ci --no-audit --no-fund && npm run build )
+    info "编译单二进制（控制台已内嵌，无需 -tags）…"
+    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
   else
-    warn "未检测到 npm：将编译**不内嵌前端**的后端（前端需另跑 npm run dev）"
-    CGO_ENABLED=0 go build -o artex ./cmd/artex
+    warn "未检测到 npm：沿用仓库里已提交的控制台产物编译（纯 Go 环境也能出可执行文件）"
+    [ -f server/console-app/index.html ] || die "server/console-app/index.html 不存在，且没有 npm 可重建"
+    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
   fi
   ok "编译完成 → ./artex"
 
