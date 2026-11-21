@@ -130,6 +130,7 @@ export default function System({ taskId, onClose }) {
 
   const head = (
     <Flex align="center" gap="1" px="2" py="1" style={{ borderBottom: "1px solid var(--c-divider)" }}>
+      <div style={{ display: "flex", gap: 4, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
       {TABS.map((t) => {
         const Icon = t.icon;
         return (
@@ -139,6 +140,7 @@ export default function System({ taskId, onClose }) {
           </button>
         );
       })}
+      </div>
       <Box style={{ marginLeft: "auto" }} />
       <Tooltip content="刷新">
         <IconButton size="1" variant="ghost" aria-label="刷新系统状态" onClick={load}>

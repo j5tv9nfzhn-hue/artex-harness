@@ -279,6 +279,18 @@ export default function Sidebar({
                             </DropdownMenu.Content>
                           </DropdownMenu.Root>
                         ) : null}
+                        {(() => {
+                          const f = t.findings || {};
+                          const total = (f.critical || 0) + (f.high || 0) + (f.medium || 0) + (f.low || 0);
+                          if (!total) return null;
+                          return (
+                            <span className="row-time"
+                                  title={`发现 ${total} 条（严重 ${f.critical || 0} / 高 ${f.high || 0} / 中 ${f.medium || 0} / 低 ${f.low || 0}）`}
+                                  style={{ color: f.critical ? "var(--red-9)" : "var(--c-ink-4)" }}>
+                              发现 {total}
+                            </span>
+                          );
+                        })()}
                         <span className="row-time">{relTime(t)}</span>
                       </span>
                     )}

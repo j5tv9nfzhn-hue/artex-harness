@@ -20,7 +20,18 @@ import (
 )
 
 func (s *Server) evidenceStore() *evidence.Store {
-	return evidence.New(s.m.pg, s.m.traffic, filepath.Join(s.m.dir, "evidence"))
+	st := evidence.New(s.m.pg, s.m.traffic, filepath.Join(s.m.dir, "evidence"))
+	// 发现登记进审计链：此前链里只有 report_generated 等人工操作，6 条
+	// 发现的登记本身一条都没有。回调在登记落库成功后才触发，失败不进链。
+	st.OnFindingRecorded = func(taskID, findingID int64, name, severity, worker string) {
+		actor := worker
+		if actor == "" {
+			actor = "harness"
+		}
+		s.auditAppend(taskID, evidence.AuditFindingReported, actor,
+			fmt.Sprintf("登记发现 #%d：%s（%s）", findingID, name, severity), findingID, nil)
+	}
+	return st
 }
 
 // Add only new optional properties; preserve edited descriptions, existing

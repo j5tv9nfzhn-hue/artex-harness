@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,6 +80,85 @@ func TestCheckHostAllowlist(t *testing.T) {
 	}
 	if err := s.CheckHost("evil.com"); err == nil {
 		t.Error("evil.com should be denied by allowlist")
+	}
+}
+
+func TestValidatePathSymlinkEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewLocalSandbox(Policy{WorkDir: work})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Symlink to a file outside the workdir.
+	link := filepath.Join(work, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidatePath(link); err == nil {
+		t.Error("symlink inside workdir pointing outside should be denied")
+	}
+	// Symlink to an outside directory, then a child path under it.
+	dirLink := filepath.Join(work, "range")
+	if err := os.Symlink(outside, dirLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidatePath(filepath.Join(dirLink, "secret.txt")); err == nil {
+		t.Error("path through a symlinked dir escaping the workdir should be denied")
+	}
+	// A symlink staying inside the workdir still passes.
+	inner := filepath.Join(work, "inner.txt")
+	if err := os.WriteFile(inner, []byte("y"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	innerLink := filepath.Join(work, "inner-link.txt")
+	if err := os.Symlink(inner, innerLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidatePath(innerLink); err != nil {
+		t.Errorf("symlink staying inside workdir should pass: %v", err)
+	}
+}
+
+func TestValidatePathDenyPrefixes(t *testing.T) {
+	s := mustSandbox(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	if err := s.ValidatePath(filepath.Join(home, ".ssh", "id_ed25519")); err == nil {
+		t.Error("~/.ssh should be denied even if inside an allowed root")
+	}
+	if err := s.ValidatePath("/proc/self/status"); err == nil {
+		t.Error("/proc should be denied")
+	}
+	if err := s.ValidatePath("/tmp/hdata/tasks/1/notes.txt"); err != nil {
+		t.Errorf("ordinary in-workdir file should pass: %v", err)
+	}
+}
+
+func TestEnvScrubOverrides(t *testing.T) {
+	t.Setenv("SANDBOX_TEST_DEMO_TOKEN", "sk-secret-value")
+	t.Setenv("SANDBOX_TEST_BENIGN_VAR", "plain")
+	over := EnvScrubOverrides()
+	found := false
+	for _, e := range over {
+		if e == "SANDBOX_TEST_DEMO_TOKEN=" {
+			found = true
+		}
+		if strings.Contains(e, "sk-secret-value") {
+			t.Errorf("override leaked the secret value: %q", e)
+		}
+		if strings.HasPrefix(e, "SANDBOX_TEST_BENIGN_VAR=") {
+			t.Errorf("benign var must not be overridden: %q", e)
+		}
+	}
+	if !found {
+		t.Errorf("expected override for SANDBOX_TEST_DEMO_TOKEN, got %v", over)
 	}
 }
 

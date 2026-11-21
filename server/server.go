@@ -23,7 +23,6 @@ import (
 	"github.com/Autumn-27/artex/evidence"
 	"github.com/Autumn-27/artex/harness/browser"
 	hperm "github.com/Autumn-27/artex/harness/permission"
-	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/report"
@@ -709,7 +708,6 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	s.registerSideRoutes(mux)
 
 	// Auth routes — exempt from JWT check (handled in requireAuth)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
@@ -770,8 +768,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/replay", s.harnessReplay)
 	mux.HandleFunc("GET /api/harness/trajectory", s.harnessTrajectory)
 	mux.HandleFunc("GET /api/harness/search", s.harnessSearch)
-	mux.HandleFunc("POST /api/harness/consistency", s.harnessConsistency)
-	mux.HandleFunc("GET /api/harness/scenarios", s.evalScenarios)
 
 	// 能力注册表与证据完整性（S4）：只读视图，不做强制（决策 5）。
 	mux.HandleFunc("GET /api/harness/capabilities", s.harnessCapabilities)
@@ -800,8 +796,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/workers/{id}", s.harnessWorkers)
 	mux.HandleFunc("GET /api/harness/subagent/{agent}", s.harnessSubagentDetail)
 	// 委派 API（Sprint 3）：后台委派的权威状态、结果与停止。
-	mux.HandleFunc("GET /api/harness/delegations/{id}", s.harnessDelegations)
-	mux.HandleFunc("GET /api/harness/delegations/{id}/{did}", s.harnessDelegationOne)
 	mux.HandleFunc("POST /api/harness/delegations/{id}/{did}/stop", s.harnessDelegationStop)
 	// AG-UI 事件流（公开协议）：上游 agent UI 直接消费，docs/10 §4
 	mux.HandleFunc("GET /api/agui/agent", s.aguiAgent)
@@ -817,7 +811,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/harness/shot/{hash}", s.harnessShot)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
 
-	mux.HandleFunc("GET /api/audit", s.getAudit)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/hosts", s.getTrafficHosts)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
@@ -825,15 +818,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
 	// 漏洞 IM 推送。渠道是「多实例 + 各自过滤规则」的资源，因此独立成一组
 	// REST 接口，而不是塞进扁平的 /api/settings 键值里。
-	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("GET /api/report/pentest", s.pentestReport)
 	mux.HandleFunc("GET /api/harness/audit-chain", s.harnessAuditChain)
 	mux.HandleFunc("POST /api/traffic/replay", s.trafficReplay)
-	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
-	mux.HandleFunc("POST /api/chat", s.chat)
-	mux.HandleFunc("POST /api/chat/upload", s.chatUpload) // 方式1 文件上传:落到会话/任务工作目录 uploads/
-	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
-	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 
 	// --- 管理后台 API (PostgreSQL 数据源; 新版数据库与管理后台方案) ---
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.pgDeleteTask)
@@ -1132,6 +1119,9 @@ type createTaskReq struct {
 	CompanyIDs           []int64  `json:"company_ids,omitempty"`       // 关联企业范围并快照关联当前企业资产;不复制资产或强制生成意图
 	TimeoutSeconds       int      `json:"timeout_seconds"`             // 任务级超时(秒);0/省略=不限时
 	PlanHeartbeatSeconds int      `json:"plan_heartbeat_seconds"`      // planner 心跳触发间隔(秒);0/省略=默认600(10min);下限=默认=600,低于自动抬到600
+	// RunBudgetMinutes 是 HARNESS 单轮墙钟预算(分钟);nil/0=用全局默认 20 分钟;
+	// 传值须在 5–480 之间，超出返回 400。只影响 harness 模式的单轮时长。
+	RunBudgetMinutes *int `json:"run_budget_minutes,omitempty"`
 	SeedFirstIntent      *bool    `json:"seed_first_intent,omitempty"` // 创建时直接下发一条种子意图(内容=描述+目标),让 worker 免等首轮 planner 直接开跑;省略/null=默认关闭,走标准先规划再执行。显式传 true 才开(CTF 常一 work 解决时可省掉开跑前的 planner 轮)。
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // 资产覆盖度功能;省略/null=默认开(true)。false=关闭覆盖度计算/展示/自动累积范围+隐藏 add_task_scope/list_untested_assets。company 关联不受影响。
 	// InterceptRules 任务级资产拦截/允许规则(创建时录入,存 task_intercept_rules,不进全局表)。
@@ -1160,6 +1150,16 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
+	}
+	runBudgetMinutes := 0
+	if req.RunBudgetMinutes != nil {
+		// 显式传值须在合法范围：0 是无效值（防误配），不传才用默认。
+		m := *req.RunBudgetMinutes
+		if m < db.MinRunBudgetMinutes || m > db.MaxRunBudgetMinutes {
+			writeErr(w, 400, fmt.Sprintf("run_budget_minutes 须在 %d–%d 分钟之间（不传=用默认）", db.MinRunBudgetMinutes, db.MaxRunBudgetMinutes))
+			return
+		}
+		runBudgetMinutes = m
 	}
 	if len(req.SourceTaskIDs) > db.MaxTaskSourceCount {
 		writeErr(w, 400, fmt.Sprintf("关联任务最多选择 %d 个", db.MaxTaskSourceCount))
@@ -1218,6 +1218,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Name: strings.TrimSpace(req.Name), CategoryID: req.CategoryID,
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
+		RunBudgetMinutes: runBudgetMinutes,
 		CoverageEnabled: req.CoverageEnabled,
 		InterceptRules:  interceptRules,
 		HarnessMode:     harnessMode,
@@ -1487,6 +1488,15 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	dto := taskDTOWithLLM(t, s.resolvedTaskStatus(t), s.engine.Ready())
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	// 单任务详情也要带发现计数：此前只在列表接口填充，GET /api/tasks/{id}
+	// 的 findings 恒为 0（任务 #1 有 6 条发现却显示 0）。失败时保持 0，不阻塞详情。
+	if taskID, err := strconv.ParseInt(t.ID, 10, 64); err == nil {
+		if c, err := s.m.PG().FindingCountsForTask(taskID); err == nil {
+			dto.Findings = FindingSeverityDTO{
+				Critical: c.Critical, High: c.High, Medium: c.Medium, Low: c.Low,
+			}
+		}
+	}
 	writeJSON(w, 200, dto)
 }
 
@@ -1743,6 +1753,14 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	assets := s.resolveAssetIDs(f.AssetIDs)
 	dto := findingFromDB(f, assets)
+	// TrafficBindings 只在导出查询里填充；详情接口此前永远返回空列表，
+	// 而 traffic_count（绑定计数子查询）是真实的 1——详情页因此同时出现
+	// “流量绑定（0 条）”“共关联 1 条”“尚未绑定”三种矛盾说法。这里取回绑定明细。
+	if tr, err := s.m.pg.GetFindingTraffic(r.Context(), id); err != nil {
+		log.Printf("[findings] task detail traffic bindings #%d: %v", id, err)
+	} else if tr != nil {
+		dto.TrafficBindings = tr.Bindings
+	}
 	if contextTaskID := strings.TrimSpace(r.URL.Query().Get("context_task")); contextTaskID != "" {
 		contextTask := s.m.ResolveTask(contextTaskID)
 		if contextTask == nil {
@@ -1917,7 +1935,17 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
+	dtos := taskNodeDTOs(nodes)
+	// 血缘里 finding 节点的 state 是探索图语义（report_finding 登记时即
+	// 置 confirmed），不是发现的 triage 状态；详情页原样显示成
+	// "confirmed · harness"，而发现本身还是 pending。把该节点的状态换成
+	// 发现的实际状态（pending/confirmed/…），其余节点不动。
+	for i := range dtos {
+		if dtos[i].ID == i64s(*f.NodeID) {
+			dtos[i].State = f.Status
+		}
+	}
+	writeJSON(w, 200, map[string]any{"nodes": dtos, "edges": edgeDTOs(edges)})
 }
 
 // patchFinding partially updates a finding: any subset of {status, severity}.
@@ -2631,114 +2659,6 @@ func notifyDigestIntervalMin(pg *db.DB) int {
 // counter advances — the task's exploration graph, assets and goal are untouched, so
 // the main agent continues over the same task with a clean transcript/context.
 
-func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.URL.Query().Get("task"))
-	if t == nil {
-		writeErr(w, 404, "no active task")
-		return
-	}
-	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
-		return
-	}
-	// 注意:任务暂停(paused)不拦截主 Agent 对话。主 Agent 编排会话独立于 planner/
-	// worker 的暂停,暂停中仍可继续对话(暂停只终止其正在进行的那一轮,见 control())。
-	var req struct {
-		Message     string           `json:"message"`
-		Attachments []chatAttachment `json:"attachments,omitempty"` // 方式1 上传的文件(路径相对任务工作目录)
-		Seg         *int             `json:"seg,omitempty"`         // 目标主会话分段;缺省=最新段
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
-		return
-	}
-	agentMessage, ok := s.prepareChatMentionMessage(w, req.Message)
-	if !ok {
-		return
-	}
-	// Admission is serialized with deletion's chat cancellation. Mark every chat
-	// turn busy before its first activity/file write, including rule-mode turns.
-	// If deletion wins the race, the second barrier check rejects this request.
-	s.chatMu.Lock()
-	if s.engine.IsDeleting(t.ID) {
-		s.chatMu.Unlock()
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
-		return
-	}
-	if s.chatBusy[t.ID] {
-		s.chatMu.Unlock()
-		writeErr(w, 409, "主 Agent 正在处理上一条消息，请稍候")
-		return
-	}
-	ctx, cancel := context.WithCancelCause(s.ctx)
-	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: req.Message})
-	s.chatBusy[t.ID] = true
-	s.chatCancel[t.ID] = cancel
-	s.chatMu.Unlock()
-
-	// The turn belongs to whichever main-agent segment the user is chatting in (any
-	// segment is interactive, like the top-level chat conversations). Stamp every
-	// mainagent row with it so this turn's transcript + activity land in that segment.
-	// Missing seg (older clients) falls back to the newest segment.
-	mainSeg := 0
-	if req.Seg != nil && *req.Seg >= 0 {
-		mainSeg = *req.Seg
-	} else {
-		mainSeg, _ = t.Store.CurrentMainSeg()
-	}
-	segPtr := &mainSeg
-
-	// Persist + broadcast the human turn so the 主 Agent 编排会话 survives page
-	// reloads and updates live: the conversation lives in the activity stream as
-	// worker="mainagent" (the per-task activity table, replayed via SSE). With
-	// attachments, the activity's Detail carries {text, attachments} so the transcript
-	// renders attachment cards.
-	humanTurn := userActivityWithAttachments("mainagent", req.Message, req.Attachments)
-	humanTurn.MainSeg = segPtr
-	s.engine.emitActivity(t, humanTurn)
-	var ma *agent.MainAgent
-	if s.taskRuntimeAvailable(t, "mainagent") {
-		ma = s.agentsForTask(t).main
-	}
-	if ma != nil {
-		// Run the agent on a per-turn cancellable ctx (NOT r.Context()): the turn can
-		// take minutes (multi-tool loop), and binding it to the request lifecycle meant
-		// a page reload / proxy timeout cancelled it mid-run ("context canceled"). The
-		// steps + final answer stream back live via SSE (worker="mainagent"), so the
-		// handler returns immediately and the browser never needs to hold the request.
-		go func() {
-			defer func() {
-				s.finishTaskChat(t.ID, cancel)
-			}()
-			// emit every step (thinking/tool_use/tool_result/text/result) so the main
-			// agent session shows its work live, like worker/planner. The final answer
-			// is the captured "result" step — no separate reply emit (would duplicate).
-			emit := func(rec db.Activity) {
-				rec.MainSeg = segPtr
-				s.engine.emitActivity(t, rec)
-			}
-			maTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
-			resume := func() { s.reviveTask(t) } // set_goals 新增目标 → 把任务拉回 running
-			// 把上传附件的【绝对路径】清单拼进发给 agent 的消息,它据此用 Read/Bash 打开文件。
-			// taskDir = agent 的工作目录(CWD),与 chatUpload 落盘、ensureRunDir 一致。
-			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
-			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
-			s.engine.BeginLLMCall(t.ID)
-			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
-			s.engine.EndLLMCall(t.ID)
-			if err != nil && ctx.Err() == nil {
-				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）", MainSeg: segPtr})
-			}
-		}()
-		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
-		return
-	}
-	reply := s.fallbackChat(t, req.Message)
-	s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", Summary: reply, MainSeg: segPtr})
-	s.finishTaskChat(t.ID, cancel)
-	writeJSON(w, 200, map[string]any{"reply": reply, "mode": "rule"})
-}
-
 func (s *Server) cancelTaskChat(taskID string, cause error) bool {
 	s.chatMu.Lock()
 	cancel := s.chatCancel[taskID]
@@ -2760,34 +2680,9 @@ func (s *Server) finishTaskChat(taskID string, cancel context.CancelCauseFunc) {
 // taskChatStatus reports the authoritative state of the task's main-agent turn.
 // Activity timestamps are not a reliable proxy because a tool or LLM call may run
 // for minutes without emitting an intermediate frame.
-func (s *Server) taskChatStatus(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.PathValue("id"))
-	if t == nil {
-		writeErr(w, http.StatusNotFound, "task not found")
-		return
-	}
-	s.chatMu.Lock()
-	running := s.chatBusy[t.ID]
-	s.chatMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]bool{"running": running})
-}
-
 // stopChat aborts the in-flight main-agent turn for a task (manual stop button).
 // Mirrors pgStopConversation: cancels only the current turn; planner/workers are
 // unaffected and continue running. The user can send a new message immediately.
-func (s *Server) stopChat(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.PathValue("id"))
-	if t == nil {
-		writeErr(w, 404, "task not found")
-		return
-	}
-	if !s.cancelTaskChat(t.ID, agent.AbortChatStoppedByUser) {
-		writeJSON(w, 200, map[string]any{"status": "idle"})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"status": "stopping"})
-}
-
 // fallbackChat is the no-LLM human-steering handler: simple命令 + 态势摘要.
 func (s *Server) fallbackChat(t *Task, msg string) string {
 	m := strings.TrimSpace(msg)
@@ -2811,38 +2706,6 @@ func (s *Server) fallbackChat(t *Task, msg string) string {
 		fr, _ := t.Store.Frontier(1000)
 		return fmt.Sprintf("（规则模式，未配置 LLM）当前态势：资产 %d，待领意图 %d，确认发现 %d。\n可用指令：以\"意图 ...\"注入意图，\"提示 ...\"给规划者提示。", assets, len(fr), len(fnd))
 	}
-}
-
-func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.URL.Query().Get("task"))
-	if t == nil {
-		writeErr(w, 404, "no active task")
-		return
-	}
-	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // 纯漏洞（事实是独立的 KindFact，不进报告）
-	counts := map[string]int{}
-	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
-		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
-		if len(ns) > 0 {
-			counts[ty] = len(ns)
-		}
-	}
-	md := report.Markdown(report.Input{
-		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
-		AssetCounts: counts, Findings: findings,
-	})
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.WriteHeader(200)
-	_, _ = w.Write([]byte(md))
-}
-
-func (s *Server) getAudit(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.URL.Query().Get("task"))
-	if t == nil {
-		writeJSON(w, 200, []any{})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"entries": t.Guard.Audit(), "attributions": t.Guard.Attributions()})
 }
 
 // gc is a no-op stub (GC not yet implemented in the new asset store).

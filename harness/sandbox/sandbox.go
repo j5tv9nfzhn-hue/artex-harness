@@ -21,12 +21,18 @@
 //
 // Callers: guard (path + host checks before PreToolUse allows a call)
 // and server/harness wiring (one Sandbox per task, rooted at the task's
-// workdir / project_dir).
+// workdir / project_dir). Since S6-FIX-PROXY-SANDBOX the guard wiring is
+// live for harness-mode tasks: file tools are contained to the task dir
+// (symlinks resolved, host-sensitive prefixes denied) and loopback /
+// private egress is denied unless the task's RoE scope authorizes the
+// host. Bash children additionally get their environment scrubbed via
+// EnvScrubOverrides (see agent bashEnv).
 package sandbox
 
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -49,6 +55,10 @@ type Policy struct {
 	// loopback and link-local egress unless the host is explicitly
 	// allowlisted. Local smoke tests use 127.0.0.1 and must allowlist it.
 	DenyPrivateNetwork bool
+	// DenyPrefixes are absolute paths that are denied even when they sit
+	// inside an AllowedRoot (defense in depth for host secrets: /etc,
+	// ~/.ssh, /proc, ...). Empty means the NewLocalSandbox defaults.
+	DenyPrefixes []string
 	// Timeout is the per-command ceiling the executor should enforce.
 	// Zero means the caller's default.
 	Timeout time.Duration
@@ -100,12 +110,22 @@ func NewLocalSandbox(p Policy) (*LocalSandbox, error) {
 		if !filepath.IsAbs(r) {
 			return nil, fmt.Errorf("sandbox: AllowedRoots 必须是绝对路径: %s", r)
 		}
-		cleaned = append(cleaned, filepath.Clean(r))
+		cleaned = append(cleaned, resolveSymlinks(filepath.Clean(r)))
 	}
 	allow := map[string]bool{}
 	for _, h := range p.EnvAllowlist {
 		allow[strings.ToUpper(strings.TrimSpace(h))] = true
 	}
+	// Sensitive host locations are denied even inside an AllowedRoot.
+	// Callers may override via Policy.DenyPrefixes.
+	deny := p.DenyPrefixes
+	if len(deny) == 0 {
+		deny = []string{"/etc", "/proc", "/sys", "/dev", "/root"}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			deny = append(deny, filepath.Join(home, ".ssh"))
+		}
+	}
+	p.DenyPrefixes = deny
 	// DenyPrivateNetwork defaults to true when the caller did not
 	// explicitly set it false via the struct — callers that want it off
 	// must set DenyPrivateNetwork=false AND set a flag. To keep the zero
@@ -116,7 +136,7 @@ func NewLocalSandbox(p Policy) (*LocalSandbox, error) {
 	// caller used the AllowPrivateNetwork option below.
 	p.DenyPrivateNetwork = true
 	p.AllowedRoots = cleaned
-	p.WorkDir = filepath.Clean(p.WorkDir)
+	p.WorkDir = resolveSymlinks(filepath.Clean(p.WorkDir))
 	return &LocalSandbox{policy: p, roots: cleaned, allow: allow}, nil
 }
 
@@ -134,6 +154,33 @@ func NewLocalSandboxAllowPrivate(p Policy) (*LocalSandbox, error) {
 func (s *LocalSandbox) WorkDir() string { return s.policy.WorkDir }
 func (s *LocalSandbox) Policy() Policy  { return s.policy }
 
+// resolveSymlinks returns abs with symlinks resolved for the part that
+// exists on disk. A path that does not exist yet resolves through its
+// nearest existing ancestor, so a Write into workdir/link/ (link ->
+// /etc) is still caught even though the final file does not exist.
+// Unresolvable paths come back unchanged.
+func resolveSymlinks(abs string) string {
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	cur := abs
+	var suffix []string
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+				return filepath.Join(append([]string{resolved}, suffix...)...)
+			}
+			return abs
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		suffix = append([]string{filepath.Base(cur)}, suffix...)
+		cur = parent
+	}
+}
+
 func (s *LocalSandbox) ValidatePath(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("sandbox: 路径为空")
@@ -143,7 +190,16 @@ func (s *LocalSandbox) ValidatePath(path string) error {
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(s.policy.WorkDir, abs)
 	}
-	abs = filepath.Clean(abs)
+	// Resolve symlinks first: a link inside the workdir pointing outside
+	// (e.g. workdir/app.py -> /workspace/target-range/app.py) must not
+	// smuggle a read past containment.
+	abs = resolveSymlinks(filepath.Clean(abs))
+	// Sensitive host locations are denied even inside an AllowedRoot.
+	for _, p := range s.policy.DenyPrefixes {
+		if abs == p || strings.HasPrefix(abs, p+string(filepath.Separator)) {
+			return fmt.Errorf("sandbox: 路径 %s 在宿主禁区 %s 内，禁止访问", path, p)
+		}
+	}
 	for _, root := range s.roots {
 		rel, err := filepath.Rel(root, abs)
 		if err != nil {
@@ -185,6 +241,31 @@ func (s *LocalSandbox) ScrubEnv(env []string) []string {
 			continue
 		}
 		out = append(out, kv)
+	}
+	return out
+}
+
+// IsSensitiveEnvKey reports whether an env key carries a secret by the
+// Stage 1 policy (same list ScrubEnv uses). Exported for the Bash-env
+// override path, which cannot drop inherited keys — only override them.
+func IsSensitiveEnvKey(key string) bool { return isSensitiveKey(key) }
+
+// EnvScrubOverrides returns "KEY=" (empty value) entries for every
+// sensitive key present in the current process environment. Appended
+// after os.Environ() they override the inherited secret with an empty
+// value — os/exec keeps the last occurrence of a duplicate key — so a
+// Bash child never sees the server's LLM keys, tokens or DSNs, even
+// though the child still inherits the rest of the process environment.
+func EnvScrubOverrides() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if isSensitiveKey(k) {
+			out = append(out, k+"=")
+		}
 	}
 	return out
 }

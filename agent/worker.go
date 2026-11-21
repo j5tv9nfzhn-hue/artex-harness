@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/harness/sandbox"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
@@ -212,15 +213,33 @@ func proxyEnv(proxyAddr, caCert string) []string {
 		"NODE_USE_ENV_PROXY=1", // Node 24+: honor HTTP(S)_PROXY in built-in fetch/http
 	}
 	if caCert != "" {
+		// caCert is non-empty ONLY when the recording MITM is on
+		// (Manager.ProxyCACert) — so this branch is exactly "capture on".
 		env = append(env,
 			"SSL_CERT_FILE="+caCert,
 			"CURL_CA_BUNDLE="+caCert,
 			"REQUESTS_CA_BUNDLE="+caCert,
 			"GIT_SSL_CAINFO="+caCert,
 			"NODE_EXTRA_CA_CERTS="+caCert,
+			// Capture on: never let a stale NO_PROXY bypass the recording
+			// proxy. The server process inherits no_proxy=127.0.0.1 from
+			// the host, and curl/Python honor it — loopback targets then
+			// dial direct and leave zero records (real-task #1). Empty
+			// means "proxy everything"; appended last, it overrides the
+			// inherited value (os/exec keeps the last duplicate key).
+			"NO_PROXY=", "no_proxy=",
 		)
 	}
 	return env
+}
+
+// bashEnv builds the environment for Bash subprocesses: the proxy routing
+// from proxyEnv plus empty overrides for every sensitive key in the
+// process environment (sandbox.EnvScrubOverrides), so child commands
+// never inherit the server's LLM keys, tokens or DSNs. Applied on top
+// of os.Environ() by the SDK (withEnv), so the overrides win.
+func bashEnv(proxyAddr, caCert string) []string {
+	return append(proxyEnv(proxyAddr, caCert), sandbox.EnvScrubOverrides()...)
 }
 
 // workerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the worker system
@@ -449,8 +468,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		DeepSeekSearchAPIKey:  w.webSearch.DeepSeekAPIKey,
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
 		WebSearchProxy:        w.webSearch.Proxy,
-		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
+		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k），
+		// 敏感环境变量以空值覆盖，不继承服务端的密钥。
+		BashEnv:    bashEnv(w.proxyAddr, w.proxyCACert),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,

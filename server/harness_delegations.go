@@ -2,10 +2,11 @@ package server
 
 // Delegation API (Sprint 3).
 //
-//	GET  /api/harness/delegations/{id}          — every delegation for one task
-//	    ?state=running|done|failed|killed       — optional filter
-//	GET  /api/harness/delegations/{id}/{did}    — one delegation's result body
 //	POST /api/harness/delegations/{id}/{did}/stop — stop a running background run
+//
+// (The two read endpoints, GET /api/harness/delegations/{id} and
+// GET /api/harness/delegations/{id}/{did}, were deleted in S6-TRIM round 2:
+// the console reads delegations from GET /api/harness/workers/{id} instead.)
 //
 // The authoritative source is delegation.Global (one in-process registry per
 // task, shared by the runtime that spawns the run and this handler that reports
@@ -16,7 +17,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -74,52 +74,6 @@ func (s *Server) startDelegationGC(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (s *Server) harnessDelegations(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.m.Task(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, "task not found")
-		return
-	}
-	reg := s.delegationRegistry(t.ID)
-	state := r.URL.Query().Get("state")
-	all := reg.List()
-	rows := make([]delegation.Record, 0, len(all))
-	for _, rec := range all {
-		if state != "" && string(rec.Status) != state {
-			continue
-		}
-		rows = append(rows, rec)
-	}
-	sum := reg.Summary()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"task":        t.ID,
-		"delegations": rows,
-		"summary":     sum,
-		"pending":     len(reg.PeekNotifications()),
-		"note":        "委派注册表是进程内权威状态：同步委派即时返回，后台委派（run_in_background）完成后以 task-notification 通知父会话。Agent Teams / 跨会话编排不在本产品范围（ADR-0005）。",
-	})
-}
-
-func (s *Server) harnessDelegationOne(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.m.Task(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, "task not found")
-		return
-	}
-	rec, found := s.delegationRegistry(t.ID).Get(r.PathValue("did"))
-	if !found {
-		writeErr(w, http.StatusNotFound, "delegation not found")
-		return
-	}
-	body := rec.Result
-	if body == "" && rec.OutputPath != "" {
-		if b, err := os.ReadFile(rec.OutputPath); err == nil {
-			body = string(b)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"delegation": rec, "result": body})
 }
 
 func (s *Server) harnessDelegationStop(w http.ResponseWriter, r *http.Request) {

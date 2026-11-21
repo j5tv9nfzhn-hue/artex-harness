@@ -57,6 +57,9 @@ type Task struct {
 	// planner 心跳触发间隔(秒)：距上轮 plan 结束/任务开始满该值且期间无触发 → 触发一轮。
 	// 下限=默认=300(5min)，低于一律抬到 300(在 CreateTask 归一)。见 docs/planner-trigger-impl-plan.md
 	PlanHeartbeatSeconds int `json:"plan_heartbeat_seconds"`
+	// RunBudgetMinutes 是 HARNESS 单轮墙钟预算(分钟)：0=未设置,用全局
+	// HARNESS_RUN_BUDGET 或 20 分钟默认；建任务时可传 5–480。
+	RunBudgetMinutes int `json:"run_budget_minutes,omitempty"`
 	// CoverageEnabled 是「资产覆盖度功能」总开关(默认 true)。false 时：不计算/不展示测试
 	// 覆盖度、不自动累积 task_scope(source=auto)、不给 agent 开放 add_task_scope/
 	// list_untested_assets、态势里不注入 coverage 块(scope 字段仍保留)。company 关联
@@ -93,6 +96,26 @@ func IsTerminal(status string) bool {
 // MinPlanHeartbeatSeconds 是 planner 心跳间隔的下限 = 默认 = 10min。
 // 低于它(含缺省 0 / 负值 / 误配的小值)一律抬到 10min，防止把 planner 打爆。
 const MinPlanHeartbeatSeconds = 600
+
+// MinRunBudgetMinutes / MaxRunBudgetMinutes 是建任务时 run_budget_minutes
+// 的合法范围（分钟）。小于 5 分钟 agent 来不及做任何有意义的工作；
+// 大于 8 小时的单轮会把一次运行拖成无人值守的长会话。0 = 未设置。
+const (
+	MinRunBudgetMinutes = 5
+	MaxRunBudgetMinutes = 480
+)
+
+// ValidateRunBudgetMinutes reports whether a per-task run budget (minutes)
+// is legal: 0 (unset) or within [MinRunBudgetMinutes, MaxRunBudgetMinutes].
+func ValidateRunBudgetMinutes(m int) error {
+	if m == 0 {
+		return nil
+	}
+	if m < MinRunBudgetMinutes || m > MaxRunBudgetMinutes {
+		return fmt.Errorf("run_budget_minutes 须在 %d–%d 分钟之间（0=用默认）", MinRunBudgetMinutes, MaxRunBudgetMinutes)
+	}
+	return nil
+}
 
 // MaxTaskSourceCount bounds the amount of live inherited context one task can
 // pull into every planner/main-agent prompt. Inheritance is intentionally direct
@@ -163,6 +186,8 @@ type TaskCreateOptions struct {
 	LLMProfileIDs        []int64
 	TimeoutSeconds       int
 	PlanHeartbeatSeconds int
+	// RunBudgetMinutes 是 HARNESS 单轮墙钟预算(分钟);0=未设置,用全局默认。
+	RunBudgetMinutes int
 	// CoverageEnabled 是「资产覆盖度功能」开关;nil=默认开(true)，让不关心该开关的创建
 	// 路径(编排 spawn、老 API)沿用原行为。仅 web 创建任务时可显式传 false 关闭。
 	CoverageEnabled *bool
@@ -227,6 +252,9 @@ VALUES ($1, 'goal', $2, 0, 'open', 'user')`, expID, string(goalPayload)); err !=
 	if opts.TimeoutSeconds < 0 {
 		opts.TimeoutSeconds = 0
 	}
+	if err := ValidateRunBudgetMinutes(opts.RunBudgetMinutes); err != nil {
+		return nil, err
+	}
 	opts.PlanHeartbeatSeconds = normalizeHeartbeat(opts.PlanHeartbeatSeconds)
 	coverageEnabled := opts.CoverageEnabled == nil || *opts.CoverageEnabled
 	harnessMode := opts.HarnessMode != nil && *opts.HarnessMode
@@ -255,12 +283,13 @@ VALUES ($1, 'goal', $2, 0, 'open', 'user')`, expID, string(goalPayload)); err !=
 		SourceTaskIDs:  append([]int64(nil), opts.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), opts.CompanyIDs...),
 		TimeoutSeconds: opts.TimeoutSeconds, PlanHeartbeatSeconds: opts.PlanHeartbeatSeconds,
+		RunBudgetMinutes: opts.RunBudgetMinutes,
 		CoverageEnabled: coverageEnabled, HarnessMode: harnessMode, ProjectDir: strings.TrimSpace(opts.ProjectDir),
 	}
 	if err := tx.QueryRow(`
-INSERT INTO tasks(name, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, coverage_enabled, harness_mode, project_dir)
-VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11)
-RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, coverageEnabled, harnessMode, strings.TrimSpace(opts.ProjectDir)).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
+INSERT INTO tasks(name, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, run_budget_minutes, coverage_enabled, harness_mode, project_dir)
+VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
+RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, opts.RunBudgetMinutes, coverageEnabled, harnessMode, strings.TrimSpace(opts.ProjectDir)).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	if err := insertTaskRelations(tx, t.ID, opts.SourceTaskIDs); err != nil {
@@ -376,11 +405,11 @@ func insertTaskLLMProfiles(tx *sql.Tx, taskID int64, profileIDs []int64) error {
 
 const taskCols = `id, COALESCE(name,''), category_id,
 COALESCE((SELECT category.name FROM task_categories category WHERE category.id=tasks.category_id),''),
-description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), first_run_at, deadline_at, COALESCE(harness_mode,false), COALESCE(project_dir,''), COALESCE(thinking_type,''), COALESCE(reasoning_effort,'')`
+description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(run_budget_minutes,0), COALESCE(coverage_enabled,true), first_run_at, deadline_at, COALESCE(harness_mode,false), COALESCE(project_dir,''), COALESCE(thinking_type,''), COALESCE(reasoning_effort,'')`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt, &t.HarnessMode, &t.ProjectDir, &t.ThinkingType, &t.ReasoningEffort); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.RunBudgetMinutes, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt, &t.HarnessMode, &t.ProjectDir, &t.ThinkingType, &t.ReasoningEffort); err != nil {
 		return nil, err
 	}
 	t.Pinned = t.PinnedAt != nil

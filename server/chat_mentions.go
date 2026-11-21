@@ -55,28 +55,6 @@ func parseChatMentions(message string) ([]chatMentionRef, error) {
 	return refs, nil
 }
 
-func (s *Server) searchChatMentions(w http.ResponseWriter, r *http.Request) {
-	kind, query := r.URL.Query().Get("kind"), strings.TrimSpace(r.URL.Query().Get("q"))
-	if (kind != "" && !db.ValidChatMentionKind(kind)) || utf8.RuneCountInString(query) > 200 {
-		writeErr(w, 400, "引用类型无效或搜索关键词超过 200 字")
-		return
-	}
-	pg := s.pg(w)
-	if pg == nil {
-		return
-	}
-	page, err := pg.SearchChatMentionsPage(r.Context(), kind, query, r.URL.Query().Get("cursor"))
-	if err != nil {
-		if errors.Is(err, db.ErrInvalidChatMentionCursor) {
-			writeErr(w, 400, err.Error())
-			return
-		}
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, page)
-}
-
 // prepareChatMentionMessage fails before accepting/persisting a turn when a
 // selected record was deleted or its type does not match. Existing plain chat
 // continues to work without a database.

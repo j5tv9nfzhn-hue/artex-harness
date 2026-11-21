@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -107,11 +105,8 @@ func TestChatMentionPagination(t *testing.T) {
 			t.Fatal("exact id repeated on second page")
 		}
 	}
-	w := httptest.NewRecorder()
-	s.searchChatMentions(w, httptest.NewRequest("GET", "/api/chat/mentions?cursor=invalid", nil))
-	if w.Code != 400 {
-		t.Fatalf("bad cursor: %d", w.Code)
-	}
+	// (GET /api/chat/mentions was deleted in S6-TRIM round 2; the bad-cursor
+	// mapping to db.ErrInvalidChatMentionCursor is covered above at the db layer.)
 }
 
 func TestChatMentionBoundedJSON(t *testing.T) {
@@ -186,21 +181,9 @@ func TestChatMentionCatalogAndContext(t *testing.T) {
 	if _, err := composeChatMentionMessage(pg, "@[漏洞#9223372036854775807]"); err == nil {
 		t.Fatal("accepted missing record")
 	}
-	for _, kind := range []string{"finding", "company", "asset", ""} {
-		r := httptest.NewRequest("GET", "/api/chat/mentions?kind="+kind+"&q="+url.QueryEscape("引用"), nil)
-		w := httptest.NewRecorder()
-		s.searchChatMentions(w, r)
-		if w.Code != 200 {
-			t.Fatalf("search %s: %d %s", kind, w.Code, w.Body)
-		}
-	}
-	for _, query := range []string{"kind=unsupported", "q=" + url.QueryEscape(strings.Repeat("字", 201))} {
-		w := httptest.NewRecorder()
-		s.searchChatMentions(w, httptest.NewRequest("GET", "/api/chat/mentions?"+query, nil))
-		if w.Code != 400 {
-			t.Fatalf("invalid search: %d", w.Code)
-		}
-	}
+	// (The GET /api/chat/mentions handler that used to serve these searches was
+	// deleted in S6-TRIM round 2; the per-kind db search above covers the same
+	// SearchChatMentions paths.)
 	// Wildcards are literal input; no whole-table match for a '%' query.
 	items, err := pg.SearchChatMentions(t.Context(), "company", "%")
 	if err != nil || len(items) != 0 {

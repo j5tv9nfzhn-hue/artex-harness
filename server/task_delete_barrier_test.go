@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -297,51 +295,6 @@ func TestWaitTaskQuiescentHonorsContext(t *testing.T) {
 	defer cancel()
 	if err := s.waitTaskQuiescent(ctx, "9"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline exceeded, got %v", err)
-	}
-}
-
-func TestTaskChatStatusUsesAuthoritativeBusyState(t *testing.T) {
-	m := &Manager{tasks: map[string]*Task{"7": {ID: "7"}}}
-	s := &Server{
-		m:          m,
-		chatBusy:   map[string]bool{"7": true},
-		chatCancel: map[string]context.CancelCauseFunc{},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/7/chat/status", nil)
-	req.SetPathValue("id", "7")
-	rec := httptest.NewRecorder()
-
-	s.taskChatStatus(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
-	}
-	var got struct {
-		Running bool `json:"running"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if !got.Running {
-		t.Fatal("busy main-agent turn was reported idle")
-	}
-}
-
-func TestTaskChatUploadRejectsDeleteBarrierBeforeCreatingDirectory(t *testing.T) {
-	dataDir := t.TempDir()
-	m := &Manager{dir: dataDir, tasks: map[string]*Task{"7": {ID: "7"}}}
-	s := &Server{m: m, engine: NewEngine(m)}
-	if !s.engine.BeginDelete("7") {
-		t.Fatal("delete barrier should be installed")
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/upload?scope=task&id=7", nil)
-	rec := httptest.NewRecorder()
-	s.chatUpload(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 while deleting, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "tasks", "7")); !os.IsNotExist(err) {
-		t.Fatalf("upload must not recreate task directory, stat err=%v", err)
 	}
 }
 

@@ -520,6 +520,22 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 	return out, rows.Err()
 }
 
+// FindingCountsForTask returns one task's finding counts by severity
+// (severity 白名单外/为空的记录不计入任一档，与 TaskListMetricsAll 的口径一致）。
+// 单任务详情（GET /api/tasks/{id}）用它补 dto.Findings：列表接口走批量聚合，
+// 单任务接口此前完全没填该字段，导致已登记的发现计数恒为 0。
+func (d *DB) FindingCountsForTask(taskID int64) (FindingSeverityCounts, error) {
+	var c FindingSeverityCounts
+	err := d.QueryRow(`
+		SELECT COUNT(*) FILTER (WHERE severity='critical'),
+		       COUNT(*) FILTER (WHERE severity='high'),
+		       COUNT(*) FILTER (WHERE severity='medium'),
+		       COUNT(*) FILTER (WHERE severity='low')
+		FROM findings WHERE task_id=$1`, taskID,
+	).Scan(&c.Critical, &c.High, &c.Medium, &c.Low)
+	return c, err
+}
+
 // FindingStats is the whole-table aggregate powering the 发现 page's stat cards
 // and vuln-class filter — computed server-side so it stays exact regardless of
 // pagination.

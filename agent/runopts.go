@@ -66,8 +66,9 @@ func (c ModelRunConfig) ApplyModelDefaults(opts *agentcore.Options) {
 	opts.WebSearchProxy = c.WebSearch.Proxy
 
 	// Bash children default to the proxy + the CA bundle, so shell-driven HTTP is
-	// recorded too without the model having to pass -x / -k.
-	opts.BashEnv = proxyEnv(c.ProxyAddr, c.ProxyCACert)
+	// recorded too without the model having to pass -x / -k. Sensitive env vars
+	// are overridden with empty values (see bashEnv).
+	opts.BashEnv = bashEnv(c.ProxyAddr, c.ProxyCACert)
 
 	opts.Compaction = compactionConfig(c.ContextWindow)
 	opts.NonStreaming = c.NonStreaming

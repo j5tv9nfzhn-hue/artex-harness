@@ -68,6 +68,8 @@ type TaskDTO struct {
 	ArchiveBlockedBy  string   `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs        []int64  `json:"company_ids"`
 	CoverageEnabled   bool     `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
+	// RunBudgetMinutes 是 HARNESS 单轮墙钟预算(分钟);0=未设置,用全局默认 20 分钟。
+	RunBudgetMinutes int `json:"run_budget_minutes,omitempty"`
 }
 
 // FindingSeverityDTO 是任务列表里按严重度分档的漏洞计数（严重/高/中/低）。
@@ -146,6 +148,7 @@ func taskDTOWithLLM(t *Task, status string, llmReady bool) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		RunBudgetMinutes:   t.RunBudgetMinutes,
 		HarnessMode:        t.HarnessMode,
 		ThinkingType:       t.ThinkingType,
 		ReasoningEffort:    t.ReasoningEffort,

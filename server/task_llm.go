@@ -15,6 +15,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
+	"github.com/Autumn-27/artex/harness/sandbox"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
@@ -631,6 +632,11 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	hx.SetNoaEnabled(s.m.NoaCompactionEnabled)
 	hx.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	hx.SetWebSearch(s.webSearchFor("harness"))
+	// 任务级单轮墙钟预算：建任务时传了 run_budget_minutes 就用它，否则走
+	// 全局 HARNESS_RUN_BUDGET / 20 分钟默认（agent.HarnessAgent.RunBudget）。
+	if t.RunBudgetMinutes > 0 {
+		hx.SetRunBudget(time.Duration(t.RunBudgetMinutes) * time.Minute)
+	}
 	// 平台审批门：没有这一行，HARNESS 运行会绕过内置破坏性命令拦截（eval gate 抓到的真实缺陷）
 	// Stage 1 (P0): wire RoE scope enforcement. The guard's hard-deny
 	// floor is on by default; the DB scope checker makes out-of-scope
@@ -638,6 +644,21 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	if t.Guard != nil {
 		if s.m != nil && s.m.pg != nil {
 			t.Guard.SetScopeChecker(guard.NewDBScopeChecker(s.m.pg))
+		}
+		// S6-FIX-PROXY-SANDBOX: enforce the sandbox policy on every tool
+		// call of harness-mode tasks (harness agent + its delegations,
+		// via the same Guard hooks). Rooted at the task dir, so file
+		// tools stay inside it; loopback/private egress is denied
+		// unless the task's RoE scope authorizes the host (the Guard
+		// consults the scope checker above). Exploration-mode tasks
+		// keep the old behavior — their agents read a wider tree.
+		if t.HarnessMode && s.m != nil && s.m.dir != "" {
+			root := filepath.Join(s.m.dir, "tasks", t.ID)
+			if sb, err := sandbox.NewLocalSandbox(sandbox.Policy{WorkDir: root}); err != nil {
+				log.Printf("[guard] task %s 沙箱初始化失败（本次运行不启用沙箱）: %v", t.ID, err)
+			} else {
+				t.Guard.SetSandbox(sb)
+			}
 		}
 		hx.SetHooks(t.Guard.Hooks())
 	}

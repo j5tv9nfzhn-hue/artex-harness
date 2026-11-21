@@ -563,3 +563,49 @@ harness 子代理委派的列表与单条详情。委派本身是 harness 机制
 - **8 个 DB 测试在本机环境下无法通过**：`finding_traffic`/`finding_workflow` 的 8 个测试在 `NewManager` 失败时用 `t.Fatal` 而不是像其它 DB 测试那样 `t.Skipf`，无库环境下直接判失败而非跳过；属测试写法既有不一致，需真库（`make test-db`）验证。
 - **保留的死符号**：`server/update.go` 的 `bootUpdateState` 现已无调用方（`SetBootUpdateState` 仍被 `cmd/artex/main.go` 调用），为保 `main.go` 不动而保留；`server/` 内无其它仅定义、无引用的导出符号（脚本扫描 0 个）。
 - **删代码的副作用**：AST 删函数工具会留下与函数体空行分隔的孤儿 doc 注释，本次已随测试清理一并处理；`go build ./server/ | head` 会掩盖失败退出码，验证须用 `set -o pipefail` 或直接检查退出码。
+
+## 第二轮删除执行记录（2026-11-21，Julie 14:17 CST 确认）
+
+按体验/稳定性标准对 UNCERTAIN 62 条逐簇定去留：留 40 条、删 22 条。后端 127 条 → **105 条**（15 个分组）。只动 HTTP 层，与第一轮相同。
+
+### 已删（22 条）
+
+| 簇 | 条数 | 路由 | 说明 |
+|---|---|---|---|
+| U5 Eval/一致性 | 2 | POST `/api/harness/consistency`、GET `/api/harness/scenarios` | 一次性评测工具，Eval 标签从未接线 |
+| U6 委派读口 | 2 | GET `/api/harness/delegations/{id}`、GET `/api/harness/delegations/{id}/{did}` | 与 `GET /api/harness/workers/{id}` 返回重复；POST `.../stop` 保留，前端 Subagents.jsx 在用 |
+| U8 旧版报告与审计 | 2 | GET `/api/report`、GET `/api/audit` | 已被新版 `GET /api/report/pentest` 与 `GET /api/harness/audit-chain` 替代 |
+| U11 旧版对话面 | 5 | POST `/api/chat`、POST `/api/chat/upload`、GET `/api/chat/mentions`、GET `/api/tasks/{id}/chat/status`、POST `/api/tasks/{id}/chat/stop` | Composer 已走 `/api/conversations/{id}/messages` 与 `/api/tasks/{id}/say` |
+| U14 边问边答整组 | 11 | `/api/conversations/{id}/side-questions`（GET/POST/DELETE）、`/api/tasks/{id}/chat/side-questions`（GET/POST/DELETE）、`/api/tasks/{id}/intents/{iid}/side-questions`（GET/POST/DELETE）、GET `/api/side-questions/{requestID}/events`、POST `/api/side-questions/{requestID}/cancel` | 完整功能但前后端零调用；只删 HTTP 层，旁路引擎（`initSideQuestions`、`drainTaskSideQuestions`、`cancelSideWhere`、`cancelWorkerSide`、快照流水线）保留——`agent/side_questions.go` 的运行时检查点发布仍在用，任务删除/归档时仍调 drain |
+
+### 保留（40 条，UNCERTAIN 剩余）
+
+U1 发现读侧 8 条（发现列表页的前提）、U2 证据绑定 7 条（人工绑定唯一入口）、U3 RoE 范围管理 3 条（授权范围须人手可改）、U4 模式切换与权限策略 4 条、U7 流量配套 2 条、U9 全局急停/批量控制/激活 3 条、U10 LLM 解析读口 1 条、U12 会话生命周期 6 条、U13 审批配套 4 条、U15 单任务详情与浏览器标签 2 条。
+
+### 改了什么
+
+- `server/server.go`：删 12 条路由注册 + `registerSideRoutes` 调用；删 handler `chat`、`taskChatStatus`、`stopChat`、`getReport`、`getAudit`；保留 `cancelTaskChat`/`finishTaskChat`/`fallbackChat`（任务删除/归档/暂停流程在用）；修掉无用 import `intercept`。
+- `server/harness_replay.go`：删 `harnessConsistency`、`evalScenarios` 与死 helper `errNotFound`/`notFoundError`；修掉无用 import `encoding/json`、`harness/consistency`。
+- `server/harness_delegations.go`：删 `harnessDelegations`、`harnessDelegationOne`；保留 `harnessDelegationStop` 与 retention/GC；修掉无用 import `os`。
+- `server/chat_mentions.go`：只删 `searchChatMentions`；`prepareChatMentionMessage` 等保留（`conversations.go` 在用）。
+- `server/chatupload.go`：删 `chatUpload` 与死符号 `maxChatUpload`、`safeChatID`、`uniqueUploadPath`；保留 `chatAttachment`、`composeAgentMessage`、`userActivityWithAttachments`、`humanBytes`（会话消息流在用）。
+- `server/side_questions.go`：只删 HTTP 层（`registerSideRoutes`、`sideParent`、`handleSideQuestions`、`runSide`、`cancelSideRequest`、`sideEvents`）；引擎与快照流水线保留（见上表）。
+- 测试随端点一起删/改：删 4 个边问边答 HTTP 测试（`side_questions_test.go`，改写 1 个检查点测试为直接等 flush 落库，保留 3 个引擎测试）；删 `chat_mentions_test.go` 的 2 个 handler 测试（db 层断言保留）；删 `task_delete_barrier_test.go` 的 2 个 handler 测试；另修掉随之无用的 import。
+- 整文件删除：无（5 个文件都还有保留代码）。
+
+### 验证（2026-11-21，Go 1.26.3）
+
+| 命令 | 结果 |
+|---|---|
+| 路由重数 | `grep -c mux.HandleFunc server/server.go` = 98，+ helper 拼接注册 7 条（finding_traffic）= **105 条**；分组 harness 29、exploration 19、tasks 18、conversations 10、llm 7、intercept 7、traffic 5、auth 3、health/agui/tokens/report/mcp/skills/active 各 1，共 15 组；side-questions、audit、chat 三组消失，report 组剩 pentest 1 条 |
+| `go vet ./...` | 通过 |
+| `go build -o /tmp/artex-harness-trim2 ./cmd/artex` | 通过；`-h` 确认默认 `:8797` / `127.0.0.1:8798` |
+| `go test ./... -count=1`（无库） | 除 server 包 11 个测试外全部通过；11 个失败（finding_traffic 5 个、finding_workflow 3 个、stage2_http 3 个）全部在夹具处报“未找到数据库配置”，属需真库类，与删除无关 |
+| `go test ./... -count=1 -timeout 25m`（真库 `artex_harness_test`） | server 包全绿；另有 2 个并行抖动（agent `TestBlackboardToolsReadDirectSources` 与 db `TestUpsertOtherService`，均为 PG 死锁 40P01，单独 `-count=3` 通过，与删除无关——db/ 与 agent/ 本轮未动） |
+| 前端核对 | `web/src/` 对 22 条已删路径 0 引用；唯一命中是保留的 POST `.../delegations/{id}/{did}/stop`（Subagents.jsx） |
+| 文档 | PROVENANCE 3.15 节；README 路由总表改为 105 条/15 组；`docs/16` 架构图路由数改为 105 条 |
+
+### 删除后仍存在的问题
+
+- 边问边答的引擎代码仍在（快照流水线是活的，删除/归档流程依赖它），但已无任何入口能发起一次旁路提问；将来若重新接线，需恢复 HTTP 层（handler 已删，git 可找回）。
+- `side_questions_test.go` 里删掉的 4 个 HTTP 测试曾覆盖旁路并发上限、忙隔离、归档前 drain 等行为；drain 路径本身仍被 `server_mgmt.go`/`task_archives.go` 调用，但不再有直接测试。

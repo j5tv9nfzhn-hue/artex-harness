@@ -523,6 +523,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_ref     TEXT,
     timeout_seconds INTEGER NOT NULL DEFAULT 0,
     plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300,
+    run_budget_minutes INTEGER NOT NULL DEFAULT 0,
     coverage_enabled BOOLEAN NOT NULL DEFAULT true,
     pinned_at      TIMESTAMPTZ,
     first_run_at   TIMESTAMPTZ,
@@ -540,6 +541,9 @@ CREATE TRIGGER trg_tasks_upd BEFORE UPDATE ON tasks
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 -- planner 心跳触发间隔(秒);补旧库。默认 300s(5min)。见 docs/planner-trigger-impl-plan.md
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300;
+-- HARNESS 单轮墙钟预算(分钟);补旧库。0=未设置,用全局 HARNESS_RUN_BUDGET 或 20 分钟默认。
+-- 建任务时可传 run_budget_minutes（5–480），见 docs/stages/S6-FIX-PUNCHLIST.md。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_budget_minutes INTEGER NOT NULL DEFAULT 0;
 -- 并发上限挂起态;补旧库。true=因并发上限排队、等待空位自动启动。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued BOOLEAN NOT NULL DEFAULT false;
 -- 资产覆盖度功能开关;补旧库。true(默认)=计算/展示测试覆盖度、自动累积测试范围、

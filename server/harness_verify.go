@@ -190,8 +190,11 @@ func (s *Server) pentestReport(w http.ResponseWriter, r *http.Request) {
 	for _, f := range fs {
 		pf := report.PentestFinding{
 			ID: f.ID, Title: firstNonEmpty(f.Name, f.VulnClass, "未分类"), VulnClass: f.VulnClass,
-			Severity: f.Severity, Summary: f.Summary, TrafficCount: f.TrafficCount,
+			Severity: f.Severity, Status: f.Status, Summary: f.Summary, TrafficCount: f.TrafficCount,
 			CreatedAt: f.CreatedAt,
+			// 修复建议只存在于发现的详细报告（report 字段的「修复建议」一节），
+			// 没有独立列：从那里提取，提不到才算未提供。
+			Remediation: report.ExtractRemediation(f.Report),
 		}
 		if ev := strings.TrimSpace(f.Evidence); ev != "" {
 			pf.ReproSteps = []string{ev}

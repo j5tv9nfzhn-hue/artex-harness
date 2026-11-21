@@ -17,7 +17,7 @@
 ![UI](https://img.shields.io/badge/UI-React%2019%20·%20Vite%207-61DAFB?logo=react&logoColor=white)
 ![DB](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)
 ![Binary](https://img.shields.io/badge/deploy-single%20binary-success)
-![API](https://img.shields.io/badge/API-127%20routes-informational)
+![API](https://img.shields.io/badge/API-105%20routes-informational)
 ![Tests](https://img.shields.io/badge/tests-819%20funcs%20·%20191%20files-brightgreen)
 
 [快速开始](#快速开始) · [功能](#功能矩阵) · [配置](#配置参考) · [架构](#架构) · [API](#api-概览) · [运维](#运维手册) · [排障](#排障手动核对清单) · [文档](#文档索引)
@@ -139,7 +139,7 @@ canvas `#fcfcfb`、accent `#d97757` clay、hairline `#e8e6dc`，浅/深两套）
 | **图谱记忆** | 资产 / 事实 / 发现落 PostgreSQL，每轮 `graph_overview` 重新注入；压缩丢过程不丢结论 | agent 工具 |
 | **子代理并行** | 同一条回复里可派 `recon` / `verify`；各自独立 transcript，父轮次取消不会杀掉已在跑的 | `Agent` 工具（`run_in_background`） |
 | **后台委派** | 立即返回委派 id，完成后投递 `<task-notification>` 到父会话，空闲任务自动唤醒 | 同上 |
-| **委派审计** | 注册表 journal 落盘，进程重启后仍能列出历史委派（终态如实标注"已中断"） | `/api/harness/delegations/{id}` |
+| **委派审计** | 注册表 journal 落盘，进程重启后仍能列出历史委派（终态如实标注"已中断"） | `GET /api/harness/workers/{id}`（返回里含 delegations） |
 
 ### 干预与治理
 
@@ -330,7 +330,7 @@ make build && ./artex-harness -addr :8797 -data ./data-harness
 ```
                      ┌─────────────────────────────────────┐
   浏览器 ──HTTP─────▶ │ /app/      内嵌控制台（go:embed）      │
-                     │ /api/*     JSON API（127 条路由）      │
+                     │ /api/*     JSON API（105 条路由）      │
                      │ /api/agui/agent, /api/harness/stream │ SSE（?since= 续传）
                      └──────────────┬──────────────────────┘
                                     │
@@ -418,7 +418,7 @@ third_party/    vendored agent SDK（带本地补丁）
 
 ## API 概览
 
-**127 条 `/api` 路由，18 个分组。**（2026-11-21 S6-TRIM 之后：之前 311 条，删了 planner/worker 专属 34 条与管理面 150 条，只动 HTTP 层——路由与 handler，底层表、agent 工具、引擎未动。分组按路径首段计，`side-questions` 含 helper 里拼接注册的 11 条。）约定：
+**105 条 `/api` 路由，15 个分组。**（2026-11-21 S6-TRIM 两轮之后：之前 311 条，第一轮删了 planner/worker 专属 34 条与管理面 150 条，第二轮删了 Eval/委派读口/旧版报告与审计/旧版对话面/边问边答共 22 条；只动 HTTP 层——路由与 handler，底层表、agent 工具、引擎未动。分组按路径首段计。）约定：
 
 - 鉴权：除 `/api/auth/*` 与 `/api/health` 外都要 `Authorization: Bearer <jwt>`（登录后前端自动带上）。
 - 错误：统一信封 `{"error":"一句话说明"}`，HTTP 状态码表意（400 参数、401 未授权、404 不存在、409 冲突、503 数据源不可用）。
@@ -426,18 +426,16 @@ third_party/    vendored agent SDK（带本地补丁）
 
 | 分组 | 条数 | 代表端点 |
 |---|---|---|
-| `harness` | 33 | `/api/harness/{ready,capabilities,files,diff,budget,workers,replay,checkpoints,browser}` |
-| `tasks` | 26 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、`PUT /api/tasks/{id}/project` |
+| `harness` | 29 | `/api/harness/{ready,capabilities,files,diff,budget,workers,replay,checkpoints,browser}` |
+| `tasks` | 18 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、`PUT /api/tasks/{id}/project` |
 | `exploration` | 19 | `PATCH /api/exploration/findings/{id}`、复测、证据绑定流量口 |
-| `conversations` | 13 | `POST /api/conversations/{id}/messages` |
+| `conversations` | 10 | `POST /api/conversations/{id}/messages` |
 | `llm` | 7 | `/api/llm/{profiles,records,models,model-catalog}` |
 | `intercept` | 7 | `GET /api/intercept/pending`、`POST /api/intercept/pending/{id}/decide` |
 | `traffic` | 5 | `GET /api/traffic`、`GET /api/traffic/exchange`、`POST /api/traffic/replay` |
 | `auth` | 3 | `POST /api/auth/{init,login}` |
-| `chat` | 3 | `POST /api/chat`（旧版对话入口，保留，未接线） |
-| `report` | 2 | `GET /api/report/pentest`、`GET /api/report`（旧版，保留） |
-| `side-questions` | 2 | `GET /api/side-questions/{id}/events` |
-| `health` `agui` `tokens` `audit` `mcp` `skills` `active` | 各 1 | `/api/health`、`/api/agui/agent`、`/api/tokens/daily`、`/api/audit`、`/api/mcp`、`/api/skills`、`POST /api/active` |
+| `report` | 1 | `GET /api/report/pentest` |
+| `health` `agui` `tokens` `mcp` `skills` `active` | 各 1 | `/api/health`、`/api/agui/agent`、`/api/tokens/daily`、`/api/mcp`、`/api/skills`、`POST /api/active` |
 
 ### 事件流契约（AG-UI）
 
@@ -573,7 +571,7 @@ ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema�
 | 登录页说"无法读取登录状态" | 服务端日志 + PG 连通性 | 数据库不可用时服务端回 503 而**不是** `initialized:false`（避免误覆盖已设密码） |
 | 浏览器面板「未启动 / 未连通」 | 是否有 `npx`；`chrome-devtools` 是否要 `--remote-debugging-port=9222` | 装 Node 或镜像里预装；点「重建会话」看耗时与错误 |
 | 任务卡在审批 | 侧栏盾牌徽标 / `GET /api/intercept/pending` | 有 `ask` 命中，去点允许或拒绝；拒绝也要点（不点就一直等） |
-| 子代理一直「运行中」 | `/api/harness/delegations/{id}` 的 `pending` | 通知未投递时留在队列（人工消息优先），恢复任务后会补投 |
+| 子代理一直「运行中」 | `GET /api/harness/workers/{id}` 返回的 `pending` | 通知未投递时留在队列（人工消息优先），恢复任务后会补投 |
 | 工作台 DIFF 显示「无基线」 | 任务是否 HARNESS 模式、是否新建 | 基线在首轮前建立；历史任务下一轮会自动补 |
 | 窄窗口右栏变成竖条 | 见 [docs/12 §四之二](docs/12-SPRINT4-WORKBENCH.md) | 已在 `b07fcc3` 前修复；升级后仍然出现请报 issue |
 | `make test-db` 拒绝执行 | `ARTEX_TEST_DB` 是否设置且与 DSN 一致 | 这是保护，不是 bug：它不让你误清开发库 |

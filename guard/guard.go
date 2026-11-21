@@ -14,12 +14,16 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/harness/sandbox"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/hook"
 )
@@ -44,6 +48,7 @@ type Guard struct {
 	interceptor  *intercept.Interceptor // optional; nil disables user-configured rules
 	hardDeny     bool                   // Stage 1: mechanical deny for critical intents; default true
 	scopeChecker ScopeChecker           // Stage 1: RoE scope enforcement; nil disables it
+	sandbox      sandbox.Sandbox        // S6-FIX: per-task isolation policy; nil disables sandbox checks
 }
 
 // GuardOption configures a Guard.
@@ -59,6 +64,12 @@ func WithHardDeny(enabled bool) GuardOption {
 // WithScopeChecker installs a RoE scope checker. Nil disables scope checks.
 func WithScopeChecker(sc ScopeChecker) GuardOption {
 	return func(g *Guard) { g.scopeChecker = sc }
+}
+
+// WithSandbox installs the per-task isolation policy (file containment +
+// private-network egress). Nil disables sandbox checks.
+func WithSandbox(sb sandbox.Sandbox) GuardOption {
+	return func(g *Guard) { g.sandbox = sb }
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -86,6 +97,13 @@ func (g *Guard) SetScopeChecker(sc ScopeChecker) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.scopeChecker = sc
+}
+
+// SetSandbox installs or replaces the per-task isolation policy at runtime.
+func (g *Guard) SetSandbox(sb sandbox.Sandbox) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sandbox = sb
 }
 
 // SetHardDeny enables or disables the mechanical hard-deny floor at runtime.
@@ -129,6 +147,19 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		}
 		return g.blockWithIntent(ev.ToolName, systemBlockMessage(intent.Reason), cmd, string(intent.Kind), "")
 	}
+	// S6-FIX-PROXY-SANDBOX, step 1.5: per-task isolation. File tools are
+	// contained to the task workdir (symlinks resolved); loopback/private
+	// egress is denied unless the task's RoE scope authorizes the host.
+	// Runs after the intent hard-deny (a destructive intent keeps its own
+	// reason) and before the scope check (which governs public hosts).
+	g.mu.Lock()
+	sb := g.sandbox
+	g.mu.Unlock()
+	if sb != nil {
+		if res := g.checkSandbox(ctx, sb, checker, ev.ToolName, ev.Input, cmd); res != nil {
+			return *res
+		}
+	}
 	// Stage 1, step 2: RoE scope. Only network intents are checked, only
 	// when the task has anchored scope, only when a host was extracted.
 	// Unanchored tasks fail open here (logged by CheckScope) so legacy
@@ -163,6 +194,111 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		Summary: "权限策略评估：" + ev.ToolName,
 	})
 	return g.applyIntercept(ctx, ev)
+}
+
+// sandboxFileTools maps each file tool to its path argument (SDK field
+// names, see third_party/norma/tool). Glob/Grep/LS take a directory;
+// Read/Write/Edit/MultiEdit take a file.
+var sandboxFileTools = map[string]string{
+	"Read": "file_path", "Write": "file_path", "Edit": "file_path",
+	"MultiEdit": "file_path", "LS": "path", "Glob": "path", "Grep": "path",
+}
+
+// checkSandbox enforces the per-task isolation policy on one tool call.
+// Returns nil to allow, or a block result. File containment always
+// applies; the network check only governs loopback/private targets —
+// public hosts are left to the RoE scope check that runs next.
+func (g *Guard) checkSandbox(ctx context.Context, sb sandbox.Sandbox, checker ScopeChecker, tool string, input []byte, cmd string) *hook.Result {
+	if key, ok := sandboxFileTools[tool]; ok {
+		var in map[string]json.RawMessage
+		if err := json.Unmarshal(input, &in); err == nil {
+			if raw, ok := in[key]; ok {
+				var p string
+				if err := json.Unmarshal(raw, &p); err == nil && strings.TrimSpace(p) != "" {
+					if err := sb.ValidatePath(p); err != nil {
+						res := g.block(tool, systemBlockMessage("沙箱拦截："+err.Error()), cmd)
+						return &res
+					}
+				}
+			}
+		}
+		return nil
+	}
+	switch tool {
+	case "WebFetch", "Bash":
+		for _, host := range sandboxPrivateHosts(tool, input) {
+			if res := g.checkSandboxHost(ctx, sb, checker, tool, host, cmd); res != nil {
+				return res
+			}
+		}
+	}
+	return nil
+}
+
+// sandboxPrivateHosts extracts the loopback/private hosts a network tool
+// call would touch. web_search is deliberately excluded: its query text
+// is not a connection target (the search backend fetches it).
+func sandboxPrivateHosts(tool string, input []byte) []string {
+	var hosts []string
+	if tool == "WebFetch" {
+		var in struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(input, &in); err == nil && in.URL != "" {
+			if u, err := url.Parse(in.URL); err == nil && u.Hostname() != "" {
+				hosts = []string{u.Hostname()}
+			}
+		}
+	} else {
+		hosts = ExtractHosts(tool, input)
+	}
+	var out []string
+	for _, h := range hosts {
+		if isPrivateHost(h) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// isPrivateHost reports whether h is a loopback/private literal (IP or
+// the localhost name). Public hostnames are not the sandbox's business.
+func isPrivateHost(h string) bool {
+	h = strings.ToLower(strings.TrimSpace(h))
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	}
+	return false
+}
+
+// checkSandboxHost decides one private/loopback target. A host inside the
+// task's anchored RoE scope is allowed (the task explicitly authorizes
+// it — e.g. a local range at 127.0.0.1). Unanchored tasks (no scope rows)
+// and guards without a checker fail open here, mirroring CheckScope's
+// legacy rule; file containment above still applies.
+func (g *Guard) checkSandboxHost(ctx context.Context, sb sandbox.Sandbox, checker ScopeChecker, tool, host, cmd string) *hook.Result {
+	if checker != nil {
+		if taskIDStr := intercept.TaskIDFromContext(ctx); taskIDStr != "" {
+			if taskID, err := strconv.ParseInt(taskIDStr, 10, 64); err == nil && taskID > 0 {
+				scopes, err := checker.Scopes(ctx, taskID)
+				if err == nil && len(scopes) > 0 {
+					if CheckHostAgainstScopes(host, scopes) {
+						return nil
+					}
+					if err := sb.CheckHost(host); err != nil {
+						res := g.block(tool, systemBlockMessage("沙箱拦截："+err.Error()), cmd)
+						return &res
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.

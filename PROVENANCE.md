@@ -251,6 +251,80 @@ provider 会被调用 8 次而不是承诺的 5 次。新增独立布尔标志�
 
 注意：apt 装的 PostgreSQL 不随虚拟机重启保留（本次验证中途虚拟机重启后需重装，运行时的 os-intent replay 未自动恢复它）；测试库与开发库的隔离只靠库名区分，重装后需重建 `harness_test` 用户与 `artex_harness_test` 库。浏览器里点一遍阶段二四个面板仍未做（需部署 + 真流量）。
 
+### 3.15 第二轮后端瘦身：UNCERTAIN 62 条定去留，删 22 条、留 40 条（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 14:17 CST 确认。标准与第一轮相同：只动 HTTP 层（路由注册 + handler），不动 db 表、agent 工具、引擎逻辑、不改前端；按体验/稳定性，删的是死功能零调用，留的是体验/安全必需。详见 `docs/stages/S6-TRIM-INVENTORY.md` 末尾“第二轮删除执行记录”。
+
+删了 22 条（U5 Eval/一致性 2 条：POST `/api/harness/consistency`、GET `/api/harness/scenarios`；U6 委派读口 2 条：GET `/api/harness/delegations/{id}`、`/{did}`，POST `.../stop` 保留；U8 旧版报告与审计 2 条：GET `/api/report`、GET `/api/audit`，新版 pentest 与 audit-chain 保留；U11 旧版对话面 5 条：POST `/api/chat`、POST `/api/chat/upload`、GET `/api/chat/mentions`、GET `/api/tasks/{id}/chat/status`、POST `/api/tasks/{id}/chat/stop`；U14 边问边答整组 11 条：三组 side-questions 各 GET/POST/DELETE + GET `/api/side-questions/{requestID}/events` + POST `.../cancel`）。后端 127 条 → **105 条**（15 个分组）。
+
+只删 HTTP 层，复用符号一律保留：边问边答的引擎（`initSideQuestions`、`drainTaskSideQuestions`、`cancelSideWhere`、`cancelWorkerSide`、快照流水线）仍在——`agent/side_questions.go` 的运行时检查点发布与任务删除/归档时的 drain 仍依赖它；`cancelTaskChat`/`finishTaskChat`/`fallbackChat`、`chatAttachment`/`composeAgentMessage`、`harnessDelegationStop` 与 retention/GC 亦保留。死符号只删确认死的（`errNotFound`/`notFoundError`、`maxChatUpload`、`safeChatID`、`uniqueUploadPath`、`runSide` 等）。
+
+测试随端点一起处理：删 `side_questions_test.go` 的 4 个 HTTP 测试并改写 1 个检查点测试（改走 flush 落库，保留 3 个引擎测试）；删 `chat_mentions_test.go` 的 2 个 handler 测试（db 层断言保留）；删 `task_delete_barrier_test.go` 的 2 个 handler 测试；修掉随之无用的 import。整文件删除：无。
+
+验证：`go vet ./...` 通过；`go build -o /tmp/artex-harness-trim2 ./cmd/artex` 通过，`-h` 确认默认 `:8797` / `127.0.0.1:8798`；路由重数 98（server.go）+ 7（finding_traffic helper）= 105 条，side-questions/audit/chat 三组消失，report 组剩 pentest 1 条；`go test ./... -count=1` 无库时除 server 包 11 个需真库测试（finding_traffic 5、finding_workflow 3、stage2_http 3）外全绿；真库（`artex_harness_test`）全量跑 server 包全绿，另有 2 个并行抖动（agent `TestBlackboardToolsReadDirectSources` 与 db `TestUpsertOtherService`，均为 PG 死锁 40P01，单独 `-count=3` 通过，与删除无关——db/ 与 agent/ 本轮未动）；前端 `web/src/` 对 22 条已删路径 0 引用。README 路由总表与 `docs/16` 架构图同步改为 105 条/15 组（委派审计入口改为 `GET /api/harness/workers/{id}`）。
+
+### 3.16 发现列表页（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 14:33 CST 确认发现列表页与拒答兜底两件一起做。控制台此前没有发现列表页，只能在右侧「系统」侧栏的「取证」签逐条确认。本轮新增 `web/src/Findings.jsx`：全局发现列表（严重程度 / 状态 / 任务 / 类型 / 关键词筛选、可点统计卡片、服务端分页每页 20 条、按严重程度或时间排序）+ 详情（报告 Markdown、证据、资产、流量绑定、血缘链、复测记录）。详情里接了标记为已确认（复用 `Stage2.jsx` 的 `patchFindingConfirm` + `GateFailure`，422 行内失败原因 + 人工越过理由写入审计链，未另写一套确认逻辑）、发起复测（POST retests，打开详情时与发起后各查一次复测列表与进行中列表，不做轮询）、导出（单条 scope=selected、列表 scope=filtered，格式 md-single/csv/json/md-zip）、删除（Dialog 二次确认）。
+
+入口按现有视图模式接进 `App.jsx`：新 view `"findings"`，顶栏分段加「发现」签（与「用量」一样是全局视图，不要求先选任务；从任务打开时任务筛选默认取当前任务），命令面板（⌘K）「操作」组加「发现列表」；详情里的任务名可点回任务对话视图。样式沿用 `styles.css` 与 `ui.jsx` 现有规范（`.cap-row`、`.traffic-select`、`.report-md`、`.replay-md`），只补了 `.findings-row` / `.findings-stat` 两处；无新依赖；后端未改。
+
+接的接口（全部是第二轮瘦身后保留的）：`GET /api/exploration/findings`（分页 + 筛选）、`GET /api/exploration/findings/stats`（统计卡片与任务/类型下拉）、`GET /api/exploration/findings/{id}`、`GET /api/exploration/findings/{id}/lineage`、`GET /api/exploration/findings/export`、`DELETE /api/exploration/findings/{id}`、`PATCH /api/exploration/findings/{id}`、`POST /api/exploration/findings/{id}/retests`、`GET /api/exploration/findings/{id}/retests`、`GET /api/exploration/findings/retests/active`。`GET /api/exploration/findings/groups` 未接——按任务分组视图暂不做，任务筛选改用 stats 自带的 tasks 下拉。详见 `docs/stages/S6-FINDINGS.md`。
+
+验证：`npm ci --no-audit --no-fund && npm run build` 通过，产物已更新 `server/console-app/`；`go vet ./...` 通过；`go build` 通过，`-h` 默认仍 `:8797`；`go test ./... -count=1` 无库时除 server 包 11 个需真库测试（finding_traffic 5、finding_workflow 3、stage2_http 3）外全绿，与上一轮一致。未在浏览器里点过，需部署后实测。
+
+### 3.17 拒答兜底 S6-REFUSAL（2026-11-21，本仓库新增，非上游）
+
+Julie 确认“发现列表页 + 拒答兜底两件一起处理”，本文是拒答兜底一件。详见 `docs/stages/S6-REFUSAL.md`。只动后端与评测，不改前端；不改系统提示词本身、不动 guard 硬拒绝逻辑、不动 `third_party/`。
+
+| 改动 | 内容 |
+|---|---|
+| 拒答检测（新） | `llmpool/refusal.go`：`Detect(msg llm.Message) Result`（是否拒答 + 命中信号 + 200 字内原文摘录）。只判无工具调用的纯文本回复；强信号才算（英文 `I can't/cannot help/assist`、`unable to help/assist/comply`、`not allowed to`、`must/have to refuse`，中文 `我无法协助/我不能帮助（协助）/我无法帮助/我不能帮你/抱歉我不能/我无法（不能）提供帮助/不被允许/我不能（无法）执行`），裸 `cannot/无法`、裸 `作为 AI`、裸 `sorry` 不算；大小写不敏感，空白折叠，中文去空格匹配。阈值宁漏勿误判。 |
+| 换模型重派 + 一次性授权重提示（`Pool.Complete` 内） | 首次拒答先对同一 member 追加授权提醒（`refusalReminder`，呼应系统提示词“任务目标与描述是授权的全部范围”，追加到复制的 `req.System` 末尾）再试一次；仍拒答才换模型，最多换两次（最多试 3 个配置）；重提示不计换模型次数，但每请求至多一次，总调用有界。用尽后把最后一次拒答原文如实返回（`llm.Message`，nil error），不伪造工具调用/发现，不包 `ErrExhausted`。拒答既不 `Trip` 也不 `Pass` 健康分，只记 `[llmpool-refusal]` 结构化日志。`Pool.Stream` 不做重派（流出事件无法撤回），仅在整条流干净结束且无工具调用、文本命中时记一行拒答日志，拒答的流也不记 `Pass`。 |
+| 拒答率评测（新） | `harness/eval/refusal.go`：`MeasureRefusals(ctx, prompts, []ProbeModel{Name, Provider})`，逐模型跑一次、用同一检测判定，输出各模型拒答率 + 命中信号分布（`RefusalReport.String()` 可打印），错误单独计数、不算拒答；测试用 fake provider，不调真实模型。 |
+| 子代理拒答标记 | `harness/delegation/delegation.go`：`Record` 加 `Refused bool`（`json:"refused,omitempty"`，journal 自动持久化）+ `FinishWithRefused`；`agent/harness.go` 的 `finishDelegation` 用同一检测判断正文，命中则标记、activity Metadata 写 `refused:true`、Summary 写“子代理拒答”、记 `[delegation]` 日志，`Status` 不变。父级循环无现成重试/升级点可接，由父模型看到 tool_result 后自行决定。 |
+| 测试 | 检测正反样例（中英文命中；“目标不可达/连接失败/工具报错/作为 AI，我可以帮你…”不命中；带工具调用的回复不命中）、重派上限（4 个全拒答 fake：调用 `[2 1 1 0]`，第 4 个未碰）、重提示只追加一次（同一 member 调两次、第二次 System 带提醒；第二次拒答的 member 不再重提示）、子代理标记（拒答正文 → `Refused=true` 且 Status 不变、activity 含 `refused:true`；普通失败/成功不标记）、journal 恢复后 `Refused` 仍在。 |
+
+验证：`go vet ./...`、`go build ./...` 通过；无库 `go test ./... -count=1` 除已知需真库的 server 11 个测试外全绿（finding_traffic 5、finding_workflow 3、stage2_http 3，均为“未找到数据库配置”）；真库 `go test ./... -count=1 -timeout 25m`（`artex_harness_test`，日志 `~/workspace/.tmp/testdb-refusal-db.log`）除已知并行抖动 `agent/TestBlackboardToolsReadDirectSources`（PG 死锁 40P01）外全绿，单独 `-count=3` 通过，未修。
+
+### 3.18 真实任务 #1 的两个高危修复：流量代理 NO_PROXY + 沙箱接入（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 16:01 CST 确认只修这两件。详见 `docs/stages/S6-FIX-PROXY-SANDBOX.md`。问题来自真实完整渗透测试任务 #1（报告 `~/workspace/real-pentest-task1-report-20261121.md`，不在仓库内）。
+
+| 改动 | 内容 |
+|---|---|
+| 流量代理强制清空 NO_PROXY（`agent/worker.go` 的 `proxyEnv`） | 捕获开启时（`caCert != ""`，即 `Manager.ProxyCACert` 非空）追加 `NO_PROXY=` 与 `no_proxy=` 空值；捕获关闭时不动用户原有的 `NO_PROXY`。根因：本机 `no_proxy` 含 `127.0.0.1`，curl / Python 认它，回环请求直连靶场，任务 #1 的 6,523 次请求 0 条录制。调用方只有三处，全走同一函数（Worker、Planner、`runopts.go` 的共享默认值）。WebFetch 不受影响（`http.ProxyURL` 固定代理，不读 `NO_PROXY`）；浏览器 MCP 也不受影响（Chromium 不读 `NO_PROXY` 环境变量，只挂 `--proxy-server`，未设 `--proxy-bypass-list`；其回环默认行为未验证，见阶段文档遗留）。 |
+| 沙箱策略接进 Guard（`guard/guard.go`） | `Guard` 加 `sandbox` 字段 + `WithSandbox` + `SetSandbox`（与 `SetScopeChecker` 同款）。`preToolUse` 在意图硬拒绝之后、RoE 范围检查之前跑沙箱检查：文件工具（Read / Write / Edit / MultiEdit 取 `file_path`；LS / Glob / Grep 取 `path`）由 `ValidatePath` 收容进任务目录；网络工具（WebFetch 取 `url`、Bash 用 `ExtractHosts`）只管回环 / 内网字面量，公网主机留给范围检查，`web_search` 不查（查询文本不是连接目标）。回环 / 内网主机先查任务 RoE 范围（`CheckHostAgainstScopes`，实时读库）：在范围内放行（任务 #1 的范围行 `ip 127.0.0.1/32`），范围行存在但不在内则 `CheckHost` 拦；未锚定范围的任务 fail open（与 `CheckScope` 的 legacy 规则一致），文件收容始终执行。拦截返回带 `【ARTEX 平台管控·非目标防御】` 前缀的明确错误。 |
+| 策略对象补强（`harness/sandbox/sandbox.go`） | `ValidatePath` 增加符号链接解析（已存在路径或最近已存在祖先做 `EvalSymlinks` 再判收容，工作区内指区外的链接与经链接目录的路径都被拦）；新增 `Policy.DenyPrefixes`（默认 `/etc`、`/proc`、`/sys`、`/dev`、`/root`、`$HOME/.ssh`），宿主敏感位置即使落在 `AllowedRoot` 内也被明确拒绝；不做文件名后缀禁区（`.pem` / `.key` 会误伤 agent 把目标上拿到的私钥存进工作区再读回的正常流程）；导出 `IsSensitiveEnvKey` 与 `EnvScrubOverrides()`（扫描进程环境，对敏感键返回 `KEY=` 空值覆盖条）。 |
+| Bash 环境清洗（`agent/worker.go` 新增 `bashEnv`） | `proxyEnv` + `EnvScrubOverrides()`，Worker / Planner / `runopts.go` 三处 `BashEnv` 调用点全部改走它。SDK 的 `withEnv` 是 `append(os.Environ(), tc.Env...)`，Go exec 保留最后一个重复键，空值覆盖压掉继承来的 LLM 密钥 / token / `ARTEX_PG_DSN`。无代理时也照常清洗。 |
+| 服务端接线（`server/task_llm.go` 的 `agentsForTask`） | 只对 harness 模式任务给任务的 Guard 装沙箱，根目录 `<数据目录>/tasks/<taskID>`（与 `HarnessAgent.WorkDirFor` / `ensureRunDir` 同布局）；harness agent 与其子代理委派经同一 Guard hooks 受控。探索模式任务保持旧行为。沙箱初始化失败记日志、不启用沙箱、不阻断建任务。 |
+
+未动：意图级硬拒绝与 RoE 范围检查本身；`third_party/norma`；报告措辞、任务计数、审计链、预算默认值（另几项，Julie 没选）。
+
+测试：`proxyEnv` 捕获开启时 `NO_PROXY` / `no_proxy` 为空串、关闭时不动；`bashEnv` 覆盖敏感变量、不碰良性变量；`ValidatePath` 符号链接逃逸被拒、区内链接放行、`~/.ssh` 与 `/proc` 被拒；Guard 层 Read 越界 / 靶场源码 / 经链接读取被拦、区内读写放行、RoE 授权的 `127.0.0.1:18080` 上 WebFetch 与 Bash curl 放行、`192.168.1.10` / `10.0.0.5` 被拦、公网主机过底线、未锚定任务网络 fail open 但文件收容仍生效、未装沙箱的 Guard 不拦截。端到端（`agent/proxyenv_e2e_test.go`）：真实 `traffic.Open` 录制代理 + `httptest` 回环目标，对照组（只设 `no_proxy`、不走 `proxyEnv`）录到 0 条，实验组（同一 `no_proxy` + `proxyEnv` 的 env）curl 200 且代理录到 1 条。
+
+验证：`go vet ./...`、`go build ./...` 通过；无库 `go test ./... -count=1`（日志 `~/workspace/.tmp/testdb-fix-nodb.log`）除已知需真库的 server 11 个测试外全绿（28 个包 `ok`，finding_traffic 5、finding_workflow 3、stage2_http 3，均为“未找到数据库配置”）。真库 `make test-db`（`artex_harness_test`，日志 `~/workspace/.tmp/testdb-fix-db.log`）：`db` 与 `server` 两包全绿，exit 0，本次无抖动失败。
+
+### 3.19 真实任务 #1 后的小问题清单修复（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 16:43 CST 确认修这批小问题。详见 `docs/stages/S6-FIX-PUNCHLIST.md`。问题来自真实完整渗透测试任务 #1（报告 `~/workspace/real-pentest-task1-report-20261121.md`，不在仓库内）与同日的浏览器核查（截图 `~/workspace/.hatch-browser/outputs/browser-task:13f577bb-5dba-5e7f-a528-1c8fc27b509b/`，不在仓库内）。
+
+| 改动 | 内容 |
+|---|---|
+| 任务摘要计数恒 0（`db/findings.go` 新增 `FindingCountsForTask`；`server/server.go` 的 `getTask`；`web/src/Sidebar.jsx`） | 根因：`getTask` 从不填充 `dto.Findings`（聚合查询本身是对的）；列表接口走批量聚合，单任务接口此前完全没填该字段。新增 `FindingCountsForTask(taskID)`（口径与 `TaskListMetricsAll` 一致：severity 白名单外 / 为空的记录不计入任一档）；`getTask` 用它填充，失败时保持 0 不阻塞详情；Sidebar 任务行加发现数徽章（>0 才显示，严重 >0 时红色）。 |
+| 报告措辞（`report/pentest.go`；`server/harness_verify.go` 的 `pentestReport`） | `PentestFinding` 加 `Status` 字段；新增 `ExtractRemediation(md)`（找含“修复建议” / “修复方案” / Remediation 的标题，截到下一同级或更高级别标题为止，找不到返回 `""`）；执行摘要改按状态计数——“发现共 N 个：已确认 C 个、待确认 P 个、已排除 E 个，其中独立复测验证 V 个，人工越过验证门 O 个”（confirmed / resolved / fixed 计已确认；false_positive / ignored / duplicate / risk_accepted 计已排除；pending / in_progress / 空计待确认）；摘要行尾改 `\n\n` 使风险表前有空行（之前表头被当成段落续行、渲染成带竖线的纯文本）。`pentestReport` 传入 `Status: f.Status` 与 `Remediation: report.ExtractRemediation(f.Report)`；修复建议取自发现详细报告的 `findings.report` 字段，无建议时才写“未提供”。`report/pentest_test.go` 的旧措辞断言已同步更新。 |
+| 发现登记进审计链（`evidence/store.go`；`server/finding_traffic.go` 的 `evidenceStore()`） | `Store` 加 `OnFindingRecorded` 回调，`Store.Record` 落库成功后才调用；`evidenceStore()` 挂回调，调 `auditAppend(taskID, evidence.AuditFindingReported, actor, …)`（actor 取 in.Worker、空则 "harness"）。状态变化（确认 / 越过）此前已在链上，无需再接。 |
+| 详情绑定文案与血缘标签（`server/server.go` 的 `getFinding` / `findingLineage`；`web/src/Findings.jsx`） | `getFinding` 在 `findingFromDB` 后调 `GetFindingTraffic` 填充 `dto.TrafficBindings`（出错只记日志）；`findingLineage` 把与 `f.NodeID` 匹配的节点 DTO 的 `State` 改写为发现的实际 `f.Status`（不改库里存的探索图状态）；详情流量绑定一节删掉 `f.traffic_count` 那句，全部以 `bindings.length` 为准，无绑定时只显示一句“尚未绑定流量证据——绑定入口在 System 侧栏的流量面板，绑定后这里会列出来。”核对结论：绑定口径本身没错——真实库里发现 1 的唯一绑定就是合法的 baseline GET /（note 明确说明 PoC 报文未被记录器落盘），矛盾纯因详情 DTO 不返回绑定列表，所以只修了文案 / DTO，没改绑定逻辑。 |
+| 初载闪现与窄栏报告（`web/src/Findings.jsx`、`Stage2.jsx`、`styles.css`） | 列表徽章未加载时显示 "…"；`TrafficPanel` 未加载时显示“读取中…”（区分“加载中”与“已加载为空”，加载中不渲染空态）；`.report-md` 加窄栏样式（h1 16px、h2 14px、h3 13px、可断行、表格 `width:100%; table-layout:fixed`、pre 横向滚动）。 |
+| 墙钟预算建任务可传参（`db/schema.sql`、`db/tasks.go`、`agent/harness.go`、`server/manager.go`、`server/dto.go`、`server/server.go`、`server/task_llm.go`、`server/harness_files.go`） | `tasks` 表加 `run_budget_minutes INTEGER NOT NULL DEFAULT 0`（含 ALTER 补旧库）；`db.Task`、`taskCols`、`scanTask`、`TaskCreateOptions`、`CreateTaskWithOptions` 贯穿；新增 `ValidateRunBudgetMinutes`（合法范围 5–480 分钟）；`server/manager.go` 的 `Task` 与 `taskFromPG`、`server/dto.go` 的 `TaskDTO`（`omitempty`）、`server/server.go` 的 `createTaskReq.run_budget_minutes`（`*int`）贯穿；`agent/harness.go` 的 `HarnessAgent` 加 `runBudget` 字段 + `SetRunBudget` / `RunBudget()`，`Run` 里用 `h.RunBudget()`；`server/task_llm.go` 的 `agentsForTask` 在 `t.RunBudgetMinutes > 0` 时调用 `SetRunBudget`；`server/harness_files.go` 的 `harnessBudget` 在任务上下文中优先报任务级预算。默认值不改：不传用全局 `HARNESS_RUN_BUDGET` / 20 分钟。口径：显式传 0 报 400（防误配），只有缺省才用默认；db 层 0 仍表示“未设置”。 |
+| 前端产物（`server/console-app/`） | `npm run build` 通过，新 bundle `index-BQKvlJP5.js` / `index-DSxWSa7u.css`，旧文件已删。 |
+
+未动：3.18 批（proxyEnv / 沙箱）的文件；proxyEnv 与沙箱的语义；现网服务端、靶场、隧道与任务 #1 的 6 条发现；未 commit、未 push、未跑 LLM 真实任务。
+
+测试：`go vet ./...`、`go build ./...` 通过。新增回归测试：`report/pentest_remediation_test.go`（`ExtractRemediation`、按状态计数）、`agent/harness_budget_test.go`（预算覆盖 / 清零回默认）、`db/run_budget_test.go`（5–480 边界）、`server/punchlist_test.go`（5 个：摘要计数、登记进审计链、详情绑定 + 血缘 pending、报告措辞、建任务预算传参 / 不传参 / 非法值 400）。`report` / `agent` / `db` 三包通过；5 个 punchlist 测试在真库（`artex_harness_test`）下 5/5 通过。期间修了一个测试本身的 bug（复用 map 导致上一轮的 `run_budget_minutes: 60` 残留），产品代码无问题。
+
+验证：无库 `go test ./... -count=1`（日志 `~/workspace/.tmp/test-punchlist-nodb.log`）exit 1，失败 16 个——11 个是已知的需真库 server 测试（finding_traffic 5、finding_workflow 3、stage2_http 3），另 5 个就是新增的 punchlist 测试（它们用 `trafficEvidenceServer` 夹具，本来就需要 PG，在真库下已全绿）；其余 29 个包全绿。**无库基线从此是 16 个失败，不是 11 个。**`make test-db` 全量与测试二进制端到端实测按 Julie 2026-11-21 16:58 CST 决定跳过、未做。
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：

@@ -417,13 +417,18 @@ func (s *Server) harnessBudget(w http.ResponseWriter, r *http.Request) {
 	// shrink is diluted by the tool output that triggered it, and it used to count a
 	// new turn as one. Both are reported so the panel never has to guess.
 	obsMicro, obsAuto := t.Store.CompactEventCounts()
+	// 预算口径与实际执行一致：任务传了 run_budget_minutes 就用它，否则全局默认。
+	budgetSeconds := int(agent.RunBudget().Seconds())
+	if t.RunBudgetMinutes > 0 {
+		budgetSeconds = t.RunBudgetMinutes * 60
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":               t.ID,
 		"window":             window,
 		"last_input":         lastInput,
 		"totals":             stats,
 		"pct":                pct(lastInput, window),
-		"run_budget_seconds": int(agent.RunBudget().Seconds()),
+		"run_budget_seconds": budgetSeconds,
 		// series = 每轮 usage 的输入 token；compactions = 输入 token 明显回落的次数。
 		// SDK 不提供压缩事件，所以这是**推断**（回落 ≥20% 计一次），API 里也这样标注。
 		"series":      series,

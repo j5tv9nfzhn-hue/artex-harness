@@ -27,6 +27,7 @@ import (
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/harness/delegation"
+	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -65,6 +66,10 @@ type HarnessAgent struct {
 	// parent; only then is it drained from the registry, so a paused or deleted
 	// task keeps the completion until it can be delivered.
 	delegationNotify func(taskID int64, text string) bool
+	// runBudget, when > 0, overrides the wall-clock budget for this task's
+	// runs (set from the task's run_budget_minutes at creation). Zero means
+	// "not set": fall back to runBudget() (HARNESS_RUN_BUDGET or 20m default).
+	runBudget time.Duration
 }
 
 // NewHarnessAgent builds the runtime for one task. Same construction contract as
@@ -86,6 +91,19 @@ func (h *HarnessAgent) SetDelegationNotifier(fn func(taskID int64, text string) 
 }
 func (h *HarnessAgent) SetCompactionWindowResolver(fn func() int) { h.windowFn = fn }
 func (h *HarnessAgent) SetFindingRecorder(f FindingRecorder)      { h.findingRecorder = f }
+
+// SetRunBudget overrides the wall-clock budget for this task's runs.
+// d <= 0 clears the override (fall back to runBudget()).
+func (h *HarnessAgent) SetRunBudget(d time.Duration) { h.runBudget = d }
+
+// RunBudget returns the budget this agent will apply to a run: the
+// per-task override when set, otherwise the global runBudget().
+func (h *HarnessAgent) RunBudget() time.Duration {
+	if h.runBudget > 0 {
+		return h.runBudget
+	}
+	return runBudget()
+}
 
 // SetCompactHook observes compactions as they happen (kind "micro" or "auto"), so
 // the operator sees the event itself instead of a token delta he has to trust.
@@ -224,8 +242,9 @@ func (h *HarnessAgent) Run(ctx context.Context, req HarnessRunRequest) (string, 
 		// Wall-clock budget for THIS run (docs/09 §1): a step budget alone lets a slow
 		// endpoint run for hours. On expiry the SDK enters the settlement phase with
 		// the timeout prompt below, so the agent lands conclusions instead of being
-		// killed mid-action.
-		MaxDuration: runBudget(),
+		// killed mid-action. Per-task override (run_budget_minutes at creation)
+		// wins over the global HARNESS_RUN_BUDGET default.
+		MaxDuration: h.RunBudget(),
 	}
 	if settle := wrapupSettlement("harness", nil); settle != nil {
 		// Distinct wording per reason: "time is up" vs "steps are up" mean different
@@ -600,16 +619,35 @@ func (h *HarnessAgent) finishDelegation(reg *delegation.Registry, id string, res
 	if res.IsError || err != nil {
 		status = delegation.StatusFailed
 	}
+	// A subagent refusal normally arrives as a *successful* text result —
+	// the child model answered with refusal text and no error — so it would
+	// otherwise sink into an ordinary done/failed with no trace of why no
+	// work happened. Detect it on the body text and mark it separately:
+	// Record.Refused, the activity metadata, the summary and a log line.
+	// Status itself is untouched (front-end and statistics read Status),
+	// and there is no automatic parent retry to hook into — the parent loop
+	// has no retry/upgrade point for delegations, so the model sees the
+	// "子代理拒答" tool_result and decides itself whether to rephrase or
+	// escalate. What matters is that the refusal is never silently swallowed.
+	refused := llmpool.Detect(llm.Message{Role: llm.RoleAssistant,
+		Content: []llm.ContentBlock{llm.TextBlock(body)}}).Refused
+	if refused {
+		log.Printf("[delegation] %s 子代理拒答（状态 %s 不变）", id, status)
+	}
 	if _, werr := reg.WriteOutput(id, body); werr != nil {
 		log.Printf("[delegation] %s 写结果文件失败: %v", id, werr)
 	}
-	reg.Finish(id, status, body, errText(err))
+	reg.FinishWithRefused(id, status, body, errText(err), refused)
 	if emit != nil {
+		summary := fmt.Sprintf("子代理 %s 返回：%s", id, truncOutput(body, 400))
+		if refused {
+			summary = fmt.Sprintf("子代理 %s 拒答：%s", id, truncOutput(body, 400))
+		}
 		emit(db.Activity{
 			Worker: "harness", Kind: "tool_result", Tool: "Agent",
 			IsError:  status == delegation.StatusFailed,
-			Summary:  fmt.Sprintf("子代理 %s 返回：%s", id, truncOutput(body, 400)),
-			Metadata: delegation.ToJSON(map[string]any{"delegation_id": id, "background": background}),
+			Summary:  summary,
+			Metadata: delegation.ToJSON(map[string]any{"delegation_id": id, "background": background, "refused": refused}),
 		})
 		if background {
 			for _, n := range reg.PeekNotifications() {

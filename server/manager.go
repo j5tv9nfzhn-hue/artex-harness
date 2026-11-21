@@ -57,6 +57,8 @@ type Task struct {
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
 	TimeoutSeconds       int  `json:"timeout_seconds"`
 	PlanHeartbeatSeconds int  `json:"plan_heartbeat_seconds"` // planner 心跳触发间隔(秒)
+	// RunBudgetMinutes 是 HARNESS 单轮墙钟预算(分钟);0=未设置,用全局默认。
+	RunBudgetMinutes     int  `json:"run_budget_minutes,omitempty"`
 	CoverageEnabled      bool `json:"coverage_enabled"`       // 资产覆盖度功能开关(创建时定,默认开)
 	// HarnessMode selects the execution engine. true = ONE conversational agent
 	// (harness/runtime: model decides what to do, may delegate to subagents);
@@ -858,6 +860,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
+		RunBudgetMinutes: pt.RunBudgetMinutes,
 		CoverageEnabled: pt.CoverageEnabled, HarnessMode: pt.HarnessMode, ProjectDir: pt.ProjectDir,
 		ThinkingType: pt.ThinkingType, ReasoningEffort: pt.ReasoningEffort,
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),

@@ -229,7 +229,7 @@ export function TrafficPanel({ taskId }) {
     <ScrollArea style={{ flex: 1, minHeight: 0 }}>
       <Box px="3" py="2">
         <Flex gap="2" mb="2" wrap="wrap" align="center">
-          <RTextField size="1" placeholder="host 过滤" value={host} onChange={(e) => setHost(e.target.value)} style={{ width: 130 }} />
+          <RTextField.Root size="1" placeholder="host 过滤" value={host} onChange={(e) => setHost(e.target.value)} style={{ width: 130 }} />
           <select value={method} onChange={(e) => setMethod(e.target.value)} className="traffic-select" aria-label="方法过滤">
             <option value="">全部方法</option>
             {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => <option key={m} value={m}>{m}</option>)}
@@ -238,10 +238,10 @@ export function TrafficPanel({ taskId }) {
             <option value="">全部状态</option>
             {["2xx", "3xx", "4xx", "5xx"].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <RTextField size="1" placeholder="搜索 URL / 内容" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 130 }} />
+          <RTextField.Root size="1" placeholder="搜索 URL / 内容" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 130 }} />
           <Button size="1" variant="soft" onClick={() => load(0)} disabled={busy}>筛选</Button>
           <Box style={{ marginLeft: "auto" }} />
-          <Text size="1" color="gray">共 {data?.total ?? 0} 条</Text>
+          <Text size="1" color="gray">{data ? `共 ${data.total} 条` : "读取中…"}</Text>
         </Flex>
         {data && data.enabled === false ? (
           <Text size="1" color="amber" style={{ display: "block", marginBottom: 8, lineHeight: 1.6 }}>
@@ -400,7 +400,7 @@ export function GateFailure({ reasons, onOverride, overrideBusy }) {
         <Text key={i} size="1" color="red" style={{ display: "block", lineHeight: 1.6 }}>· {r}</Text>
       ))}
       <Flex gap="2" mt="2" align="center">
-        <RTextField size="1" placeholder="人工越过理由（必填，会写入审计链）" value={reason}
+        <RTextField.Root size="1" placeholder="人工越过理由（必填，会写入审计链）" value={reason}
                     onChange={(e) => setReason(e.target.value)} style={{ flex: 1 }} />
         <Button size="1" variant="soft" disabled={!reason.trim() || overrideBusy}
                 onClick={() => onOverride(reason.trim())}>

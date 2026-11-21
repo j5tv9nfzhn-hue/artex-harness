@@ -15,6 +15,7 @@ import SettingsView from "./SettingsView.jsx";
 import Subagents from "./Subagents.jsx";
 import Trajectory from "./Trajectory.jsx";
 import Checkpoints from "./Checkpoints.jsx";
+import Findings from "./Findings.jsx";
 import WorkspaceTabs from "./WorkspaceTabs.jsx";
 import Workbench from "./Workbench.jsx";
 import Browser from "./Browser.jsx";
@@ -99,7 +100,7 @@ function Console({ theme, onLogout }) {
   const [err, setErr] = useState("");
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
-  const [view, setView] = useState("chat"); // chat | trajectory | checkpoints | settings
+  const [view, setView] = useState("chat"); // chat | trajectory | checkpoints | settings | findings | usage
   const [tabs, setTabs] = useState([]);   // 打开过的会话/任务标签
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -531,7 +532,11 @@ function Console({ theme, onLogout }) {
             </Box>
           ) : null}
 
-          {view === "trajectory" && taskId && !convId ? (
+          {view === "findings" ? (
+            <Findings initialTaskId={taskId}
+                      onOpenTask={(id) => { setTaskId(String(id)); setConvId(null); setView("chat"); }}
+                      onClose={() => setView("chat")} />
+          ) : view === "trajectory" && taskId && !convId ? (
             <Trajectory taskId={taskId} onClose={() => setView("chat")} onLocate={() => setView("chat")} />
           ) : view === "checkpoints" && taskId && !convId ? (
             <Box style={{ flex: 1, minHeight: 0 }}><Checkpoints taskId={taskId} onRestored={() => setRetryNonce((n) => n + 1)} /></Box>
@@ -603,7 +608,9 @@ function Console({ theme, onLogout }) {
 
         {palette ? (
           <CommandPalette tasks={harnessRuns} onPick={(id) => { setTaskId(id); setConvId(null); setPalette(false); }}
-                   onNew={newConversation} onNewTask={() => setNewOpen(true)} onClose={() => setPalette(false)} />
+                   onNew={newConversation} onNewTask={() => setNewOpen(true)}
+                   onOpenFindings={() => { setView("findings"); setPalette(false); }}
+                   onClose={() => setPalette(false)} />
         ) : null}
       </div>
     </Theme>
@@ -688,11 +695,22 @@ function Row({ row }) {
 /* 命令面板的调用适配层：把任务列表映射成 Palette 需要的 sections。
  * 原来这里是 cmdk 的 <Command>；行为（↑↓/Enter/Esc/过滤）现在由 Palette.jsx
  * 自己实现，这里只负责数据形状，避免 App 里散落一地的 render 细节。 */
-function CommandPalette({ tasks, onPick, onNew, onNewTask, onClose }) {
+function CommandPalette({ tasks, onPick, onNew, onNewTask, onOpenFindings, onClose }) {
   const sections = [
     {
       label: "操作",
       items: [
+        {
+          label: "发现列表", keywords: "漏洞 发现 findings 漏洞列表 渗透结果",
+          render: () => (
+            <Flex align="center" gap="2" style={{ width: "100%" }}>
+              <ShieldAlert size={13} />
+              <Text size="2">发现列表</Text>
+              <Box style={{ marginLeft: "auto" }}><Text size="1" color="gray">全部任务的漏洞</Text></Box>
+            </Flex>
+          ),
+          onSelect: () => onOpenFindings?.(),
+        },
         {
           label: "新建对话", keywords: "新建会话 聊天 new chat 无目标",
           render: () => (
@@ -749,6 +767,7 @@ function SegmentedView({ view, onChange, disabled }) {
     { key: "chat", label: "对话" },
     { key: "trajectory", label: "轨迹" },
     { key: "checkpoints", label: "检查点" },
+    { key: "findings", label: "发现" },
     { key: "usage", label: "用量" },
   ];
   return (
@@ -756,7 +775,7 @@ function SegmentedView({ view, onChange, disabled }) {
       {items.map((it) => (
         <button key={it.key} role="tab" aria-selected={view === it.key}
                 className={"view-seg-btn" + (view === it.key ? " active" : "")}
-                disabled={disabled && it.key !== "chat" && it.key !== "usage"}
+                disabled={disabled && it.key !== "chat" && it.key !== "usage" && it.key !== "findings"}
                 onClick={() => onChange(it.key)}>{it.label}</button>
       ))}
     </Flex>

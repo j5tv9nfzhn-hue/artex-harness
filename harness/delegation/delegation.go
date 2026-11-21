@@ -60,6 +60,13 @@ type Record struct {
 	// the retention sweep (TTL). The record itself is kept — it is the audit
 	// trail and the console still lists it; only the scratch directory is gone.
 	Reclaimed bool `json:"reclaimed,omitempty"`
+	// Refused marks a delegation whose final text was a model content refusal
+	// (llmpool.Detect), rather than an ordinary failure: the subagent said
+	// no instead of doing the work. Status is untouched — a refused run is
+	// still StatusFailed when it errored, StatusDone when it answered with
+	// refusal text — so front-end and statistics keep reading Status, and
+	// Refused is the extra signal that says *why* it ended that way.
+	Refused bool `json:"refused,omitempty"`
 }
 
 type entry struct {
@@ -332,6 +339,14 @@ func (r *Registry) AttachCancel(id string, cancel context.CancelFunc) {
 // Finish records a terminal state. It is idempotent: a delegation finished
 // twice (e.g. kill racing with completion) keeps the first terminal state.
 func (r *Registry) Finish(id string, status Status, result, errText string) {
+	r.FinishWithRefused(id, status, result, errText, false)
+}
+
+// FinishWithRefused is Finish plus the refusal mark: refused=true when the
+// delegation's final text was a model content refusal rather than an
+// ordinary failure. The journal persists the flag automatically (Record is
+// marshalled whole), so a restarted process still lists it.
+func (r *Registry) FinishWithRefused(id string, status Status, result, errText string, refused bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.entries[id]
@@ -341,6 +356,7 @@ func (r *Registry) Finish(id string, status Status, result, errText string) {
 	e.rec.Status = status
 	e.rec.Result = result
 	e.rec.Error = errText
+	e.rec.Refused = refused
 	e.rec.EndedAt = time.Now()
 	e.rec.DurationMS = e.rec.EndedAt.Sub(e.rec.StartedAt).Milliseconds()
 	if e.cancel != nil {

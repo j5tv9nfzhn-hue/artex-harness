@@ -24,6 +24,11 @@ type Store struct {
 	DB      *db.DB
 	Traffic *traffic.Traffic
 	Dir     string
+	// OnFindingRecorded, if set, runs after a finding is durably recorded.
+	// The server wires it to the task audit chain (finding_reported); the
+	// store itself stays unaware of audit file locations, so export-only
+	// stores (nil hook) are unaffected.
+	OnFindingRecorded func(taskID, findingID int64, name, severity, worker string)
 }
 
 func New(pg *db.DB, tr *traffic.Traffic, dir string) *Store {
@@ -191,7 +196,22 @@ func (s *Store) Record(ctx context.Context, in db.RecordFindingInput, refs []db.
 		out, err = db.RecordFindingTx(ctx, tx, in, prepared)
 		return err
 	})
+	// 登记成功后才通知：失败的登记不进链，链里每条 finding_reported
+	// 对应一行真实的 findings 记录。回调本身不影响本次调用的成败。
+	if err == nil && out != nil && s.OnFindingRecorded != nil {
+		s.OnFindingRecorded(in.TaskID, out.FindingID, firstNonEmpty(in.Name, in.VulnClass), in.Severity, in.Worker)
+	}
 	return
+}
+
+// firstNonEmpty returns the first non-blank string, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (s *Store) Bind(ctx context.Context, findingID int64, refs []db.TrafficRef) (out *db.FindingTraffic, err error) {
