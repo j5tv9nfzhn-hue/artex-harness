@@ -44,11 +44,11 @@ for pkg in "${EXPECTED[@]}"; do
   root="${pkg%.zip}"
   case "$pkg" in
     *windows*)
-      printf '%s\n' "$listing" | grep -Fxq "${root}/artex.exe" || err "${pkg} 缺少 artex.exe"
+      printf '%s\n' "$listing" | grep -Fxq "${root}/artex-harness.exe" || err "${pkg} 缺少 artex-harness.exe"
       printf '%s\n' "$listing" | grep -Fxq "${root}/start.bat" || err "${pkg} 缺少 start.bat"
       ;;
     *)
-      printf '%s\n' "$listing" | grep -Fxq "${root}/artex" || err "${pkg} 缺少 artex"
+      printf '%s\n' "$listing" | grep -Fxq "${root}/artex-harness" || err "${pkg} 缺少 artex-harness"
       printf '%s\n' "$listing" | grep -Fxq "${root}/start.sh" || err "${pkg} 缺少 start.sh"
       ;;
   esac

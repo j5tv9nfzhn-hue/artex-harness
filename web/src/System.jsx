@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Box, Button, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "./ui.jsx";
-import { AlertTriangle, CheckCircle2, FileText, Fingerprint, History, Network, RefreshCw, ShieldCheck, Wrench, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Fingerprint, History, Network, RefreshCw, ScrollText, ShieldCheck, Wrench, X, XCircle } from "lucide-react";
 import { authedFetch, errorText } from "./lib/auth.js";
 import { AuditChainPanel, GateFailure, PentestReportPanel, TrafficPanel, patchFindingConfirm } from "./Stage2.jsx";
 
@@ -17,6 +17,10 @@ import { AuditChainPanel, GateFailure, PentestReportPanel, TrafficPanel, patchFi
  *   审计链  GET /api/harness/audit-chain?task=   哈希链验证 + 条目
  *   流量    GET /api/traffic + POST /api/traffic/replay  F12 表 + 重放
  *   报告    GET /api/report/pentest?task=       专业报告 Markdown + 下载
+ * 管理面恢复（S6-RESTORE）又加了日志面：
+ *   日志    GET /api/logs?limit=500            最近的后端日志（newest-last）
+ *           GET /api/logs/history?before=<db_id> 更早的已落库日志（newest-first）
+ *           GET /api/stats                     引擎状态 / 流量条数 / 资产数
  * 取证面的每条发现还多了「标记为已确认」：走验证门，422 时在行内列出
  * 失败原因并可人工越过（理由写入审计链）。
  */
@@ -35,6 +39,7 @@ const TABS = [
   { key: "audit", label: "审计链", icon: Fingerprint },
   { key: "traffic", label: "流量", icon: Network },
   { key: "report", label: "报告", icon: FileText },
+  { key: "logs", label: "日志", icon: ScrollText },
 ];
 
 /* 就绪项的展示顺序固定：数据库 → 模型 → 技能 → 浏览器。
@@ -127,6 +132,46 @@ export default function System({ taskId, onClose }) {
     setReplay(null);
     loadReplay();
   }, [tab, loadReplay]);
+
+  // 日志面：/api/logs 是内存环的最近行（newest-last），/api/logs/history 是
+  // 已落库的更早行（newest-first）。界面统一按 newest-first 展示：初载把
+  // logs 倒序，翻更早时把 history 的一批直接拼在前面（那批整体更早）。
+  // stats 只读全局字段（不带 ?task= 时不绑定任务）。
+  const [sysLogs, setSysLogs] = useState(null); // LogLine[]，newest-first
+  const [logsErr, setLogsErr] = useState("");
+  const [logsBusy, setLogsBusy] = useState(false);
+  const [sysStats, setSysStats] = useState(null);
+  const [histBusy, setHistBusy] = useState(false);
+  const [histMore, setHistMore] = useState(false);
+  const loadSysLogs = useCallback(async () => {
+    setLogsBusy(true); setLogsErr("");
+    try {
+      const [l, s] = await Promise.all([
+        api("/api/logs?limit=500"),
+        api("/api/stats").catch(() => null),
+      ]);
+      setSysLogs([...(l?.items || [])].reverse());
+      setSysStats(s);
+      setHistMore(false);
+    } catch (e) { setLogsErr(e.message); }
+    finally { setLogsBusy(false); }
+  }, []);
+  useEffect(() => {
+    if (tab !== "logs" || sysLogs) return;
+    loadSysLogs();
+  }, [tab, sysLogs, loadSysLogs]);
+  const loadOlder = async () => {
+    const items = sysLogs || [];
+    const oldest = [...items].reverse().find((l) => l.db_id > 0);
+    if (!oldest) return;
+    setHistBusy(true);
+    try {
+      const d = await api(`/api/logs/history?before=${oldest.db_id}&limit=200`);
+      setSysLogs((cur) => [...(d?.items || []), ...(cur || [])]);
+      setHistMore(!!d?.has_more);
+    } catch (e) { setLogsErr(e.message); }
+    finally { setHistBusy(false); }
+  };
 
   const head = (
     <Flex align="center" gap="1" px="2" py="1" style={{ borderBottom: "1px solid var(--c-divider)" }}>
@@ -392,6 +437,54 @@ export default function System({ taskId, onClose }) {
                   <Text size="1" color="gray" style={{ display: "block", marginTop: 8, lineHeight: 1.7 }}>{ev.note}</Text>
                 ) : null}
               </>
+            ) : null}
+          </Box>
+        </ScrollArea>
+      ) : null}
+
+      {tab === "logs" ? (
+        <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+          <Box px="3" py="2">
+            <Flex align="center" gap="2" mb="2">
+              <Text size="1" weight="medium">后端日志</Text>
+              {sysStats ? (
+                <>
+                  <Badge size="1" variant="soft" color="gray">{sysStats.engine_mode || "—"}</Badge>
+                  {typeof sysStats.traffic === "number" ? <Text size="1" color="gray">流量 {sysStats.traffic} 条</Text> : null}
+                  {typeof sysStats.assets === "number" ? <Text size="1" color="gray">资产 {sysStats.assets}</Text> : null}
+                  <Text size="1" color="gray">{sysStats.llm_configured ? "模型已配" : "模型未配"}</Text>
+                </>
+              ) : null}
+              <Box style={{ marginLeft: "auto" }} />
+              <IconButton size="1" variant="ghost" aria-label="刷新日志" onClick={loadSysLogs}>
+                <RefreshCw size={12} className={logsBusy ? "spin" : ""} />
+              </IconButton>
+            </Flex>
+            {logsErr ? (
+              <Text size="1" color="red">{logsErr} <Button size="1" variant="soft" onClick={loadSysLogs}>重试</Button></Text>
+            ) : null}
+            {!sysLogs && !logsErr ? <Text size="1" color="gray">读取中…</Text> : null}
+            {(sysLogs || []).map((l, i) => (
+              <div key={l.seq || l.db_id || i} className="cap-row">
+                <Flex align="center" gap="2" style={{ width: "100%" }}>
+                  <Text size="1" color="gray" className="mono">{(l.ts || "").replace("T", " ").slice(0, 19)}</Text>
+                  <Badge size="1" variant="soft" color={l.level === "error" ? "red" : l.level === "warn" ? "amber" : "gray"}>
+                    {l.level || "info"}
+                  </Badge>
+                  {l.tag ? <Code size="1">{l.tag}</Code> : null}
+                </Flex>
+                <div className="cap-detail mono">{l.text}</div>
+              </div>
+            ))}
+            {sysLogs && !sysLogs.length ? <Text size="1" color="gray">暂无日志。</Text> : null}
+            {sysLogs?.length ? (
+              <Flex mt="2">
+                <Button size="1" variant="soft" disabled={histBusy || !sysLogs.some((l) => l.db_id > 0)}
+                        onClick={loadOlder}>
+                  {histBusy ? "加载中…" : "加载更早的日志"}
+                </Button>
+                {histMore ? <Text size="1" color="gray" style={{ alignSelf: "center" }}>还有更早的记录</Text> : null}
+              </Flex>
             ) : null}
           </Box>
         </ScrollArea>

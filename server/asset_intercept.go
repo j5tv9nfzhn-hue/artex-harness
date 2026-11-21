@@ -3,13 +3,122 @@ package server
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 // --- asset intercept rule CRUD ---
 //
 // Global asset blocklist: exact/fuzzy domain·ip·url + CIDR. This layer only
 // persists rules; the actual match/enforcement logic lives elsewhere.
+
+func (s *Server) assetInterceptListRules(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	rules, err := pg.ListAssetInterceptRules()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if rules == nil {
+		rules = []db.AssetInterceptRule{}
+	}
+	writeJSON(w, 200, map[string]any{"rules": rules})
+}
+
+func (s *Server) assetInterceptCreateRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req assetInterceptRuleReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateAssetInterceptRuleReq(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rule, err := pg.CreateAssetInterceptRule(req.Kind, req.Pattern, req.Note, req.Enabled)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rule)
+}
+
+func (s *Server) assetInterceptUpdateRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	var req assetInterceptRuleReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateAssetInterceptRuleReq(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rule, err := pg.UpdateAssetInterceptRule(id, req.Kind, req.Pattern, req.Note, req.Enabled)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rule)
+}
+
+func (s *Server) assetInterceptDeleteRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	if err := pg.DeleteAssetInterceptRule(id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+func (s *Server) assetInterceptToggleRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := pg.ToggleAssetInterceptRule(id, req.Enabled); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "enabled": req.Enabled})
+}
 
 // --- helpers ---
 

@@ -37,7 +37,7 @@ const (
 // 其余阶段传 -1。
 type Progress func(ph Phase, pct int, msg string)
 
-// Stage 下载指定 Release 的当前平台发布包，校验后把新二进制暂存为 artex.new。
+// Stage 下载指定 Release 的当前平台发布包，校验后把新二进制暂存为 artex-harness.new。
 //
 // 走的是完整 zip 而不是裸二进制，理由有两个：现有 Release 的 SHA256SUMS 本来就
 // 只覆盖 zip，走 zip 不需要改 CI，也能兼容已经发布出去的历史版本；zip 里还带着
@@ -238,14 +238,14 @@ func get(ctx context.Context, c *http.Client, rawURL string) (io.ReadCloser, err
 	return resp.Body, nil
 }
 
-// extractBinary 从发布包里取出 artex 可执行文件。
+// extractBinary 从发布包里取出 artex-harness 可执行文件。
 //
-// 包内结构是 artex-<版本>-<os>-<arch>/artex，但这里按**基名**匹配而不是拼完整
+// 包内结构是 artex-<版本>-<os>-<arch>/artex-harness，但这里按**基名**匹配而不是拼完整
 // 路径：版本号在包名里出现过一次，拼错一个字符就整个升级失败，按基名找更耐改。
 func extractBinary(zipPath, dst string) error {
-	want := "artex"
+	want := "artex-harness"
 	if runtime.GOOS == "windows" {
-		want = "artex.exe"
+		want = "artex-harness.exe"
 	}
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {

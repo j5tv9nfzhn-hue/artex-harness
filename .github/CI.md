@@ -31,7 +31,7 @@
 2. **工具链交叉核对**：每个目标都必须出现在 `go tool dist list` 里。
 3. **每端两包**：`linux`、`darwin`、`windows` 各自恰好 2 个架构，防止矩阵被误改。
 4. **标签/命名**：产物名必须匹配 `artex-<version>-<os>-<arch>.zip`，且能反解出正确的 os/arch；
-   同时约定 windows 包内含 `artex.exe` + `start.bat`，其余含 `artex` + `start.sh`。
+   同时约定 windows 包内含 `artex-harness.exe` + `start.bat`，其余含 `artex-harness` + `start.sh`。
 5. **版本一致性**：release 模式要求 `v<version> == tag` 且版本号语义化；CL 模式要求 `0.0.0-cl.*`。
 6. **签名**：`pem` 模式要求 `openssl` 可用并承诺产出 `SHA256SUMS.sig`（finalize 会回验）；
    `none` 模式显式降级为「仅 SHA256SUMS」，不失败。

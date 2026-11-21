@@ -42,11 +42,11 @@ const maxAttempts = 3
 // 别处，换装逻辑直接失效。
 type Paths struct {
 	Dir     string // 可执行文件所在目录
-	Current string // 当前运行的二进制        artex      / artex.exe
-	New     string // 暂存的新版本            artex.new  / artex.new.exe
-	Sum     string // 新版本的 sha256（hex）  artex.new.sha256 / artex.new.exe.sha256
-	Old     string // 换装前备份的旧版本      artex.old  / artex.old.exe
-	Marker  string // 升级状态标记            artex.upgrade.json
+	Current string // 当前运行的二进制        artex-harness      / artex-harness.exe
+	New     string // 暂存的新版本            artex-harness.new  / artex-harness.new.exe
+	Sum     string // 新版本的 sha256（hex）  artex-harness.new.sha256 / artex-harness.new.exe.sha256
+	Old     string // 换装前备份的旧版本      artex-harness.old  / artex-harness.old.exe
+	Marker  string // 升级状态标记            artex-harness.upgrade.json
 }
 
 // ResolvePaths 按当前可执行文件推导全部升级路径。

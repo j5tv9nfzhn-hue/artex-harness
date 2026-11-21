@@ -84,9 +84,9 @@ export default function Sidebar({
         body: JSON.stringify({ decision: body }),
       });
       if (!r.ok) throw new Error(await errorText(r));
-      toast?.(decision === "allow" ? "已允许" : "已拒绝");
+      toast.success(decision === "allow" ? "已允许" : "已拒绝");
       loadPending();
-    } catch (e) { toast?.(e.message, true); }
+    } catch (e) { toast.error(e.message); }
   }
 
   async function patchTask(id, body) {
@@ -262,18 +262,18 @@ export default function Sidebar({
                               <DropdownMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>
                                 <Copy size={12} /> 复制 ID #{t.id}
                               </DropdownMenu.Item>
-                              <DropdownMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                              <DropdownMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast.error(e.message))}>
                                 <Pin size={12} /> {t.pinned ? "取消置顶" : "置顶"}
                               </DropdownMenu.Item>
                               <DropdownMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>
                                 <Pencil size={12} /> 重命名
                               </DropdownMenu.Item>
                               <DropdownMenu.Separator />
-                              <DropdownMenu.Item onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                              <DropdownMenu.Item onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast.error(e.message))}>
                                 <Archive size={12} /> 归档
                               </DropdownMenu.Item>
                               <DropdownMenu.Item color="red"
-                                                 onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                                                 onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast.error(e.message))}>
                                 删除
                               </DropdownMenu.Item>
                             </DropdownMenu.Content>
@@ -299,12 +299,12 @@ export default function Sidebar({
                 <ContextMenu.Content>
                   <ContextMenu.Item onSelect={() => onPick(String(t.id))}>打开</ContextMenu.Item>
                   <ContextMenu.Item onSelect={() => navigator.clipboard?.writeText(String(t.id))}>复制 ID</ContextMenu.Item>
-                  <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast?.(e.message, true))}>
+                  <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast.error(e.message))}>
                     {t.pinned ? "取消置顶" : "置顶"}
                   </ContextMenu.Item>
                   <ContextMenu.Separator />
                   <ContextMenu.Item color="red"
-                                   onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast?.(e.message, true))}>
+                                   onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast.error(e.message))}>
                     删除
                   </ContextMenu.Item>
                 </ContextMenu.Content>
@@ -368,8 +368,8 @@ export default function Sidebar({
           <Flex gap="2" mt="4" justify="end">
             <Dialog.Close><Button variant="ghost">取消</Button></Dialog.Close>
             <Button variant="solid" onClick={async () => {
-              try { await patchTask(renaming.id, { name: newName.trim() }); setRenaming(null); toast?.("已重命名"); }
-              catch (e) { toast?.(e.message, true); }
+              try { await patchTask(renaming.id, { name: newName.trim() }); setRenaming(null); toast.success("已重命名"); }
+              catch (e) { toast.error(e.message); }
             }}>保存</Button>
           </Flex>
         </Dialog.Content>

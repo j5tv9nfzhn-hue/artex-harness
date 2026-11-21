@@ -214,6 +214,56 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 // token (this route is under /api/auth/* which requireAuth exempts, so the token
 // is validated here) AND the current password.
 
+func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	if !verifyJWT(extractToken(r), s.jwtKey) {
+		writeErr(w, 401, "未授权")
+		return
+	}
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if req.NewPassword == "" {
+		writeErr(w, 400, "新密码不能为空")
+		return
+	}
+	if msg := validatePassword(req.NewPassword); msg != "" {
+		writeErr(w, 400, msg)
+		return
+	}
+	hash, ok, err := pg.GetSetting(authPassKey)
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
+	if !ok || hash == "" {
+		writeErr(w, 403, "密码未初始化，请先设置密码")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)); err != nil {
+		writeErr(w, 401, "当前密码错误")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeErr(w, 500, "密码加密失败")
+		return
+	}
+	if err := pg.SetSetting(authPassKey, string(newHash)); err != nil {
+		writeErr(w, 500, "保存失败: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 // POST /api/auth/login — validates username/password and returns a JWT.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)

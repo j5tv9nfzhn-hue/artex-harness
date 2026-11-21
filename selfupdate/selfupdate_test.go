@@ -314,7 +314,7 @@ func TestParseSums(t *testing.T) {
 
 func TestExtractBinaryFindsNestedEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("包内基名在 Windows 上是 artex.exe，此用例按 Unix 命名构造")
+		t.Skip("包内基名在 Windows 上是 artex-harness.exe，此用例按 Unix 命名构造")
 	}
 	dir := t.TempDir()
 	zipPath := filepath.Join(dir, "release.zip")
@@ -324,11 +324,11 @@ func TestExtractBinaryFindsNestedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(f)
-	// 真实发布包的结构：artex-<版本>-<os>-<arch>/artex，外加若干干扰文件。
+	// 真实发布包的结构：artex-<版本>-<os>-<arch>/artex-harness，外加若干干扰文件。
 	for name, body := range map[string]string{
 		"artex-0.3.8-linux-amd64/README.md":           "readme",
 		"artex-0.3.8-linux-amd64/skills/a.md":         "skill",
-		"artex-0.3.8-linux-amd64/artex":               "#!/bin/sh\nexit 0\n",
+		"artex-0.3.8-linux-amd64/artex-harness":       "#!/bin/sh\nexit 0\n",
 		"artex-0.3.8-linux-amd64/config.example.json": "{}",
 	} {
 		w, err := zw.Create(name)
@@ -349,7 +349,7 @@ func TestExtractBinaryFindsNestedEntry(t *testing.T) {
 		t.Fatalf("extractBinary: %v", err)
 	}
 	if got := readAll(t, dst); !strings.Contains(got, "exit 0") {
-		t.Errorf("解压出来的不是 artex 可执行文件: %q", got)
+		t.Errorf("解压出来的不是 artex-harness 可执行文件: %q", got)
 	}
 	info, err := os.Stat(dst)
 	if err != nil {

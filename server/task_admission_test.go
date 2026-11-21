@@ -620,6 +620,27 @@ func TestTaskLLMResolutionReportsDatabaseFailure(t *testing.T) {
 	}
 }
 
+func TestTokenStatsWithoutTaskReturnsStableShape(t *testing.T) {
+	s := &Server{m: &Manager{tasks: map[string]*Task{}}}
+	req := httptest.NewRequest(http.MethodGet, "/api/exploration/tokens?task=missing", nil)
+	rec := httptest.NewRecorder()
+	s.tokenStats(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Workers  []db.TokenUsage        `json:"workers"`
+		Sessions []db.SessionTokenUsage `json:"sessions"`
+		Total    TokenTotalDTO          `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Workers == nil || payload.Sessions == nil {
+		t.Fatalf("empty collections must serialize as arrays: %s", rec.Body.String())
+	}
+}
+
 func TestBatchControlLimitCountsDeduplicatedIDs(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

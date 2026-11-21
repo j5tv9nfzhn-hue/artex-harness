@@ -268,7 +268,7 @@ jobs:
           set -euo pipefail
           tmp="$(mktemp -d)"
           unzip -q "${{ env.ACTION_DIR }}/${{ matrix.package }}" -d "$tmp"
-          bin="$tmp/$(basename "${{ matrix.package }}" .zip)/artex"
+          bin="$tmp/$(basename "${{ matrix.package }}" .zip)/artex-harness"
           chmod +x "$bin"
           "$bin" -h > "$tmp/help.txt" 2>&1 || true
           head -5 "$tmp/help.txt"

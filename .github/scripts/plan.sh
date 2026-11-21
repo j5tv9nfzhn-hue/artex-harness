@@ -67,9 +67,9 @@ for t in "${EXPECTED[@]}"; do
   fi
   # 归档内可执行文件名必须与目标系统一致
   if [ "$os" = "windows" ]; then
-    hint "${t} 归档内含 artex.exe + start.bat"
+    hint "${t} 归档内含 artex-harness.exe + start.bat"
   else
-    hint "${t} 归档内含 artex + start.sh"
+    hint "${t} 归档内含 artex-harness + start.sh"
   fi
 done
 

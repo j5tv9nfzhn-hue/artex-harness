@@ -29,22 +29,154 @@ import (
 
 // ---------- 自定义工具 CRUD ----------
 
-// command | script | http
+type customToolReq struct {
+	Key         string          `json:"key"`
+	Description string          `json:"description"`
+	Schema      json.RawMessage `json:"schema"`
+	Agents      []string        `json:"agents"`
+	Enabled     bool            `json:"enabled"`
+	Kind        string          `json:"kind"` // command | script | http
+	Exec        json.RawMessage `json:"exec"`
+	Deferred    bool            `json:"deferred"`
+}
 
 var reToolKey = reAgentKey // 同 agent key 规则:小写字母开头 + 小写字母/数字/下划线
+
+func (s *Server) pgCreateCustomTool(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req customToolReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	req.Key = strings.TrimSpace(req.Key)
+	if !reToolKey.MatchString(req.Key) {
+		writeErr(w, 400, "key 需小写字母开头，仅含小写字母/数字/下划线")
+		return
+	}
+	if req.Kind != "command" && req.Kind != "script" && req.Kind != "http" && req.Kind != "shell" {
+		writeErr(w, 400, "kind 需为 command / script / http / shell")
+		return
+	}
+	if req.Kind == "http" && !hasSchemaProps(req.Schema) {
+		writeErr(w, 400, "http 工具必须提供参数 JSON Schema(不能留空)")
+		return
+	}
+	if exist, _ := pg.GetTool(req.Key); exist != nil {
+		writeErr(w, 409, "该 key 已存在(内置或自定义工具)")
+		return
+	}
+	if err := pg.CreateCustomTool(&db.Tool{
+		Key: req.Key, Description: req.Description, Schema: req.Schema, Agents: req.Agents,
+		Enabled: req.Enabled, Kind: req.Kind, Exec: req.Exec, Deferred: req.Deferred,
+	}); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"key": req.Key})
+}
+
+func (s *Server) pgUpdateCustomTool(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	key := r.PathValue("key")
+	existing, err := pg.GetTool(key)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if existing == nil || existing.System {
+		writeErr(w, 400, "只能编辑自定义工具")
+		return
+	}
+	var req customToolReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.Kind != "command" && req.Kind != "script" && req.Kind != "http" && req.Kind != "shell" {
+		writeErr(w, 400, "kind 需为 command / script / http / shell")
+		return
+	}
+	if req.Kind == "http" && !hasSchemaProps(req.Schema) {
+		writeErr(w, 400, "http 工具必须提供参数 JSON Schema(不能留空)")
+		return
+	}
+	if err := pg.UpdateCustomTool(&db.Tool{
+		Key: key, Description: req.Description, Schema: req.Schema, Agents: req.Agents,
+		Enabled: req.Enabled, Kind: req.Kind, Exec: req.Exec, Deferred: req.Deferred,
+	}); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) pgDeleteCustomTool(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	key := r.PathValue("key")
+	if err := pg.DeleteCustomTool(key); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": key})
+}
 
 // testToolReq is a dry-run request from the editor: run the given (possibly unsaved)
 // exec spec with sample params, without persisting the tool. Same executor path as a
 // real tool call — it runs arbitrary command/script/http on the server, which the
 // custom-tool feature already allows, so no new capability is granted.
-
-// command | script | http
+type testToolReq struct {
+	Kind   string          `json:"kind"` // command | script | http
+	Exec   json.RawMessage `json:"exec"`
+	Params map[string]any  `json:"params"`
+}
 
 // pgTestCustomTool executes an exec spec once and returns its raw output + error
 // flag, so the editor can debug a tool before saving it. Per-kind timeouts still
 // apply from the exec spec (with defaults); the outer ceiling is a hard backstop.
-
-// run in the project dir, like a real call
+func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req testToolReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "无效的请求体")
+		return
+	}
+	params := req.Params
+	if params == nil {
+		params = map[string]any{}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	tc := &actool.ToolContext{WorkingDir: s.m.dir} // run in the project dir, like a real call
+	var res actool.Result
+	switch req.Kind {
+	case "command":
+		res, _ = s.runCommandTool(ctx, req.Exec, params, tc)
+	case "script":
+		res, _ = s.runScriptTool(ctx, "test", req.Exec, params, tc)
+	case "http":
+		res, _ = s.runHTTPTool(ctx, req.Exec, params, tc)
+	case "shell":
+		writeErr(w, 400, "shell 类型工具是 bash 环境声明，无可执行内容")
+		return
+	default:
+		writeErr(w, 400, "未知工具类型: "+req.Kind)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"output": res.Flatten(), "is_error": res.IsError})
+}
 
 // ---------- Python 解释器(检测 + 入库 + 覆盖) ----------
 

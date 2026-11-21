@@ -609,3 +609,25 @@ U1 发现读侧 8 条（发现列表页的前提）、U2 证据绑定 7 条（�
 
 - 边问边答的引擎代码仍在（快照流水线是活的，删除/归档流程依赖它），但已无任何入口能发起一次旁路提问；将来若重新接线，需恢复 HTTP 层（handler 已删，git 可找回）。
 - `side_questions_test.go` 里删掉的 4 个 HTTP 测试曾覆盖旁路并发上限、忙隔离、归档前 drain 等行为；drain 路径本身仍被 `server_mgmt.go`/`task_archives.go` 调用，但不再有直接测试。
+
+## 恢复执行记录（2026-11-21）
+
+按 Julie 2026-11-21 17:25 CST 确认：第一批与第二批一起恢复，即把 DELETE-管理面 150 条加回来，扣除已被 profiles 体系取代的旧版 LLM 全局配置 3 条（GET/POST `/api/llm`、POST `/api/llm/test`），实恢复 **147 条**。详见 `docs/stages/S6-RESTORE-MGMT.md` 与 PROVENANCE 3.21 节。
+
+### 已恢复（147 条，按子组）
+
+Agents 配置管理 + triggers 21、技能管理 10、通知渠道 8、任务归档 7、工作区文件操作 7、自定义工具 7、任务分类 6、公司 6、设置 6、拦截 judge + 历史 6、任务级拦截规则 5、资产拦截规则 5、ScopeSentry 同步 5、日志 + 统计 4、资产 4、LLM 池与重试策略 4、LLM 记录明细 3、MCP 单个管理 3、流量删除 3、任务模板 4、可见性 4、拦截规则写口 4、Token 统计 2、命令统计 2、其它 7（改密码、GC、任务挂/摘资产 2、删除 LLM 记录 1、新建 MCP 1、新建技能 1）。
+
+### 仍删除
+
+- 旧版 LLM 全局配置 3 条（明确不恢复，已被 profiles 取代）。
+- DELETE-多智能体 exploration 专属 34 条（含 `goals_api.go` 整文件、`taskIntentAssets`、interventions、constraints、deepenFinding）。
+- 第二轮删的 22 条（U5 Eval/一致性 2、U6 委派读口 2、U8 旧版报告与审计 2、U11 旧版对话面 5、U14 边问边答 11）。
+
+### 恢复后状态
+
+- 路由：`server/server.go` 的 `mux.HandleFunc` 由 98 变 **245**（+147），helper 7 条不动，总计 **252 条**；新增集合与 147 条清单逐条比对零缺失、零多余。README 路由总表同步为 252 条/34 分组。
+- 前端：设置新增运行开关/更新/账户安全 3 个分区，系统侧栏新增「日志」签；其余恢复路由只恢复后端，UI 待接（见 `S6-RESTORE-MGMT.md` 第 1、5 节）。
+- 取回来源纠正：被删代码取自 **d46c53b**（瘦身前的父提交），不是 b4dccfe——b4dccfe 已是瘦身第一轮之后的状态。d46c53b→HEAD 的 server.go 删除总数 195 条 = 147（本次恢复）+ 34（exploration）+ 3（旧版 LLM）+ 11（第二轮）。
+- 适配：`triggers.go` 的重复 helper 已统一为 `agentByKey`；`syncSSRun` 的 `s.companyStore()` 改为 `pg.Companies()`；整文件取回带进的清单外 `taskIntentAssets` 已删；`tokenStats` handler 恢复但未注册路由（属 exploration，测试保留）；通知测试消息文案改为 artex-harness。
+- 验证：`go vet`/`go build` 通过；无库全量失败 30 个（11 已知需真库 + 5 punchlist + 14 恢复的通知测试，均“未找到数据库配置”）；恢复测试的定向真库子集 42 通过、0 失败；`make test-db` 全量未跑。隔离实测 settings/update/logs/stats/notify/agents/改密码均通。

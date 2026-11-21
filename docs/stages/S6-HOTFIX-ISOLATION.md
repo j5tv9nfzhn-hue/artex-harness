@@ -27,9 +27,11 @@
 | 配置文件 | `artex-harness.json`（`HARNESS_CONFIG` 优先，`ARTEX_CONFIG` 仍可用；旧 `config.json` 仅作回退） | `config.json` |
 | 二进制 | `artex-harness`（`artex-harness.exe`） | `artex` |
 | Compose 服务 / 卷 | `postgres-harness` / `artex-harness`，卷 `pgdata-harness`，镜像 `artex-harness:latest`（本地构建） | `postgres` / `artex`，卷 `pgdata`，镜像 `autumn27/artex` |
-| 发布包 | `artex-harness-<version>-<os>-<arch>.zip`，`dist/artex-harness-<os>-<arch>/` | `artex-…` |
+| 发布包 | `artex-<version>-<os>-<arch>.zip`（包内目录 `artex-<version>-<os>-<arch>/`，二进制仍为 `artex-harness`；构建输出目录仍为 `dist/artex-harness-<os>-<arch>/`） | `artex-…` |
 
-注意：`selfupdate.ResolvePaths` 按可执行文件名派生 `.new/.old/.upgrade.json`，改名后自动变成 `artex-harness.new` 等，无需另改代码。`loadOrCreateJWTKey` 不从 ARTEX 的 `jwt.key` 迁移，只迁移本产品旧位置 `data-harness/jwt.key`（如存在）。
+注意：`selfupdate.ResolvePaths` 按可执行文件名派生 `.new/.old/.upgrade.json`，改名后自动变成 `artex-harness.new` 等，无需另改代码。
+
+**订正（2026-11-21）：**本节初版把发布包写作 `artex-harness-<version>-<os>-<arch>.zip`，但这只是 build.sh 一处的改名，CI（plan.sh/assemble.sh）与更新器（`AssetName`/`extractBinary`，另有 `TestAssetNameMatchesBuildScript` 钉住 `artex-…` 命名）仍期望 `artex-…`，导致 2026-11-21 三次推送的 CI 六个编译任务全部失败（`缺少产物 ACTION/artex-0.0.0-cl.22-c86c09f-…zip`，run 44888762798）。已改回 `artex-<version>-<os>-<arch>.zip`，包内二进制期望同步改为 `artex-harness`/`artex-harness.exe`；存档名刻意保持 `artex-…` 是为了与 CI 与更新器一致，见 PROVENANCE 3.23。`loadOrCreateJWTKey` 不从 ARTEX 的 `jwt.key` 迁移，只迁移本产品旧位置 `data-harness/jwt.key`（如存在）。
 
 ## 改动文件
 

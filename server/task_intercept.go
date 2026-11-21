@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -53,4 +54,136 @@ func buildTaskInterceptRules(reqs []taskInterceptRuleReq) ([]db.TaskInterceptRul
 		})
 	}
 	return out, nil
+}
+
+func (s *Server) taskInterceptListRules(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	taskID, ok := pathInt(r, "id")
+	if !ok || taskID <= 0 {
+		writeErr(w, 400, "bad task id")
+		return
+	}
+	rules, err := pg.Assets().ListTaskInterceptRules(taskID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if rules == nil {
+		rules = []db.AssetInterceptRule{}
+	}
+	writeJSON(w, 200, map[string]any{"rules": rules})
+}
+
+func (s *Server) taskInterceptCreateRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	taskID, ok := pathInt(r, "id")
+	if !ok || taskID <= 0 {
+		writeErr(w, 400, "bad task id")
+		return
+	}
+	var req taskInterceptRuleReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateTaskInterceptRuleReq(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rule, err := pg.Assets().CreateTaskInterceptRule(taskID, req.Action, req.Kind, req.Pattern, req.Note, req.Enabled)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rule)
+}
+
+func (s *Server) taskInterceptUpdateRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	taskID, ok := pathInt(r, "id")
+	if !ok || taskID <= 0 {
+		writeErr(w, 400, "bad task id")
+		return
+	}
+	ruleID, ok := pathInt(r, "rid")
+	if !ok || ruleID <= 0 {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	var req taskInterceptRuleReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateTaskInterceptRuleReq(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rule, err := pg.Assets().UpdateTaskInterceptRule(taskID, ruleID, req.Action, req.Kind, req.Pattern, req.Note, req.Enabled)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rule)
+}
+
+func (s *Server) taskInterceptDeleteRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	taskID, ok := pathInt(r, "id")
+	if !ok || taskID <= 0 {
+		writeErr(w, 400, "bad task id")
+		return
+	}
+	ruleID, ok := pathInt(r, "rid")
+	if !ok || ruleID <= 0 {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	deleted, err := pg.Assets().DeleteTaskInterceptRule(taskID, ruleID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": deleted})
+}
+
+func (s *Server) taskInterceptToggleRule(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	taskID, ok := pathInt(r, "id")
+	if !ok || taskID <= 0 {
+		writeErr(w, 400, "bad task id")
+		return
+	}
+	ruleID, ok := pathInt(r, "rid")
+	if !ok || ruleID <= 0 {
+		writeErr(w, 400, "bad rule id")
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := pg.Assets().ToggleTaskInterceptRule(taskID, ruleID, req.Enabled); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "enabled": req.Enabled})
 }

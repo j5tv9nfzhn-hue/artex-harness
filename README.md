@@ -17,7 +17,7 @@
 ![UI](https://img.shields.io/badge/UI-React%2019%20·%20Vite%207-61DAFB?logo=react&logoColor=white)
 ![DB](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)
 ![Binary](https://img.shields.io/badge/deploy-single%20binary-success)
-![API](https://img.shields.io/badge/API-105%20routes-informational)
+![API](https://img.shields.io/badge/API-252%20routes-informational)
 ![Tests](https://img.shields.io/badge/tests-819%20funcs%20·%20191%20files-brightgreen)
 
 [快速开始](#快速开始) · [功能](#功能矩阵) · [配置](#配置参考) · [架构](#架构) · [API](#api-概览) · [运维](#运维手册) · [排障](#排障手动核对清单) · [文档](#文档索引)
@@ -331,7 +331,7 @@ make build && ./artex-harness -addr :8797 -data ./data-harness
 ```
                      ┌─────────────────────────────────────┐
   浏览器 ──HTTP─────▶ │ /app/      内嵌控制台（go:embed）      │
-                     │ /api/*     JSON API（105 条路由）      │
+                     │ /api/*     JSON API（252 条路由）      │
                      │ /api/agui/agent, /api/harness/stream │ SSE（?since= 续传）
                      └──────────────┬──────────────────────┘
                                     │
@@ -419,7 +419,7 @@ third_party/    vendored agent SDK（带本地补丁）
 
 ## API 概览
 
-**105 条 `/api` 路由，15 个分组。**（2026-11-21 S6-TRIM 两轮之后：之前 311 条，第一轮删了 planner/worker 专属 34 条与管理面 150 条，第二轮删了 Eval/委派读口/旧版报告与审计/旧版对话面/边问边答共 22 条；只动 HTTP 层——路由与 handler，底层表、agent 工具、引擎未动。分组按路径首段计。）约定：
+**252 条 `/api` 路由，34 个分组。**（2026-11-21 S6-RESTORE-MGMT：从 105 条恢复管理面 147 条回 252 条——之前 311 条，第一轮瘦身删了 planner/worker 专属 34 条与管理面 150 条，第二轮删了 Eval/委派读口/旧版报告与审计/旧版对话面/边问边答共 22 条；本次只恢复管理面 147 条，旧版 LLM 全局配置 3 条、exploration 34 条、第二轮 22 条仍删除。只动 HTTP 层——路由与 handler，底层表、agent 工具、引擎未动。分组按路径首段计；总数含 7 条 helper 注册的证据绑定流量口。）约定：
 
 - 鉴权：除 `/api/auth/*` 与 `/api/health` 外都要 `Authorization: Bearer <jwt>`（登录后前端自动带上）。
 - 错误：统一信封 `{"error":"一句话说明"}`，HTTP 状态码表意（400 参数、401 未授权、404 不存在、409 冲突、503 数据源不可用）。
@@ -428,15 +428,34 @@ third_party/    vendored agent SDK（带本地补丁）
 | 分组 | 条数 | 代表端点 |
 |---|---|---|
 | `harness` | 29 | `/api/harness/{ready,capabilities,files,diff,budget,workers,replay,checkpoints,browser}` |
-| `tasks` | 18 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、`PUT /api/tasks/{id}/project` |
-| `exploration` | 19 | `PATCH /api/exploration/findings/{id}`、复测、证据绑定流量口 |
+| `tasks` | 28 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、任务拦截规则、挂/摘资产、归档 |
+| `exploration` | 19 | `PATCH /api/exploration/findings/{id}`、复测、证据绑定流量口（7 条 helper 注册） |
+| `agents` | 19 | `GET /api/agents`、提示词/触发器/可见性管理 |
+| `intercept` | 17 | `GET /api/intercept/pending`、拦截规则/历史/judge |
+| `llm` | 15 | `/api/llm/{profiles,records,models,model-catalog,pool,retry-policy}` |
+| `skills` | 12 | `GET /api/skills`、`POST /api/skills/upload`、技能文件管理 |
 | `conversations` | 10 | `POST /api/conversations/{id}/messages` |
-| `llm` | 7 | `/api/llm/{profiles,records,models,model-catalog}` |
-| `intercept` | 7 | `GET /api/intercept/pending`、`POST /api/intercept/pending/{id}/decide` |
-| `traffic` | 5 | `GET /api/traffic`、`GET /api/traffic/exchange`、`POST /api/traffic/replay` |
-| `auth` | 3 | `POST /api/auth/{init,login}` |
-| `report` | 1 | `GET /api/report/pentest` |
-| `health` `agui` `tokens` `mcp` `skills` `active` | 各 1 | `/api/health`、`/api/agui/agent`、`/api/tokens/daily`、`/api/mcp`、`/api/skills`、`POST /api/active` |
+| `notify` | 8 | `/api/notify/{channels,deliveries,meta}` |
+| `traffic` | 8 | `GET /api/traffic`、流量删除、重放 |
+| `tools` | 7 | `/api/tools`、自定义工具 |
+| `workspace` | 7 | `/api/workspace/{list,read,write,upload,download,mkdir,delete}` |
+| `companies` | 6 | `/api/companies`、范围与重归属 |
+| `task-archives` | 6 | `/api/task-archives`、归档/恢复 |
+| `settings` | 6 | `GET/PUT /api/settings`、git-bash/python 检测、联网搜索测试 |
+| `asset-intercept` | 5 | `/api/asset-intercept/rules` |
+| `mcp` | 5 | `/api/mcp`、删除/刷新/工具列表 |
+| `sync` | 5 | `/api/sync/scopesentry/*` |
+| `assets` | 4 | `/api/assets` |
+| `task-categories` | 4 | `/api/task-categories` |
+| `task-templates` | 4 | `/api/task-templates` |
+| `auth` | 4 | `POST /api/auth/{init,login}`、改密码 |
+| `update` | 4 | `/api/update/{check,apply,rollback,stream}` |
+| `visibility` | 4 | `/api/visibility/*` |
+| `logs` | 3 | `/api/logs`、`/api/logs/history`、`/api/logs/stream` |
+| `tokens` | 3 | `/api/tokens/{daily,conversations,usage}` |
+| `triggers` | 2 | `PATCH/DELETE /api/triggers/{id}` |
+| `commands` | 2 | `/api/commands`、`/api/commands/stats` |
+| `health` `agui` `report` `stats` `active` `gc` | 各 1 | `/api/health`、`/api/agui/agent`、`/api/report/pentest`、`/api/stats`、`POST /api/active`、`POST /api/gc` |
 
 ### 事件流契约（AG-UI）
 

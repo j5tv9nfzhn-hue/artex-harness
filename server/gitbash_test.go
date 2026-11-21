@@ -1,23 +1,79 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	actool "github.com/Autumn-27/norma/tool"
 )
 
+type doFunc func(method, path string, body any) (int, map[string]any)
+
+// newGitBashFixture spins the real mux over PG. Callers that need a database get
+// a skip, matching the rest of this package's PG-dependent tests.
+func newGitBashFixture(t *testing.T) doFunc {
+	t.Helper()
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("database unavailable (%v) — skipping", err)
+	}
+	if m.pg == nil {
+		t.Skip("postgres unavailable — skipping")
+	}
+	td := t.TempDir()
+	s := New(context.Background(), m, td, td, td)
+	h := s.Handler()
+	tok, err := signJWT(s.jwtKey)
+	if err != nil {
+		t.Fatalf("sign jwt: %v", err)
+	}
+	return func(method, path string, body any) (int, map[string]any) {
+		var r *http.Request
+		if body != nil {
+			b, _ := json.Marshal(body)
+			r = httptest.NewRequest(method, path, bytes.NewReader(b))
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		r.Header.Set("Authorization", "Bearer "+tok)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+}
+
+// gitBashStatus 从 GET /api/settings 里取回显的 shell 状态。
+func gitBashStatus(t *testing.T, do doFunc) map[string]any {
+	t.Helper()
+	code, out := do(http.MethodGet, "/api/settings", nil)
+	if code != 200 {
+		t.Fatalf("GET /api/settings=%d", code)
+	}
+	st, ok := out["git_bash"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings 缺少 git_bash 字段: %T", out["git_bash"])
+	}
+	return st
+}
+
 // TestGitBashSettingsPersistence 覆盖 Git Bash 路径配置的核心链路：写入库 →
 // applyGitBash 推给执行层 → shellStatus 回显一致。
 //
-// 2026-11-21 S6-TRIM 改写：GET/PUT /api/settings 已删，原测试走 HTTP 设置面板
-// 的部分随之失效。非法输入的 400 校验与引号清洗都在已删的 handler 里，
-// validateGitBashPath 纯函数也不在了，这两类断言无法保留；保留下来的断言只
-// 覆盖还存在的层（库 + applyGitBash + shellStatus）。
+// 本测试只覆盖还存在的层（库 + applyGitBash + shellStatus）；走 HTTP 设置面板
+// 的非法输入校验与引号清洗由恢复的 TestGitBashDetect / TestValidateGitBashPath
+// 覆盖（GET/PUT /api/settings 与 validateGitBashPath 已随管理面恢复而恢复）。
 func TestGitBashSettingsPersistence(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
@@ -98,18 +154,124 @@ func waitShellPath(want string) string {
 
 // TestGitBashDetect 是"一键检测"端点：带 path 走手动验证，不带走自动探测。
 // 断言只针对两端共有的结构，避免依赖具体机器的安装情况。
+func TestGitBashDetect(t *testing.T) {
+	do := newGitBashFixture(t)
+	t.Cleanup(func() { actool.SetShellPath("") })
 
-// 自动检测。
+	// 自动检测。
+	code, out := do(http.MethodPost, "/api/settings/git-bash/detect", map[string]any{})
+	if code != 200 {
+		t.Fatalf("detect=%d (%v)", code, out["error"])
+	}
+	if _, has := out["detail"]; !has {
+		t.Error("检测结果必须给出可读结论")
+	}
+	if _, has := out["effective"]; !has {
+		t.Error("检测结果必须回显当前生效的 shell")
+	}
+	if _, has := out["candidates"]; !has {
+		t.Error("检测结果必须带候选清单（前端据此提供手动选择）")
+	}
+	if applicable, _ := out["applicable"].(bool); applicable != (runtime.GOOS == "windows") {
+		t.Errorf("applicable=%v 与平台不符", applicable)
+	}
 
-// 手动路径实测：真 bash 应通过并带出版本行。
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash on this host")
+	}
 
-// 不存在的路径：结论必须是不可用并附原因（而不是 500）。
+	// 手动路径实测：真 bash 应通过并带出版本行。
+	code, out = do(http.MethodPost, "/api/settings/git-bash/detect", map[string]any{"path": bashPath})
+	if code != 200 {
+		t.Fatalf("detect path=%d (%v)", code, out["error"])
+	}
+	if ok, _ := out["ok"].(bool); !ok {
+		t.Fatalf("对真实 bash 的探测应成功: %v", out)
+	}
+	if v, _ := out["version"].(string); strings.TrimSpace(v) == "" {
+		t.Error("探测应带回 shell 版本信息")
+	}
 
-// 普通可执行文件也要被拒绝：存在性检查会放行，语法检查不会。
+	// 不存在的路径：结论必须是不可用并附原因（而不是 500）。
+	bad := filepath.Join(t.TempDir(), "ghost.exe")
+	code, out = do(http.MethodPost, "/api/settings/git-bash/detect", map[string]any{"path": bad})
+	if code != 200 {
+		t.Fatalf("探测不存在的路径也应返回结论而非报错: %d", code)
+	}
+	if ok, _ := out["ok"].(bool); ok {
+		t.Fatalf("不存在的 shell 被判为可用: %v", out)
+	}
+	if e, _ := out["error"].(string); e == "" {
+		t.Fatal("探测失败必须附带原因")
+	}
+
+	// 普通可执行文件也要被拒绝：存在性检查会放行，语法检查不会。
+	notAShell := filepath.Join(t.TempDir(), "notashell")
+	if err := writeExecForTest(notAShell); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	_, out = do(http.MethodPost, "/api/settings/git-bash/detect", map[string]any{"path": notAShell})
+	if ok, _ := out["ok"].(bool); ok {
+		t.Fatalf("普通文件被判为可用 shell: %v", out)
+	}
+}
 
 // TestGitBashBrowseIsWindowsOnlyAndPathGuarded 检查浏览端点的安全边界：
 // 非 Windows 一律拒绝；Windows 上只接受不含 .. 的绝对目录。
+func TestGitBashBrowseIsWindowsOnlyAndPathGuarded(t *testing.T) {
+	do := newGitBashFixture(t)
 
-// 相对路径与 .. 越界都要拒绝。
+	code, out := do(http.MethodGet, "/api/settings/git-bash/browse", nil)
+	if runtime.GOOS != "windows" {
+		if code != http.StatusBadRequest {
+			t.Fatalf("非 Windows 浏览应 400，得到 %d (%v)", code, out["error"])
+		}
+		if e, _ := out["error"].(string); !strings.Contains(e, "Windows") {
+			t.Errorf("拒绝理由应说明平台限制: %q", e)
+		}
+		return
+	}
+	if code != 200 {
+		t.Fatalf("browse roots=%d (%v)", code, out["error"])
+	}
+	if roots, ok := out["roots"].([]any); !ok || len(roots) == 0 {
+		t.Fatalf("应返回可用盘符: %v", out)
+	}
+	// 相对路径与 .. 越界都要拒绝。
+	for _, bad := range []string{"Git/bin", `C:\Program Files\..\..\Windows`} {
+		code, _ := do(http.MethodGet, "/api/settings/git-bash/browse?dir="+bad, nil)
+		if code == 200 {
+			t.Errorf("不应接受 dir=%q", bad)
+		}
+	}
+}
 
 // TestValidateGitBashPath 纯函数校验：引号清洗、相对路径拒绝、目录拒绝。
+func TestValidateGitBashPath(t *testing.T) {
+	if p, err := validateGitBashPath("  \"\" "); err != nil || p != "" {
+		t.Errorf("空白应视作清空: p=%q err=%v", p, err)
+	}
+	if _, err := validateGitBashPath(`Git\bin\bash.exe`); err == nil {
+		t.Error("相对路径必须拒绝")
+	}
+	if _, err := validateGitBashPath(t.TempDir()); err == nil {
+		t.Error("目录必须拒绝")
+	}
+	f := filepath.Join(t.TempDir(), "bash.exe")
+	if err := writeExecForTest(f); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	p, err := validateGitBashPath(`"` + f + `"`)
+	if err != nil || p != f {
+		t.Errorf("合法绝对路径应通过并去引号: p=%q err=%v", p, err)
+	}
+	if got := parentDir(`C:\Program Files\Git\bin`); runtime.GOOS == "windows" && got != `C:\Program Files\Git` {
+		t.Errorf("parentDir=%q", got)
+	}
+}
+
+func writeExecForTest(p string) error {
+	// 0o755：让"这个文件不是 shell"判定走语法失败，而不是权限失败。
+	return os.WriteFile(p, []byte("#!/bin/sh\necho not-a-real-shell\n"), 0o755)
+}

@@ -1,10 +1,11 @@
 import { authedFetch, errorText } from "./lib/auth.js";
-import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Table, Text, TextField, Tooltip } from "./ui.jsx";
-import { ArrowLeft, Check, Cpu, FileText, Palette, Pencil, Plug, Plus, RefreshCw, Shield, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Switch, Table, Text, TextField, Tooltip } from "./ui.jsx";
+import { ArrowLeft, ArrowUpCircle, Check, Cpu, FileText, KeyRound, Palette, Pencil, Plug, Plus, RefreshCw, Shield, SlidersHorizontal, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
 
 /* 设置：与 DSH 相同的形态——打开后【左侧栏变成设置导航】，主区显示该分区的表单。
  * 不是弹窗、不是上下堆叠卡片、不是弹窗内的 tab。
- *   左侧 = 分区枚举（供应商 / 插件·MCP / 技能 / 权限 / 会话日志 / 运行环境 / 外观 / 系统）
+ *   左侧 = 分区枚举（供应商 / 插件·MCP / 技能 / 权限 / 会话日志 / 运行环境 /
+ *   运行开关 / 更新 / 账户安全 / 外观）
  *   右侧 = 选中分区的表单
  */
 
@@ -21,6 +22,9 @@ const SECTIONS = [
   { id: "perm", label: "权限与审批", icon: Shield },
   { id: "logs", label: "会话日志", icon: FileText },
   { id: "env", label: "运行环境", icon: Terminal },
+  { id: "run", label: "运行开关", icon: SlidersHorizontal },
+  { id: "update", label: "更新", icon: ArrowUpCircle },
+  { id: "account", label: "账户安全", icon: KeyRound },
   { id: "look", label: "外观", icon: Palette },
 ];
 
@@ -53,14 +57,138 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
   async function activate(id) {
     try { await jfetch("/api/llm/profiles/active", { method: "POST", body: JSON.stringify({ id: Number(id) }) });
-      toast?.("已切换默认模型");
+      toast.success("已切换默认模型");
       const d = await jfetch("/api/llm/profiles"); setProfiles(Array.isArray(d) ? d : d.profiles || []);
-    } catch (e) { toast?.(e.message, true); }
+    } catch (e) { toast.error(e.message); }
   }
   async function remove(p) {
-    try { await jfetch(`/api/llm/profiles/${p.id}`, { method: "DELETE" }); toast?.("已删除");
+    try { await jfetch(`/api/llm/profiles/${p.id}`, { method: "DELETE" }); toast.success("已删除");
       const d = await jfetch("/api/llm/profiles"); setProfiles(Array.isArray(d) ? d : d.profiles || []);
-    } catch (e) { toast?.(e.message, true); }
+    } catch (e) { toast.error(e.message); }
+  }
+
+  // toast 在 App 里是 {success, error, info} 对象（见 toast.jsx），不可当函数调用；
+  // 老代码的 toast?.(msg, isErr) 调用形会在运行时抛错，已全改为 toast.success/error，
+  // 新代码的 say() 只是同一写法的兼容壳。
+  const say = (msg, isErr) => {
+    if (!toast) return;
+    if (isErr) { if (toast.error) toast.error(msg); else if (typeof toast === "function") toast(msg, true); }
+    else { if (toast.success) toast.success(msg); else if (typeof toast === "function") toast(msg); }
+  };
+
+  /* ── 运行开关：GET/PUT /api/settings（扁平键值，见 server/server.go 的
+   *    settingsPayload / putSettings；PUT 只发改动的键，后端按 *bool/*int
+   *    做部分更新）。未读到之前不渲染开关，只显示加载态，不闪现错误值。 */
+  const [runSettings, setRunSettings] = useState(null);
+  const [runErr, setRunErr] = useState("");
+  const [runBusy, setRunBusy] = useState({});
+  const [concLimitDraft, setConcLimitDraft] = useState("");
+  const loadRunSettings = async () => {
+    setRunErr("");
+    try {
+      const d = await jfetch("/api/settings");
+      setRunSettings(d || {});
+      setConcLimitDraft(String(d?.task_concurrency_limit ?? 5));
+    } catch (e) { setRunErr(e.message); }
+  };
+  useEffect(() => {
+    if (section === "run" && runSettings === null && !runErr) loadRunSettings();
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function toggleRun(key, label) {
+    if (!runSettings || runBusy[key]) return;
+    const next = !runSettings[key];
+    const prev = runSettings;
+    setRunBusy((b) => ({ ...b, [key]: true }));
+    setRunSettings((s) => ({ ...s, [key]: next }));
+    try {
+      await jfetch("/api/settings", { method: "PUT", body: JSON.stringify({ [key]: next }) });
+      say(`${label}已${next ? "开启" : "关闭"}`);
+    } catch (e) {
+      setRunSettings(prev);
+      say(`${label}切换失败：${e.message}`, true);
+    } finally {
+      setRunBusy((b) => ({ ...b, [key]: false }));
+    }
+  }
+  async function saveConcLimit() {
+    const n = Number(concLimitDraft);
+    if (!Number.isInteger(n) || n < 1) { say("并发上限需为 ≥ 1 的整数", true); return; }
+    setRunBusy((b) => ({ ...b, task_concurrency_limit: true }));
+    try {
+      await jfetch("/api/settings", { method: "PUT", body: JSON.stringify({ task_concurrency_limit: n }) });
+      setRunSettings((s) => ({ ...s, task_concurrency_limit: n }));
+      say(`任务并发上限已设为 ${n}`);
+    } catch (e) { say(`保存失败：${e.message}`, true); }
+    finally { setRunBusy((b) => ({ ...b, task_concurrency_limit: false })); }
+  }
+
+  /* ── 自更新：GET /api/update/check（?force=1 强制回源）、
+   *    POST /api/update/apply（202 后台下载）、POST /api/update/rollback、
+   *    GET /api/update/stream（SSE 推送 {phase, percent, message, version, error}）。
+   *    应用/回滚成功后服务端退出、由守护脚本拉起（退出码 75），UI 只提示重启。 */
+  const [upd, setUpd] = useState(null);
+  const [updErr, setUpdErr] = useState("");
+  const [updBusy, setUpdBusy] = useState(false);
+  const [updProg, setUpdProg] = useState(null);
+  const [updLines, setUpdLines] = useState([]);
+  async function checkUpdate(force) {
+    setUpdBusy(true); setUpdErr("");
+    try {
+      const d = await jfetch(`/api/update/check${force ? "?force=1" : ""}`);
+      setUpd(d);
+    } catch (e) { setUpdErr(e.message); }
+    finally { setUpdBusy(false); }
+  }
+  useEffect(() => {
+    if (section !== "update") return;
+    checkUpdate(false);
+    // 流用 cookie 鉴权（EventSource 不能设请求头，见 LoginGate）。
+    const es = new EventSource("/api/update/stream");
+    es.onmessage = (e) => {
+      try {
+        const p = JSON.parse(e.data);
+        setUpdProg(p);
+        if (p.message) setUpdLines((ls) => [...ls.slice(-49), `${UPD_PHASE[p.phase] || p.phase || ""} ${p.message}${p.percent >= 0 ? `（${p.percent}%）` : ""}`.trim()]);
+      } catch { /* 忽略非 JSON 帧 */ }
+    };
+    return () => es.close();
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function applyUpdate() {
+    if (!upd?.has_update) return;
+    setUpdBusy(true);
+    try {
+      const d = await jfetch("/api/update/apply", { method: "POST", body: JSON.stringify({}) });
+      setUpdLines((ls) => [...ls, `已提交更新到 ${d?.target || upd.latest}，开始下载…`]);
+      say(`已开始更新到 ${d?.target || upd.latest}，服务即将重启，请稍后刷新`);
+    } catch (e) { say(`应用更新失败：${e.message}`, true); }
+    finally { setUpdBusy(false); }
+  }
+  async function rollbackUpdate() {
+    setUpdBusy(true);
+    try {
+      await jfetch("/api/update/rollback", { method: "POST", body: JSON.stringify({}) });
+      say("已回滚到上一版本，服务即将重启，请稍后刷新");
+    } catch (e) { say(`回滚失败：${e.message}`, true); }
+    finally { setUpdBusy(false); }
+  }
+
+  /* ── 改密码：POST /api/auth/change-password
+   *    {old_password, new_password}（见 d46c53b 的 server/auth.go；
+   *    后端要求新密码至少 8 位、不超过 72 字节）。 */
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  async function changePassword() {
+    if (newPw.length < 8) { say("新密码至少 8 位", true); return; }
+    if (newPw !== newPw2) { say("两次输入的新密码不一致", true); return; }
+    setPwBusy(true);
+    try {
+      await jfetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ old_password: oldPw, new_password: newPw }) });
+      say("密码已修改，下次登录请用新密码");
+      setOldPw(""); setNewPw(""); setNewPw2("");
+    } catch (e) { say(`修改密码失败：${e.message}`, true); }
+    finally { setPwBusy(false); }
   }
 
   const providers = groupProviders(profiles);
@@ -225,6 +353,127 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
               </Flex>
             )}
 
+            {section === "run" && (
+              <Flex direction="column" gap="2">
+                {runErr ? (
+                  <Card size="1"><Text size="1" color="red">{runErr} <Button size="1" variant="soft" onClick={loadRunSettings}>重试</Button></Text></Card>
+                ) : !runSettings ? (
+                  <Text size="1" color="gray">读取中…</Text>
+                ) : (
+                  <>
+                    {RUN_TOGGLES.map((t) => (
+                      <Flex key={t.key} align="center" gap="3" style={{ maxWidth: 640 }}>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Text size="2">{t.label}</Text>
+                          <Text size="1" color="gray" style={{ display: "block", lineHeight: 1.6 }}>{t.hint}</Text>
+                          {t.key === "web_search_enabled" && runSettings.web_search_backend ? (
+                            <Text size="1" color="gray" style={{ display: "block" }}>后端：{runSettings.web_search_backend}</Text>
+                          ) : null}
+                        </Box>
+                        <Switch checked={!!runSettings[t.key]} disabled={!!runBusy[t.key]}
+                                onCheckedChange={() => toggleRun(t.key, t.label)} />
+                      </Flex>
+                    ))}
+                    <Separator size="4" />
+                    <Flex align="center" gap="3" style={{ maxWidth: 640 }}>
+                      <Box style={{ flex: 1, minWidth: 0 }}>
+                        <Text size="2">任务并发上限</Text>
+                        <Text size="1" color="gray" style={{ display: "block", lineHeight: 1.6 }}>
+                          同时运行的任务数上限；仅在「任务并发上限」开启时生效，超限的新任务排队等待。
+                        </Text>
+                      </Box>
+                      <TextField.Root size="2" style={{ width: 72 }} value={concLimitDraft}
+                        disabled={!runSettings.task_concurrency_enabled}
+                        onChange={(e) => setConcLimitDraft(e.target.value)} />
+                      <Button size="1" variant="soft"
+                        disabled={!runSettings.task_concurrency_enabled || !!runBusy.task_concurrency_limit}
+                        onClick={saveConcLimit}>保存</Button>
+                    </Flex>
+                    <Text size="1" color="gray">开关即时保存；流量捕获与 LLM 轮询切换后，后台会重建 agent 以使新状态生效。</Text>
+                  </>
+                )}
+              </Flex>
+            )}
+
+            {section === "update" && (
+              <Flex direction="column" gap="3">
+                {updErr ? (
+                  <Card size="1"><Text size="1" color="red">{updErr} <Button size="1" variant="soft" onClick={() => checkUpdate(true)}>重试</Button></Text></Card>
+                ) : null}
+                {!upd && !updErr ? <Text size="1" color="gray">读取中…</Text> : null}
+                {upd ? (
+                  <>
+                    <Flex direction="column" gap="2">
+                      <Row k="当前版本" v={upd.current || "—"} />
+                      <Row k="最新版本" v={upd.latest || "未查到"} />
+                      <Row k="运行方式" v={upd.mode || "—"} />
+                      <Row k="平台" v={[upd.os, upd.arch].filter(Boolean).join(" / ") || "—"} />
+                      {upd.has_backup ? <Row k="备份" v="有上一版本备份，可回滚" /> : null}
+                      {upd.published_at ? <Row k="发布时间" v={String(upd.published_at).replace("T", " ").slice(0, 19)} /> : null}
+                    </Flex>
+                    {upd.error ? <Text size="1" color="red">检查失败：{upd.error}</Text> : null}
+                    {upd.boot_notice ? <Text size="1" color="amber" style={{ lineHeight: 1.6 }}>{upd.boot_notice}</Text> : null}
+                    {upd.rolled_back ? <Text size="1" color="amber">上次启动检测到回滚。</Text> : null}
+                    {upd.comparable === false && upd.reason ? <Text size="1" color="gray" style={{ lineHeight: 1.6 }}>{upd.reason}</Text> : null}
+                    {upd.has_update ? (
+                      <Flex align="center" gap="2">
+                        <Badge size="1" variant="soft" color="green">有新版本 {upd.latest}</Badge>
+                        {upd.asset_available === false ? <Text size="1" color="amber">当前平台暂无对应安装包</Text> : null}
+                      </Flex>
+                    ) : upd.latest ? (
+                      <Badge size="1" variant="soft" color="gray">已是最新版本</Badge>
+                    ) : null}
+                    {upd.notes ? (
+                      <Text size="1" color="gray" style={{ lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                        {String(upd.notes).slice(0, 500)}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : null}
+                <Flex gap="2" wrap="wrap">
+                  <Button size="2" variant="soft" onClick={() => checkUpdate(true)} disabled={updBusy}>
+                    <RefreshCw size={13} className={updBusy ? "spin" : ""} /> 检查更新
+                  </Button>
+                  <Button size="2" disabled={!upd?.has_update || updBusy || updProg?.phase === "downloading"}
+                          onClick={applyUpdate}>应用更新</Button>
+                  <Button size="2" variant="soft" color="gray" disabled={!upd?.has_backup || updBusy}
+                          onClick={rollbackUpdate}>回滚到上一版本</Button>
+                </Flex>
+                <Text size="1" color="gray">应用更新或回滚后服务将重启，请稍后刷新页面。</Text>
+                {updProg && updProg.phase !== "idle" ? (
+                  <Flex align="center" gap="2">
+                    <Text size="2" weight="medium">{UPD_PHASE[updProg.phase] || updProg.phase}</Text>
+                    {updProg.percent >= 0 ? <Text size="1" color="gray">{updProg.percent}%</Text> : null}
+                    {updProg.version ? <Code size="1">{updProg.version}</Code> : null}
+                    {updProg.error ? <Text size="1" color="red">{updProg.error}</Text> : null}
+                  </Flex>
+                ) : (
+                  <Text size="1" color="gray">当前无进行中的更新。</Text>
+                )}
+                {updLines.length ? <pre className="replay-md">{updLines.join("\n")}</pre> : null}
+              </Flex>
+            )}
+
+            {section === "account" && (
+              <Flex direction="column" gap="3" style={{ maxWidth: 420 }}>
+                <Field label="当前密码">
+                  <TextField.Root type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" />
+                </Field>
+                <Field label="新密码">
+                  <TextField.Root type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password" placeholder="至少 8 位" />
+                </Field>
+                <Field label="确认新密码">
+                  <TextField.Root type="password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} autoComplete="new-password" />
+                </Field>
+                <Flex gap="2">
+                  <Button size="2" disabled={pwBusy || !oldPw || !newPw} onClick={changePassword}>
+                    {pwBusy ? "修改中…" : "修改密码"}
+                  </Button>
+                </Flex>
+                <Text size="1" color="gray">新密码至少 8 位、不超过 72 字节；修改成功后当前会话不受影响，下次登录请用新密码。</Text>
+              </Flex>
+            )}
+
             {section === "look" && (
               <Flex align="center" gap="3">
                 <Text size="2">主题</Text>
@@ -245,23 +494,23 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
           for (const m of b.models) {
             await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, name: m.model, format: b.format, base_url: b.base_url, proxy: b.proxy, api_key: b.api_key }) });
           }
-          toast?.(b.models.length > 1 ? `已添加供应商与 ${b.models.length} 个模型` : "已添加供应商");
+          toast.success(b.models.length > 1 ? `已添加供应商与 ${b.models.length} 个模型` : "已添加供应商");
           setAddProvider(false); reloadProfiles();
-        } catch (e) { toast?.(e.message, true); } }} />
+        } catch (e) { toast.error(e.message); } }} />
       <ProviderDialog open={!!addModelFor} seed={addModelFor} onClose={() => setAddModelFor(null)}
         onSave={async (b) => { try {
           for (const m of b.models) {
             await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, name: m.model, format: addModelFor.format, base_url: addModelFor.base_url, proxy: addModelFor.proxy, api_key: "" }) });
           }
-          toast?.(`已添加 ${b.models.length} 个模型`); setAddModelFor(null); reloadProfiles();
-        } catch (e) { toast?.(e.message, true); } }} />
+          toast.success(`已添加 ${b.models.length} 个模型`); setAddModelFor(null); reloadProfiles();
+        } catch (e) { toast.error(e.message); } }} />
       <EditProviderDialog pv={editProvider} onClose={() => setEditProvider(null)}
         onSave={async (patch) => { try {
           for (const m of editProvider.models) await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify({ ...m, api_key: patch.api_key || "", base_url: patch.base_url, proxy: patch.proxy }) });
-          toast?.("供应商已更新"); setEditProvider(null); reloadProfiles();
-        } catch (e) { toast?.(e.message, true); } }} />
+          toast.success("供应商已更新"); setEditProvider(null); reloadProfiles();
+        } catch (e) { toast.error(e.message); } }} />
       <EditModelDialog model={editModel} onClose={() => setEditModel(null)}
-        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast?.("模型已更新"); setEditModel(null); reloadProfiles(); } catch (e) { toast?.(e.message, true); } }} />
+        onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast.success("模型已更新"); setEditModel(null); reloadProfiles(); } catch (e) { toast.error(e.message); } }} />
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -273,6 +522,21 @@ const Row = ({ k, v }) => (
     <Text size="1">{v}</Text>
   </Flex>
 );
+
+/* 运行开关的键名与 settingsPayload / putSettings 一致（bool，除并发上限为 int）。
+ * 顺序即界面顺序：前 5 个是任务要求的必接开关，后两个同属同一扁平设置，顺手接上。 */
+const RUN_TOGGLES = [
+  { key: "traffic_capture", label: "流量捕获", hint: "开启后 agent 流量经录制代理，可绑定到发现做证据；关闭后 agent 不再挂代理、不再有流量工具。" },
+  { key: "agent_traffic_binding", label: "Agent 自动绑定流量", hint: "任务结束时自动把录到的流量绑定到本次任务的发现。" },
+  { key: "llm_pool_enabled", label: "LLM 轮询（故障转移）", hint: "当前模型配置不可用时，自动切到下一个已配置的模型。" },
+  { key: "task_concurrency_enabled", label: "任务并发上限", hint: "开启后同时运行的任务数受上限约束，超限的新任务排队等待。" },
+  { key: "web_search_enabled", label: "联网搜索", hint: "允许 agent 使用联网搜索工具；后端为 web_search_backend。" },
+  { key: "llm_record", label: "LLM 调用录制", hint: "记录每次 LLM 调用的输入输出 token，见「会话日志」分区。" },
+  { key: "notify_enabled", label: "漏洞 IM 推送", hint: "新发现按配置的渠道推送；渠道本身在 /api/notify/* 管理，这里只开关总闸。" },
+];
+
+/* 自更新 SSE 的 phase 取值（见 selfupdate/stage.go）。 */
+const UPD_PHASE = { idle: "空闲", downloading: "下载中", verifying: "校验中", extracting: "解压中", staged: "已暂存", failed: "失败" };
 
 const FORMATS = ["openai", "anthropic", "openai-responses"];
 const fmtLabel = (f) => ({ openai: "OpenAI 兼容", anthropic: "Anthropic", "openai-responses": "OpenAI Responses" }[f] || f || "—");

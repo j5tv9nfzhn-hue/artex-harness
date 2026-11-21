@@ -341,6 +341,68 @@ Julie 2026-11-21 17:07 CST 确认两件一起做。起因：构建产物检查�
 
 验证：隔离实测（测试库 `artex_harness_test`、端口 18997/18998、scratch 数据目录，未碰现网服务端）：有 DISPLAY 时假 `xdg-open` 被调到 `http://127.0.0.1:18997/`，日志 `[browser] 已在浏览器中打开控制台 http://127.0.0.1:18997/`；无 DISPLAY 时服务正常、静默跳过；`-open-browser=false` 时有 DISPLAY 也不打开。三次实测的横幅均为 `artex-harness`，监听日志为 `artex-harness dev backend listening`，`/api/health` 返回 `{"ok":true,"service":"artex-harness","version":"dev"}`。未跑 `make test-db` 全量（本轮只动启动路径与两处字符串，server 包的改动是一行常量）。
 
+### 3.21 恢复管理面路由 147 条 + 前端接线（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 17:25 CST 确认第一批与第二批一起恢复：把瘦身第一轮删掉的管理面 150 条路由加回来，扣除已被 profiles 体系取代的旧版 LLM 全局配置 3 条（GET/POST `/api/llm`、POST `/api/llm/test`），实恢复 **147 条**。详见 `docs/stages/S6-RESTORE-MGMT.md`。
+
+方法：被删代码从 git 历史取回——**取回来源是 d46c53b（瘦身前的父提交），不是 b4dccfe**：b4dccfe 已是瘦身第一轮之后的状态（127 条路由），其 server.go 只有 109 条注册；d46c53b 的 server.go 有 290 条注册，7 个整文件删除的文件也都在 d46c53b 存在、b4dccfe 缺失。恢复前逐条核对：147 条全部在 d46c53b 存在、HEAD 缺失；d46c53b→HEAD 的 server.go 删除总数 195 条 = 147（本次恢复）+ 34（exploration）+ 3（旧版 LLM）+ 11（第二轮），账对得上。工作由 7 个工人按文件并行做（server_mgmt / 整文件四组 / 通知+同步 / 拦截三组 / 资产+归档+工作区+自定义工具 / server.go+更新+认证+命令+git-bash / 前端），协调员中央核对、验证、写文档。只动 HTTP 层（路由 + handler），不动 db 表、agent 工具、引擎逻辑。
+
+| 改动 | 内容 |
+|---|---|
+| Agents 配置管理 + triggers（21 条，`server/server_mgmt.go`、`server/triggers.go`） | agent 增删改、提示词/版本/预览/重置、wrapup 与任务超时 wrapup、变量、可见性、触发器 CRUD；另恢复 helper `agentByKey`、`cleanStrs`、`rewriteSkillFrontmatter`、`skillNameFromFrontmatter`、`readZipEntry`、`globalPromptVars`、`withGlobalVars`、`validateTemplate`、`renderPrompt`、`templateFields` 与 import。`server_mgmt.go` 恢复后与 d46c53b 逐字节相同（HEAD 保留代码与 d46 保留代码一致，无后续修复可供回滚）。 |
+| 技能管理（10 条，`server/server_mgmt.go`） | 技能上传/删除/文件读写/元数据/用量/缺失检查；列表与新建此前已接，本次补文件级管理。恢复测试 `skill_upload_test.go`（5 个上传测试 + `TestSkillNameFromFrontmatterQuoted`）与 `prompt_vars_test.go`（2 个 `withGlobalVars` 测试）。 |
+| 通知渠道（8 条，`server/notify_api.go` 整文件取回） | 渠道增删改测、投递记录、投递重试、meta；推送引擎 `server/notifier.go` 本就未删。恢复测试 `notify_api_test.go` 的 14 个接口测试（HEAD 保留的 5 个引擎纯函数测试原样保留）。测试消息文案顺手改为 artex-harness（3.20 身份一致）。 |
+| 任务归档（7 条，`server/task_archives.go`） | 归档列表/单条/恢复/批量删除/批量恢复/批量归档；`queueTaskArchive` 链本就保留。 |
+| 工作区文件操作（7 条，`server/workspace.go`） | list/read/write/mkdir/delete/download/upload；`saveUpload` 本就保留。 |
+| 自定义工具（7 条，`server/customtool.go`） | tools 列表/修改/自定义工具 CRUD/测试/重置；引擎加载逻辑本就保留。 |
+| 任务分类（6 条，`server/task_categories.go` 整文件取回） | 分类的增删改 + 批量改分类 + 单任务改分类。 |
+| 公司（6 条，`server/assets.go`） | 公司的增删改查 + 范围 + 重归属；另恢复 `companyStore()`、`companyScopeInputs`、`decodeCompanyMutationRequest()`。恢复测试 `assets_scope_test.go`（7 个）。 |
+| 设置（6 条，`server/server.go`、`server/gitbash.go`） | GET/PUT `/api/settings`（`getSettings`/`putSettings` 函数体在 HEAD 只剩孤儿注释，已从 d46 恢复；键以 HEAD `settingsPayload` 为准，含 notify/noa/constraints 等新增键）、git-bash 浏览/检测、python 检测、web 搜索测试。恢复测试 `gitbash_test.go` 的 3 个测试（另补漏掉的 `doFunc` 类型声明）。 |
+| 拦截 judge + 历史（6 条，`server/intercept.go`） | judge 配置/用量 + 拦截历史/详情/执行记录；恢复 `interceptRuleReq`、`validateInterceptRuleReq`。 |
+| 任务级拦截规则（5 条，`server/task_intercept.go`）、资产拦截规则（5 条，`server/asset_intercept.go`） | 两组规则的增删改查 + 开关；`taskInterceptRuleReq`/`buildTaskInterceptRules` 与 `assetInterceptRuleReq` 本就保留。 |
+| ScopeSentry 同步（5 条，`server/sync_scopesentry.go` 整文件取回） | 同步状态/数据源/项目/任务/触发同步；唯一适配：`syncSSRun` 调的 `s.companyStore()` 在 HEAD 已不存在，改为直接用 db 层 `pg.Companies()`（与 `chat_mentions.go`、`manager.go` 同款用法）。 |
+| 日志 + 统计（4 条，`server/server.go`） | `GET /api/logs`、`/api/logs/history`、`/api/logs/stream`、`/api/stats`。 |
+| 资产（4 条，`server/assets.go`） | 资产列表/计数/新增/删除。 |
+| LLM 池与重试策略（4 条，`server/server_mgmt.go`） | 模型池状态/重置 + 重试策略读/写；策略本身由服务端启动时从 db 读。 |
+| LLM 记录明细（3 条，`server/commands.go`） | 记录的按任务/按模型/单条；恢复 `pgDeleteLLMRecords` 等 7 个 handler（含命令统计 2 条）。 |
+| MCP 单个管理（3 条，`server/server_mgmt.go`） | MCP 服务的删除/工具列表/刷新；另恢复 `POST /api/mcp`（新建，属“其它”组）。 |
+| 流量删除（3 条，`server/server.go`） | 流量全删/按 host 删/全清。 |
+| 任务模板（4 条，`server/task_templates.go` 整文件取回） | 模板的增删改查；恢复测试 `TestTaskTemplateHTTPCRUD`。 |
+| 可见性（4 条，`server/server_mgmt.go`） | 资源/技能的可见性查询与开关。 |
+| 拦截规则写口（4 条，`server/intercept.go`） | 全局规则的新建/修改/删除/开关；SettingsView 的规则区此前只读。 |
+| Token 统计（2 条，`server/commands.go`） | 按会话 / 全局的 token 用量统计（`conversationTokens` 在 `server/server.go`、`pgUsageStats` 在 `commands.go`）。另：`tokenStats` handler（`GET /api/exploration/tokens`）为让恢复的测试 `TestTokenStatsWithoutTaskReturnsStableShape` 能编译而一并恢复，但**未注册路由**——该路由属 exploration 34 条，不在本次范围；测试本身无库通过。 |
+| 命令统计（2 条，`server/commands.go`） | 工具调用列表与按工具聚合统计。 |
+| 其它（7 条） | 改密码（`POST /api/auth/change-password`，`server/auth.go`）、GC（`POST /api/gc`，`server/server.go`）、任务挂/摘资产 2 条（`server/task_assets.go` 整文件取回）、删除 LLM 记录 1 条（`commands.go`）、新建 MCP 1 条（`server_mgmt.go`）、新建技能 1 条（`server_mgmt.go`）。另：整文件取回的 `task_assets.go` 还含清单外的 `taskIntentAssets`（`GET /api/tasks/{id}/intent-assets`，属 exploration 34 条），已由协调员删掉，未注册。 |
+| 前端接线（`web/src/SettingsView.jsx`、`web/src/System.jsx`） | 设置新增 3 个分区：运行开关（GET/PUT `/api/settings`，7 个开关 + 并发上限数字框：流量捕获、Agent 自动绑定流量、LLM 轮询、任务并发、联网搜索、LLM 录制、推送总闸）、更新（update/check + apply + rollback + stream，应用后提示服务将重启）、账户安全（改密码）；系统侧栏新增「日志」签（`/api/logs`、`/api/logs/history`、`/api/stats`）。其余恢复的路由只恢复后端，UI 待接（见阶段文档清单）。`npm run build` 通过，新 bundle `index-BxsVq5m1.js`，旧 `index-BwDk6e9j.js` 已删。 |
+
+未动：exploration 34 条（含 `goals_api.go` 整文件、`taskIntentAssets`、interventions、constraints、deepenFinding）、旧版 LLM 全局配置 3 条、第二轮删的 22 条（U5/U6/U8/U11/U14）、UNCERTAIN 剩余 40 条、KEEP 的 65 条；现网服务端、靶场、隧道、任务 #1 的数据；未 commit、未 push、未跑 LLM 真实任务。
+
+测试：`go vet ./...`、`go build ./...` 通过；`go test ./cmd/... ./config/... -count=1` 通过。恢复中修了两处装配问题：`gitbash_test.go` 漏掉的 `doFunc` 类型声明（vet 报错 `undefined: doFunc`，补回后通过）；`triggers.go` 的本地 helper `agentByPathKey` 与 W1 恢复的 `agentByKey` 函数体逐字相同，已由协调员统一为 `agentByKey`、删掉重复。无库 `go test ./... -count=1`（日志 `~/workspace/.tmp/test-restore-nodb.log`）exit 1，失败 30 个——11 个已知需真库 + 5 个 punchlist + 14 个恢复的通知接口测试（均在夹具处报“未找到数据库配置”，与已知 16 个同类）；其余 28 个包全绿。**无库基线从此是 30 个失败，不是 16 个。**恢复的纯函数测试无库通过（5 个技能上传、5 个 releaseCache、2 个 withGlobalVars、1 个公司 scope 输入、1 个 tokenStats 形状），需库的恢复测试无库时干净跳过（gitbash 3 个、任务模板 1 个、公司 6 个）。
+
+验证：路由数核对——`grep -c mux.HandleFunc server/server.go` 由 98 变 **245**（+147），helper 7 条不动，总计 **252 条**；新增集合与 147 条清单逐条比对零缺失、零多余；旧版 LLM、exploration tokens、intent-assets、第二轮路由均不在注册表内。隔离实测（重建后的测试库 `artex_harness_test`，端口 18997/18998，scratch 数据目录）：`GET /api/settings` 返回 22 个键；`PUT /api/settings` 改 `traffic_capture=true` 后 GET 回显为 true；`GET /api/update/check` 200（仓库尚未发布正式版本，如实报错）；`GET /api/update/stream` 正常出 SSE（`phase: idle`）；`GET /api/stats`、`/api/logs`、`/api/logs/history`、`/api/notify/channels`、`GET /api/agents` 均 200；`POST /api/auth/change-password` 返回 `{"ok":true}` 且新密码可登录。另对恢复的测试做了一次定向真库子集（非全量 `make test-db`）：`go test ./server/ -run 'TestNotify|TestGitBash|TestTaskTemplate|TestCompany|TestDeleteCompany|TestListAssets|TestCreateCompany|TestUploadSkill|TestReleaseCache|TestTokenStats|TestWithGlobalVars' -count=1` 在真库下 **42 通过、0 失败**（日志 `~/workspace/.tmp/test-restore-db.log`）。`make test-db` 全量仍未跑（按 Julie 此前决定）。
+
+环境注记：验证期间发现虚拟机重启后 PG 集群虽在、但角色与库已被清空（只剩 postgres 角色与系统库，现网服务端进程亦不在）；为做定向真库验证重建了测试角色与 `artex_harness_test` 空库（`CREATE ROLE harness_test … CREATEDB` + `CREATE DATABASE artex_harness_test OWNER harness_test`），schema 由服务端/测试夹具自动迁移；未动真实库（`artex_harness` 本就不存在了，未尝试恢复）。
+
+### 3.22 前后端接线核对 + toast 调用形修复（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 18:08 CST 指示：不再重跑整轮真实任务，只确保前后端接线完成、前端没有问题。做法：静态抽取 `web/src/` 全部 `/api/` 调用（76 条 distinct 路径，含模板字面量动态段）逐条对照后端路由表，6 条初筛“缺失”逐一核对均为抽取伪影（`${qs}` 查询串、`encodeURIComponent` 截断、文案里的 `/api/notify` 字样、`/api/update/check${force}` 模板后缀）；`GET /api/harness/budget/{id}` 等动态段路由均存在。结论：**前端调用的接口后端全部有注册，零缺口**。
+
+核对中发现一个真前端 bug：`toast` 在 App 里是 `{success, error, info}` 对象（`web/src/toast.jsx`，不可当函数调用），但 `SettingsView.jsx` 与 `Sidebar.jsx` 共 21 处用 `toast?.(msg)` / `toast?.(msg, true)` 调用形，运行时抛 `TypeError: toast is not a function`——命中路径包括切换默认模型、删除模型、新增/更新供应商与模型、审批允许/拒绝、任务置顶/归档/删除/重命名；抛错点在 await 成功之后，导致提示不显示、后续刷新（如 `reloadProfiles()`）被跳过。已全改为 `toast.success(msg)` / `toast.error(msg)`（其余文件本来就用正确调用形），`SettingsView.jsx` 的 `say()` 兼容壳保留，过期注释同步改写。
+
+验证：`npm run build` 通过，新 bundle `index-B-Je1v-K.js`，`/app/` 下发验证已含新 bundle；隔离冒烟（新建空库 `artex_harness_smoke`，端口 18997/18998，scratch 数据目录，用后已删库）：`/api/health` 返回 `{"ok":true,"service":"artex-harness"}`，`/` 302 到 `/app/`；18 个重点接口（含 settings、update/check、stats、logs、notify/channels、agents、tasks、findings/stats、tokens/daily、llm/profiles、mcp、skills、intercept、traffic、harness/ready、harness/capabilities）用初始化后的 token 测全部 200；`PUT /api/settings` 改 `traffic_capture=true` 回显 true（后改回 false）；`GET /api/update/stream` 正常出 SSE（`phase: idle`）；`POST /api/auth/change-password` 返回 `{"ok":true}` 且新密码可登录。未跑 `make test-db` 全量；未 commit、未 push。
+
+遗留：约 140 条恢复路由无前端入口（后端已恢复，UI 待接，清单见 3.21 与 `docs/stages/S6-RESTORE-MGMT.md`）；自更新 `check` 如实报仓库尚未发布正式版本，一键更新要真正可用需先发布带二进制资产的 Release；自动更新仍没有。
+
+### 3.23 发布包命名断裂修复（云端 CI 三连败）
+
+**发现**：2026-11-21 18:19，Julie 让检查云端 CI（产物 artifact 名为 `artex-CL`）最后打包的压缩包名字。结论：名字是错的，且已经导致 CI 连续失败三次。
+
+- 证据：`gh run list` 显示 2026-11-21 三次推送到 main 的 CI 全部 failure（run 44888762798、44887699179、44874463134，分别对应 c86c09f、ce14587、b4dccfe）；此前 11-17 为 success。失败日志：六个编译任务（linux/darwin/windows × amd64/arm64）全灭在「校验归档与命名」，`##[error]缺少产物 ACTION/artex-0.0.0-cl.22-c86c09f-windows-amd64.zip`；finalize 与 release 被跳过。
+- 根因：隔离 hotfix（3.11）把二进制改名为 artex-harness 时，只改了 build.sh 的包名（`artex-harness-<version>-<os>-<arch>.zip`），漏了四处仍期望旧名的校验/消费方：① CI plan.sh 生成的矩阵包名与更新器 `AssetName` 均为 `artex-<version>-<os>-<arch>.zip`（另有 `TestAssetNameMatchesBuildScript` 把该命名钉死为 build.sh 的约定）；② 更新器 `extractBinary` 按基名找包内 `artex`/`artex.exe`，而包内实际是 `artex-harness`；③ assemble.sh 内容校验要求包内 `${root}/artex`（windows 为 `artex.exe`）；④ ci.yml linux/amd64 冒烟测试跑 `$tmp/<包名>/artex -h`。本地实测复现：`ARTEX_PACKAGE=1 ./build.sh --target linux/amd64` 产出 `artex-harness-0.3.3-linux-amd64.zip`，而 CI 期望 `artex-0.3.3-linux-amd64.zip`。
+- 修复（以 CI 与更新器已达成一致的 `artex-…zip` 为准，包名改回；包内二进制保持 artex-harness）：`build.sh` 的 `package_name` 改回 `artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}`（包内目录随之变为 `artex-<version>-<os>-<arch>/`，与 CI 期望一致；构建输出目录 `dist/artex-harness-<os>-<arch>/` 不动）；`selfupdate/stage.go` 的 `extractBinary` 改找 `artex-harness`/`artex-harness.exe`；`.github/scripts/assemble.sh` 包内校验改为 `artex-harness`/`artex-harness.exe`；`.github/workflows/ci.yml` 冒烟测试路径改为 `…/artex-harness`；`.github/scripts/plan.sh` 提示文案、`.github/CI.md` 约定、测试 `TestExtractBinaryFindsNestedEntry` 的 fixture 与 `selfupdate.go` 注释同步改名；`docs/stages/S6-HOTFIX-ISOLATION.md` 发布包一行订正并附订正注。
+- 验证：本地重新打包产出 `artex-0.3.3-linux-amd64.zip`，CI 三项校验逐项模拟通过（文件存在、`unzip -tq`、包内含 `artex-harness`/`start.sh`/`skills/`/`config.example.json`、冒烟 `-h` 含 `-addr`）；`gofmt`、`go vet ./selfupdate/...`、`go test ./selfupdate/...`、`go build ./...` 通过。
+- 注意：存档名刻意保持 `artex-…zip` 是为了与 CI、更新器一致；若日后想把存档名也改成 `artex-harness-…zip`，须同步改 plan.sh（NAME_RE 与矩阵包名）、AssetName、github_test.go fixture、assemble.sh、ci.yml 冒烟路径，缺一不可。本次推送触发的新 CI 运行是否变绿，见推送后核查；仓库至今未发布过 Release，一键更新仍需先发 Release 才能真正可用。
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：
