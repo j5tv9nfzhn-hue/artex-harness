@@ -280,6 +280,7 @@ make build && ./artex-harness -addr :8797 -data ./data-harness
 | `-addr` | `:8797` | HTTP 监听地址 |
 | `-data` | 可执行文件同级 `data-harness/` | 数据目录（工作区、transcript、截图、证据） |
 | `-proxy` | `127.0.0.1:8798` | 流量记录代理；传 `""` 关闭 |
+| `-open-browser` | `true` | 启动后在默认浏览器打开控制台；无图形会话时静默跳过，传 `false` 关闭 |
 
 ### 环境变量
 

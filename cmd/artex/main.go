@@ -1,4 +1,4 @@
-// Command artex runs the ARTEX backend: the dual SQLite graph stores,
+// Command artex-harness runs the artex-harness backend: the dual SQLite graph stores,
 // the event-driven exploration engine, and the JSON HTTP API consumed by the
 // shadcn/ui frontend.
 package main
@@ -29,11 +29,7 @@ import (
 var version = "dev"
 
 const banner = `
-    _    ____ _____ _______  __
-   / \  |  _ \_   _| ____\ \/ /
-  / _ \ | |_) || | |  _|  \  /
- / ___ \|  _ < | | | |___ /  \
-/_/   \_\_| \_\|_| |_____/_/\_\
+artex-harness
 `
 
 // printBanner writes the startup banner + version/runtime info to stdout.
@@ -54,9 +50,10 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8797", "HTTP listen address")
-		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data-harness"), "data directory (default: data-harness/ next to the executable)")
-		proxy   = flag.String("proxy", "127.0.0.1:8798", "traffic recording proxy address (empty to disable)")
+		addr        = flag.String("addr", ":8797", "HTTP listen address")
+		dataDir     = flag.String("data", filepath.Join(config.BaseDir(), "data-harness"), "data directory (default: data-harness/ next to the executable)")
+		proxy       = flag.String("proxy", "127.0.0.1:8798", "traffic recording proxy address (empty to disable)")
+		openBrowser = flag.Bool("open-browser", true, "open the web console in the default browser after startup (skipped without a graphical session)")
 	)
 	flag.Parse()
 
@@ -125,11 +122,14 @@ func run() int {
 	}
 
 	go func() {
-		log.Printf("ARTEX %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
+		log.Printf("artex-harness %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
 		}
 	}()
+
+	// 控制台就绪后在默认浏览器里打开它（有图形会话时；无头/容器里静默跳过）。
+	maybeOpenBrowser(*addr, *openBrowser)
 
 	// Two ways out: a signal (normal stop → exit 0, the start script stops looping)
 	// or a staged update / rollback (→ exit 75, the script relaunches us and the

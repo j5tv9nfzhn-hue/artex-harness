@@ -478,7 +478,7 @@ export const useAnchorRect = () => {
 export { useMemo, useId };
 
 /* ── BrandMark ───────────────────────────────────────────────────────────────
- * ARTEX's own mark — the interlocking rings from `web/public/logo.png`, cut to
+ * artex-harness's own mark — the interlocking rings from `web/public/logo.png`, cut to
  * the glyph and shipped as `web/public/artex-mark.png`.
  *
  * Why not the reference project's starburst: that mark is Anthropic's brand

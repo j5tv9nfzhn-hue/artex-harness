@@ -140,7 +140,7 @@ export default function Sidebar({
 
   return (
     <aside className={"rail" + (collapsed ? " collapsed" : "")}>
-      {/* Brand row: the ARTEX mark + serif wordmark. Collapsed keeps only the mark. */}
+      {/* Brand row: the artex-harness mark + serif wordmark. Collapsed keeps only the mark. */}
       <div className="rail-head">
         {collapsed ? (
           <Tooltip content="展开侧栏" side="right">
@@ -339,7 +339,7 @@ export default function Sidebar({
               <Avatar fallback="A" />
             </button>
             <Box style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.2 }}>ARTEX</div>
+              <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.2 }}>artex-harness</div>
               <div style={{ fontSize: 10, color: "var(--c-ink-4)", lineHeight: 1.3 }}>
                 {version ? "v" + version : "本地"}
               </div>

@@ -325,6 +325,22 @@ Julie 2026-11-21 16:43 CST 确认修这批小问题。详见 `docs/stages/S6-FIX
 
 验证：无库 `go test ./... -count=1`（日志 `~/workspace/.tmp/test-punchlist-nodb.log`）exit 1，失败 16 个——11 个是已知的需真库 server 测试（finding_traffic 5、finding_workflow 3、stage2_http 3），另 5 个就是新增的 punchlist 测试（它们用 `trafficEvidenceServer` 夹具，本来就需要 PG，在真库下已全绿）；其余 29 个包全绿。**无库基线从此是 16 个失败，不是 11 个。**`make test-db` 全量与测试二进制端到端实测按 Julie 2026-11-21 16:58 CST 决定跳过、未做。
 
+### 3.20 自称 artex-harness + 启动自动打开控制台（2026-11-21，本仓库新增，非上游）
+
+Julie 2026-11-21 17:07 CST 确认两件一起做。起因：构建产物检查发现可执行文件已是 `artex-harness`（`Makefile` 的 `BIN`、`build.sh` 产出、`start.sh` 的 `BIN=./artex-harness`），默认端口已是 `:8797` / `127.0.0.1:8798`（Go 代码里无 8787/8788），但程序自己在日志、接口与控制台里仍自称 ARTEX，且启动后不自动打开 web UI。详见 `docs/stages/S6-IDENTITY-BROWSER.md`。
+
+| 改动 | 内容 |
+|---|---|
+| 自称改为 artex-harness（`cmd/artex/main.go`、`server/server.go`） | 启动横幅的 ASCII ARTEX 图改为纯文本 `artex-harness`；监听日志改为 `artex-harness %s backend listening on %s`；包注释与 `server.go` 的包注释同步改写。`GET /api/health` 的 `service` 字段由 `"artex"` 改为 `"artex-harness"`。 |
+| 控制台品牌字（`web/src/Sidebar.jsx`、`SettingsView.jsx`、`ui.jsx`） | 侧栏品牌行 `ARTEX` 改为 `artex-harness`；设置页环境区服务名的兜底值同步改为 `"artex-harness"`；`ui.jsx` 的 logo 注释同步改写。`npm run build` 后 console-app 产物已更新（新 bundle `index-BwDk6e9j.js`，旧 `index-BQKvlJP5.js` 已删）。 |
+| 启动自动打开控制台（`cmd/artex/browser.go`，新增；`main.go` 接线） | 新增 `-open-browser` flag（默认 true，`-open-browser=false` 关闭）。监听启动后在后台等 `/api/health` 有响应（每 200ms 轮询，最多 5 秒），再按操作系统打开控制台 URL（Linux `xdg-open`、macOS `open`、Windows `rundll32 url.dll,FileProtocolHandler`）。URL 由 `-addr` 导出（`:8797` / `0.0.0.0:8797` / `[::]:8797` 一律变 `http://127.0.0.1:8797/`，真实主机名保留，IPv6 回环包方括号）。无图形会话时静默跳过（Linux 需 `DISPLAY` 或 `WAYLAND_DISPLAY`，macOS / Windows 直接尝试）；打开失败只记一条 `[browser]` 日志并提示手动访问，永不影响启动。 |
+
+未动：Go module 路径（仍 `github.com/Autumn-27/artex`，见 §4）；管理员用户名仍固定 `ARTEX`（功能标识，改它会断登录）；默认端口 `:8797` / `127.0.0.1:8798` 与数据目录 `data-harness` 不变；未 commit、未 push、未碰现网服务端与任务 #1 的数据。
+
+测试：新增 `cmd/artex/browser_test.go`（`consoleURL` 8 个用例、`canOpenBrowser` 的 DISPLAY/WAYLAND_DISPLAY 组合、`openBrowserCmd` 按操作系统选命令）；`go vet ./...`、`go build ./...`、`go test ./cmd/... -count=1` 通过；`npm run build` 通过。
+
+验证：隔离实测（测试库 `artex_harness_test`、端口 18997/18998、scratch 数据目录，未碰现网服务端）：有 DISPLAY 时假 `xdg-open` 被调到 `http://127.0.0.1:18997/`，日志 `[browser] 已在浏览器中打开控制台 http://127.0.0.1:18997/`；无 DISPLAY 时服务正常、静默跳过；`-open-browser=false` 时有 DISPLAY 也不打开。三次实测的横幅均为 `artex-harness`，监听日志为 `artex-harness dev backend listening`，`/api/health` 返回 `{"ok":true,"service":"artex-harness","version":"dev"}`。未跑 `make test-db` 全量（本轮只动启动路径与两处字符串，server 包的改动是一行常量）。
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：

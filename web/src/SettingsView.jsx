@@ -215,7 +215,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
             {section === "env" && (
               <Flex direction="column" gap="2">
-                <Row k="服务" v={health?.service || "artex"} />
+                <Row k="服务" v={health?.service || "artex-harness"} />
                 <Row k="版本" v={health?.version || version || "—"} />
                 <Row k="监听" v={window.location.host} />
                 <Row k="事件协议" v="AG-UI（SSE）" />
