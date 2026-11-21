@@ -10,10 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/llm"
 )
@@ -113,96 +111,6 @@ func TestChatMentionPagination(t *testing.T) {
 	s.searchChatMentions(w, httptest.NewRequest("GET", "/api/chat/mentions?cursor=invalid", nil))
 	if w.Code != 400 {
 		t.Fatalf("bad cursor: %d", w.Code)
-	}
-}
-
-func TestChatMentionWorkerReceivesServerDetails(t *testing.T) {
-	m, err := NewManager(t.TempDir(), "")
-	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
-	}
-	defer m.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{ctx: ctx, m: m, engine: NewEngine(m)}
-	task, err := m.CreateTask("Worker mention test", "Read referenced records", nil, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		cancel()
-		drain, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stop()
-		_ = s.waitTaskQuiescent(drain, task.ID)
-		_, _ = m.DeleteTask(task.ID, DeleteTaskOptions{})
-	}()
-	iid, err := task.Store.AddNode(db.KindIntent, map[string]any{"summary": "Read referenced records only"}, 1, "paused", "human", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fid, err := m.pg.AddFinding(0, 0, "xss", "Worker mention", "low", "summary", "worker-hidden-proof", "test", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer m.pg.DeleteFinding(fid)
-	requests := make(chan llm.CompletionRequest, 10)
-	worker := agent.NewWorker(retestProvider{complete: func(_ context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-		requests <- req
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("已读取引用")}}, "end_turn", llm.Usage{}, nil
-	}}, "test", m.dir, nil, 10000, 1)
-	worker.SetNonStreaming(func() bool { return true })
-	s.engine.SetAuthoritativeAgentResolver(func(*Task) (*agent.Planner, *agent.Worker) {
-		return nil, worker
-	})
-	send := func(message string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]string{"message": message, "request_id": "worker-mention-test"})
-		r := httptest.NewRequest("POST", "/", strings.NewReader(string(body)))
-		r.SetPathValue("id", task.ID)
-		r.SetPathValue("iid", fmt.Sprint(iid))
-		w := httptest.NewRecorder()
-		s.sendWorkerMessage(w, r)
-		return w
-	}
-	if w := send("@[漏洞#9223372036854775807]"); w.Code != 400 {
-		t.Fatalf("invalid ref accepted: %d %s", w.Code, w.Body)
-	}
-	node, _ := task.Store.GetNode(iid)
-	items, _, _ := task.Store.ActivityList(&iid, 0, 100)
-	if node.State != "paused" || len(items) != 0 {
-		t.Fatal("invalid reference started worker or persisted a turn")
-	}
-	message := fmt.Sprintf("请核对 @[漏洞#%d 测试]", fid)
-	if w := send(message); w.Code != 200 {
-		t.Fatalf("send: %d %s", w.Code, w.Body)
-	}
-	select {
-	case req := <-requests:
-		blob, _ := json.Marshal(req.Messages)
-		if !strings.Contains(string(blob), "worker-hidden-proof") || !strings.Contains(string(blob), "用户引用的记录快照") {
-			t.Fatalf("worker missing reference details: %s", blob)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not receive a model request")
-	}
-	drain, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
-	if err := s.waitTaskQuiescent(drain, task.ID); err != nil {
-		t.Fatal(err)
-	}
-	items, _, err = task.Store.ActivityList(&iid, 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	userCount := 0
-	for _, item := range items {
-		if item.Kind == "user" {
-			userCount++
-			if item.Summary != message {
-				t.Fatalf("UI history contains expanded details: %s", item.Summary)
-			}
-		}
-	}
-	if userCount != 1 {
-		t.Fatalf("human turns=%d", userCount)
 	}
 }
 

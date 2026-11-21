@@ -58,8 +58,8 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	bind := s.toolBindFindingTraffic()
 	input := map[string]any{"finding_id": initial.FindingID, "traffic_refs": []db.TrafficRef{{TrafficID: "handoff-baseline"}}}
 	workflowCall(t, ctx, bind, input, true)
-	if r := request("PUT", "/api/settings", `{"agent_traffic_binding":true}`); r.Code != 200 {
-		t.Fatal(r.Code, r.Body)
+	if err := pg.SetBool(settingAgentTrafficBinding, true); err != nil {
+		t.Fatal(err)
 	}
 	if !pg.GetBool(settingAgentTrafficBinding, false) {
 		t.Fatal("switch was not persisted")
@@ -160,8 +160,8 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	workflowCall(t, childCtx, bind, input, true)
 	workflowCall(t, childCtx, s.toolGetFindingTraffic(), map[string]any{"finding_id": recorded.FindingID}, false)
 	// Existing, already assembled tools must honor a later switch-off.
-	if r := request("PUT", "/api/settings", `{"agent_traffic_binding":false}`); r.Code != 200 {
-		t.Fatal(r.Code, r.Body)
+	if err := pg.SetBool(settingAgentTrafficBinding, false); err != nil {
+		t.Fatal(err)
 	}
 	workflowCall(t, ctx, bind, input, true)
 	// Turning binding off must still save a confirmed finding from an already
@@ -263,7 +263,7 @@ func TestFindingWorkflowMigrationPreservesUserConfiguration(t *testing.T) {
 }
 
 func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
-	s, f, request := trafficEvidenceServer(t)
+	s, f, _ := trafficEvidenceServer(t)
 	pg := s.m.pg
 	ctx := context.Background()
 	if err := pg.SetBool(settingAgentTrafficBinding, true); err != nil {
@@ -310,8 +310,8 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 		t.Fatal("report did not cover post-binding version", updated, err)
 	}
 	// Disabling automatic binding still lets Reporter read manually bound snapshots.
-	if r := request("PUT", "/api/settings", `{"agent_traffic_binding":false}`); r.Code != 200 {
-		t.Fatal(r.Code, r.Body)
+	if err := pg.SetBool(settingAgentTrafficBinding, false); err != nil {
+		t.Fatal(err)
 	}
 	off, offDef, closeOff := agent.AugmentTools(ctx, "reporter", nil)
 	defer closeOff()

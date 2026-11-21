@@ -215,10 +215,10 @@ R=6 轮冷却、K=2 折叠阈值、同父单点救援，折叠成 `digest` 节�
 
 ```
 artex-harness（单二进制，CGO_ENABLED=0）
-  ├── :8787  HTTP（API + SSE + 内嵌控制台）
-  └── :8788  流量记录代理（MITM，可关）
+  ├── :8797  HTTP（API + SSE + 内嵌控制台）
+  └── :8798  流量记录代理（MITM，可关）
 PostgreSQL 16（同机）
-本地文件系统：data/（jwt.key、traffic blob、evidence 快照、transcripts、tasks 工作区）
+本地文件系统：data-harness/（harness-jwt.key、traffic blob、evidence 快照、transcripts、tasks 工作区）
 ```
 
 **无 Node / 无 Redis / 无容器编排 / 无云依赖**。前端已静态导出并 `go:embed`；
@@ -228,8 +228,8 @@ PostgreSQL 16（同机）
 
 | 路径 | 内容 | 备份需否 |
 |---|---|---|
-| `config.json` | 数据库连接（含密码，**不入库**） | 是 |
-| `data/jwt.key` | 会话签名密钥 | 是 |
+| `artex-harness.json` | 数据库连接（含密码，**不入库**） | 是 |
+| `data-harness/harness-jwt.key` | 会话签名密钥 | 是 |
 | `data/traffic/` | 流量 blob（可清理） | 可选 |
 | `data/evidence/blobs/` | 漏洞证据正文（**必须与流量分开备份**） | **必须** |
 | `data/transcripts/` `data/tasks/` | LLM 原文、任务工作区 | 可选 |
@@ -253,7 +253,7 @@ Type=simple
 User=artex
 WorkingDirectory=/opt/artex-harness
 Environment=ARTEX_PG_DSN=postgres://artex:***@127.0.0.1:5432/artex?sslmode=disable
-ExecStart=/opt/artex-harness/artex -addr :8787 -proxy 127.0.0.1:8788
+ExecStart=/opt/artex-harness/artex-harness -addr :8797 -proxy 127.0.0.1:8798
 Restart=on-failure
 RestartSec=3
 # 换装协议：程序主动退出并期望被重拉，需允许 restart

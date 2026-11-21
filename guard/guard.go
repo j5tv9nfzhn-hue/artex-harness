@@ -1,16 +1,21 @@
 // Package guard implements the safety boundary layer (docs §11): an audit log,
 // user-configured intercept-rule evaluation, and Observer/G5 failure attribution.
 // Every tool call passes through the PreToolUse hook before executing.
-// (The RoE authorization-scope mechanism was removed; a replacement may be added
-// later.) Destructive/exfil gating is no longer hard-coded here — it lives in the
-// DB intercept rules (seeded as ordinary [内置] rules, so users can disable or
-// delete them), evaluated via applyIntercept.
+//
+// Stage 1 (P0) safety floor: destructive/exfil gating is no longer only in
+// the DB intercept rules (seeded as ordinary [内置] rules, so users could
+// disable or delete them). A deterministic intent classifier runs first and
+// hard-denies the extreme set (rm -rf /, mkfs, dd to /dev, DROP/TRUNCATE)
+// mechanically — see intent.go. RoE scope enforcement is restored in
+// scope.go: when a task has anchored scope rows, a network target outside
+// them is denied until registered via add_task_scope.
 package guard
 
 import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,30 +31,68 @@ type AuditEntry struct {
 	Action  string `json:"action"` // allow|block
 	Reason  string `json:"reason,omitempty"`
 	Command string `json:"command,omitempty"`
+	Intent  string `json:"intent,omitempty"`
+	Host    string `json:"host,omitempty"`
 }
 
 // Guard enforces the side-effect policy via agent-core hooks.
 type Guard struct {
-	mu          sync.Mutex
-	audit       []AuditEntry
-	attrib      map[string]int // failure attribution counts (Observer / G5)
-	reg         *hook.Registry
-	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
+	mu           sync.Mutex
+	audit        []AuditEntry
+	attrib       map[string]int // failure attribution counts (Observer / G5)
+	reg          *hook.Registry
+	interceptor  *intercept.Interceptor // optional; nil disables user-configured rules
+	hardDeny     bool                   // Stage 1: mechanical deny for critical intents; default true
+	scopeChecker ScopeChecker           // Stage 1: RoE scope enforcement; nil disables it
+}
+
+// GuardOption configures a Guard.
+type GuardOption func(*Guard)
+
+// WithHardDeny enables or disables the mechanical hard-deny floor.
+// Default is true. Disabling it is only for tests that need the old
+// passthrough behaviour; production code must not disable it.
+func WithHardDeny(enabled bool) GuardOption {
+	return func(g *Guard) { g.hardDeny = enabled }
+}
+
+// WithScopeChecker installs a RoE scope checker. Nil disables scope checks.
+func WithScopeChecker(sc ScopeChecker) GuardOption {
+	return func(g *Guard) { g.scopeChecker = sc }
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
 // tasks where the Interceptor is not yet available).
-func New() *Guard { return newGuard(nil) }
+func New(opts ...GuardOption) *Guard { return newGuard(nil, opts...) }
 
 // NewWithInterceptor creates a Guard with user-configured intercept rules.
-func NewWithInterceptor(ic *intercept.Interceptor) *Guard { return newGuard(ic) }
+func NewWithInterceptor(ic *intercept.Interceptor, opts ...GuardOption) *Guard {
+	return newGuard(ic, opts...)
+}
 
-func newGuard(ic *intercept.Interceptor) *Guard {
-	g := &Guard{attrib: map[string]int{}, interceptor: ic}
+func newGuard(ic *intercept.Interceptor, opts ...GuardOption) *Guard {
+	g := &Guard{attrib: map[string]int{}, interceptor: ic, hardDeny: true}
+	for _, o := range opts {
+		o(g)
+	}
 	g.reg = hook.NewRegistry().
 		On(hook.PreToolUse, g.preToolUse).
 		On(hook.PostToolUse, g.postToolUse)
 	return g
+}
+
+// SetScopeChecker installs or replaces the RoE scope checker at runtime.
+func (g *Guard) SetScopeChecker(sc ScopeChecker) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.scopeChecker = sc
+}
+
+// SetHardDeny enables or disables the mechanical hard-deny floor at runtime.
+func (g *Guard) SetHardDeny(enabled bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.hardDeny = enabled
 }
 
 // Hooks returns the hook registry to attach to an agent session.
@@ -57,9 +100,7 @@ func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	// Extract the shell-command surface for the audit log: Bash + the interactive-shell
-	// tools (shell_open's command, shell_send's text). Destructive/exfil gating is no
-	// longer hard-coded here — it now lives in the DB intercept rules, evaluated by
-	// applyIntercept below. Other tools record an empty command.
+	// tools (shell_open's command, shell_send's text). Other tools record an empty command.
 	var cmd string
 	switch ev.ToolName {
 	case "Bash", "shell_open":
@@ -75,7 +116,45 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		_ = json.Unmarshal(ev.Input, &in)
 		cmd = in.Text
 	}
-	g.record(ev.ToolName, "allow", "", cmd)
+	// Stage 1, step 1: deterministic intent classification. This runs
+	// before the DB rules so deleting a DB rule cannot remove the floor.
+	intent := ClassifyIntent(ev.ToolName, ev.Input)
+	g.mu.Lock()
+	hardDeny := g.hardDeny
+	checker := g.scopeChecker
+	g.mu.Unlock()
+	if hardDeny && intent.IsHardDeny() {
+		if g.interceptor != nil {
+			g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), intercept.Decision{Action: "deny", Message: "[意图级硬拦截] " + intent.Reason, RuleName: "intent-hard-deny"}, ev.ToolName, ev.Input, "denied")
+		}
+		return g.blockWithIntent(ev.ToolName, systemBlockMessage(intent.Reason), cmd, string(intent.Kind), "")
+	}
+	// Stage 1, step 2: RoE scope. Only network intents are checked, only
+	// when the task has anchored scope, only when a host was extracted.
+	// Unanchored tasks fail open here (logged by CheckScope) so legacy
+	// tasks do not suddenly break.
+	if checker != nil && (intent.Kind == IntentNetworkOutbound || intent.Kind == IntentLangExec) {
+		if taskIDStr := intercept.TaskIDFromContext(ctx); taskIDStr != "" {
+			if taskID, err := strconv.ParseInt(taskIDStr, 10, 64); err == nil && taskID > 0 {
+				dec := CheckScope(ctx, checker, taskID, ev.ToolName, ev.Input)
+				if dec.Checked && dec.HasScope && !dec.InScope {
+					return g.blockWithIntent(ev.ToolName, systemBlockMessage(dec.Reason), cmd, string(intent.Kind), dec.Host)
+				}
+				if dec.Checked && dec.Host != "" {
+					// In-scope or unanchored: keep the host in the audit trail.
+					g.recordWithIntent(ev.ToolName, "allow", "", cmd, string(intent.Kind), dec.Host)
+				} else {
+					g.record(ev.ToolName, "allow", "", cmd)
+				}
+			} else {
+				g.record(ev.ToolName, "allow", "", cmd)
+			}
+		} else {
+			g.record(ev.ToolName, "allow", "", cmd)
+		}
+	} else {
+		g.record(ev.ToolName, "allow", "", cmd)
+	}
 	// Sprint 2: make the policy layer's view of this call replayable. The event
 	// carries no verdict — the server-side emitter attaches the active policy's
 	// decision. This is observation only; applyIntercept below is still the veto.
@@ -186,10 +265,19 @@ func (g *Guard) block(tool, reason, cmd string) hook.Result {
 	return hook.Result{Decision: "block", Message: reason}
 }
 
+func (g *Guard) blockWithIntent(tool, reason, cmd, intent, host string) hook.Result {
+	g.recordWithIntent(tool, "block", reason, cmd, intent, host)
+	return hook.Result{Decision: "block", Message: reason}
+}
+
 func (g *Guard) record(tool, action, reason, cmd string) {
+	g.recordWithIntent(tool, action, reason, cmd, "", "")
+}
+
+func (g *Guard) recordWithIntent(tool, action, reason, cmd, intent, host string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.audit = append(g.audit, AuditEntry{TS: time.Now().Unix(), Tool: tool, Action: action, Reason: reason, Command: cmd})
+	g.audit = append(g.audit, AuditEntry{TS: time.Now().Unix(), Tool: tool, Action: action, Reason: reason, Command: cmd, Intent: intent, Host: host})
 	if len(g.audit) > 2000 {
 		g.audit = g.audit[len(g.audit)-2000:]
 	}

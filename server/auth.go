@@ -17,7 +17,12 @@ import (
 )
 
 const (
-	jwtKeyFilename = "jwt.key"
+	// harness-jwt.key, not jwt.key: upstream ARTEX uses jwt.key next to
+	// its executable. Sharing the same filename in the same folder
+	// would make the two products share (and overwrite) one signing
+	// key, so sessions would cross over. Do NOT migrate from
+	// BaseDir()/jwt.key — that file belongs to ARTEX.
+	jwtKeyFilename = "harness-jwt.key"
 	authPassKey    = "auth.password_hash"
 	jwtTTL         = 7 * 24 * time.Hour
 	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -45,10 +50,10 @@ func validatePassword(pw string) string {
 	return ""
 }
 
-// loadOrCreateJWTKey reads the 32-byte signing key from keyDir/jwt.key. keyDir is
+// loadOrCreateJWTKey reads the 32-byte signing key from keyDir/harness-jwt.key. keyDir is
 // the project base dir (next to the executable), NOT the browsable workspace root
 // (dataDir) — the signing key must never be listable/downloadable via the file
-// manager. Legacy installs kept it at dataDir/jwt.key; if present there and not yet
+// manager. Legacy installs kept it at dataDir/harness-jwt.key; if present there and not yet
 // at the new location, it is migrated (key preserved, so sessions stay valid) and
 // the old file removed so it disappears from the workspace. On first run a random
 // key is generated and persisted.
@@ -208,55 +213,6 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 // POST /api/auth/change-password — changes the admin password. Requires a valid
 // token (this route is under /api/auth/* which requireAuth exempts, so the token
 // is validated here) AND the current password.
-func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
-	pg := s.pg(w)
-	if pg == nil {
-		return
-	}
-	if !verifyJWT(extractToken(r), s.jwtKey) {
-		writeErr(w, 401, "未授权")
-		return
-	}
-	var req struct {
-		OldPassword string `json:"old_password"`
-		NewPassword string `json:"new_password"`
-	}
-	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
-		return
-	}
-	if req.NewPassword == "" {
-		writeErr(w, 400, "新密码不能为空")
-		return
-	}
-	if msg := validatePassword(req.NewPassword); msg != "" {
-		writeErr(w, 400, msg)
-		return
-	}
-	hash, ok, err := pg.GetSetting(authPassKey)
-	if err != nil {
-		writeErr(w, 503, errDataSourceUnavailable)
-		return
-	}
-	if !ok || hash == "" {
-		writeErr(w, 403, "密码未初始化，请先设置密码")
-		return
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)); err != nil {
-		writeErr(w, 401, "当前密码错误")
-		return
-	}
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		writeErr(w, 500, "密码加密失败")
-		return
-	}
-	if err := pg.SetSetting(authPassKey, string(newHash)); err != nil {
-		writeErr(w, 500, "保存失败: "+err.Error())
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true})
-}
 
 // POST /api/auth/login — validates username/password and returns a JWT.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {

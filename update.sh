@@ -2,7 +2,7 @@
 # ARTEX 更新脚本：① Docker 更新（拉新镜像重建）  ② 本地编译更新（重建二进制）
 # 与 install.sh 对应：install 负责首次落地，update 负责升级到新版本。
 # DB 迁移无需手动执行——artex 每次启动都会幂等重跑 schema.sql（含 ADD COLUMN/CREATE
-# INDEX IF NOT EXISTS），所以“重启即迁移”。数据（pgdata 卷、./data、./skills）不受影响。
+# INDEX IF NOT EXISTS），所以“重启即迁移”。数据（pgdata-harness 卷、./data-harness、./skills）不受影响。
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 
@@ -42,18 +42,18 @@ update_docker(){
   # 且大版本变动还会有兼容风险）。artex 声明了 depends_on postgres，所以带服务名
   # up 时若 pg 没起会自动拉起，已在跑的则原样保留、不重建。
   info "拉取新镜像（仅 artex）…"
-  docker compose pull artex
+  docker compose pull artex-harness
   info "重建并启动（artex 重启时自动迁移 schema）…"
-  docker compose up -d artex
-  ok "更新完成 → http://localhost:8787"
-  info "查看日志：docker compose logs -f artex"
+  docker compose up -d artex-harness
+  ok "更新完成 → http://localhost:8797"
+  info "查看日志：docker compose logs -f artex-harness"
   info "清理旧镜像（可选）：docker image prune -f"
 }
 
 # ── ② 本地编译更新 ──────────────────────────────
 update_local(){
   command -v go >/dev/null 2>&1 || die "未检测到 Go（>=1.26）：https://go.dev/dl/"
-  [ -f config.json ] || warn "未找到 config.json——若首次部署请改用 ./install.sh"
+  [ -f artex-harness.json ] || [ -f config.json ] || warn "未找到 artex-harness.json——若首次部署请改用 ./install.sh"
   ok "Go: $(go version)"
 
   # 与 install.sh 同一套：控制台产物在 server/console-app/，go:embed 无条件嵌入。
@@ -62,18 +62,18 @@ update_local(){
     info "重建控制台（产物写入 server/console-app）…"
     ( cd web && npm ci --no-audit --no-fund && npm run build )
     info "重新编译单二进制（控制台已内嵌）…"
-    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -trimpath -o artex-harness ./cmd/artex
   else
     warn "未检测到 npm：沿用仓库里已提交的控制台产物编译"
     [ -f server/console-app/index.html ] || die "server/console-app/index.html 不存在，且没有 npm 可重建"
-    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -trimpath -o artex-harness ./cmd/artex
   fi
-  ok "编译完成 → ./artex"
-  warn "请重启正在运行的 artex 进程以生效（重启时会自动迁移 schema）"
+  ok "编译完成 → ./artex-harness"
+  warn "请重启正在运行的 artex-harness 进程以生效（重启时会自动迁移 schema）"
 }
 
 echo "=============================="
-echo "  ARTEX 更新"
+echo "  artex-harness 更新"
 echo "  1) Docker 更新（拉新镜像重建）"
 echo "  2) 本地更新（go 重新编译）"
 echo "=============================="

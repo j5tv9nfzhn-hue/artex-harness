@@ -31,8 +31,8 @@ type Config struct {
 	SkillDir string   `json:"skill_dir"`
 }
 
-// BaseDir is the directory that anchors all runtime artifacts (config.json and
-// the data/ store). It is the directory the running binary lives in, so a
+// BaseDir is the directory that anchors all runtime artifacts (artex-harness.json and
+// the data-harness/ store). It is the directory the running binary lives in, so a
 // distributed executable keeps its files next to itself on any OS (Windows,
 // Linux, …) regardless of the working directory it is launched from.
 //
@@ -72,19 +72,33 @@ func isGoRunDir(dir string) bool {
 	return false
 }
 
+// ConfigFileName is the harness config file. It is deliberately different
+// from upstream ARTEX's config.json: unzipping both products into the same
+// folder must not make them share (and overwrite) one database config.
+const ConfigFileName = "artex-harness.json"
+
 // Path returns the config file path. Resolution order:
-//  1. env ARTEX_CONFIG (explicit override)
-//  2. ./config.json in the current working directory (running from the project
-//     dir — robust no matter where `go run` placed the temp/cached binary)
-//  3. config.json next to the executable (a distributed binary keeps it beside)
+//  1. env HARNESS_CONFIG, then ARTEX_CONFIG (explicit override, legacy compat)
+//  2. ./artex-harness.json in the current working directory
+//  3. artex-harness.json next to the executable
+//  4. ./config.json / BaseDir()/config.json (legacy fallback: an install
+//     created before the rename keeps working, but a fresh install
+//     must use artex-harness.json)
 //
-// The first existing file wins. If none exist, the CWD path is returned so the
-// "not found" message points at the project dir the user most likely expected.
+// The first existing file wins. If none exist, the CWD artex-harness.json
+// path is returned so the "not found" message points at the file to create.
 func Path() string {
+	if v := strings.TrimSpace(os.Getenv("HARNESS_CONFIG")); v != "" {
+		return v
+	}
 	if v := strings.TrimSpace(os.Getenv("ARTEX_CONFIG")); v != "" {
 		return v
 	}
 	var candidates []string
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, ConfigFileName))
+	}
+	candidates = append(candidates, filepath.Join(BaseDir(), ConfigFileName))
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(cwd, "config.json"))
 	}

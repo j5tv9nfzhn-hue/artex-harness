@@ -17,12 +17,12 @@
 ```
                      ┌─────────────────────────────────────┐
   浏览器 ──HTTP─────▶ │ /app/      内嵌控制台（go:embed）      │
-                     │ /api/*     JSON API（294 条路由）      │
+                     │ /api/*     JSON API（127 条路由）      │
                      │ /api/agui/agent, /api/harness/stream  │ SSE
                      └──────────────┬──────────────────────┘
                                     │
                      ┌──────────────▼──────────────────────┐
-   目标站点 ─mitm──▶  │ -proxy :8788  流量记录代理（可关）     │
+   目标站点 ─mitm──▶  │ -proxy :8798  流量记录代理（可关）     │
                      └──────────────┬──────────────────────┘
                                     │
         ┌───────────────────────────┼───────────────────────────┐
@@ -32,7 +32,7 @@
     审批/通知/发现）            截图/证据 blob）              / npx playwright）
 ```
 
-- 启动：`artex -addr :8787 -data ./data -proxy 127.0.0.1:8788`
+- 启动：`artex -addr :8797 -data ./data -proxy 127.0.0.1:8798`
 - 单二进制：控制台产物 `server/console-app/` 被 `go:embed` 打进二进制，目标机不需要 Node。
 - 数据库：`ARTEX_PG_DSN` 环境变量；首次启动自动建表（`db/schema.sql`，51 张表）。
 
@@ -346,7 +346,7 @@ ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试；会重建 schema�
 
 - `server/console-app/` 是**被提交进仓库的构建产物**：`go:embed` 需要它在编译时存在，
   这样纯 Go 构建不需要 node_modules。**改前端后必须 `make web` 再提交**，否则二进制里是旧界面。
-- `web/node_modules/`、`data/`、`jwt.key`、`*.log`、编译出的 `artex` 一律不进版本库。
+- `web/node_modules/`、`data-harness/`、`harness-jwt.key`、`*.log`、编译出的 `artex-harness` 一律不进版本库。
 - CI 四段式：gate（判定构建什么、要不要发布）→ plan（校验三端六包）→ job（前端产物 + 六包编译）
   → release（仅显式 tag 时）。见 `.github/CI.md`。
 

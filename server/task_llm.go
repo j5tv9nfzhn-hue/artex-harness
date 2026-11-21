@@ -14,6 +14,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
@@ -631,7 +632,13 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	hx.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	hx.SetWebSearch(s.webSearchFor("harness"))
 	// 平台审批门：没有这一行，HARNESS 运行会绕过内置破坏性命令拦截（eval gate 抓到的真实缺陷）
+	// Stage 1 (P0): wire RoE scope enforcement. The guard's hard-deny
+	// floor is on by default; the DB scope checker makes out-of-scope
+	// network targets a deny until registered via add_task_scope.
 	if t.Guard != nil {
+		if s.m != nil && s.m.pg != nil {
+			t.Guard.SetScopeChecker(guard.NewDBScopeChecker(s.m.pg))
+		}
 		hx.SetHooks(t.Guard.Hooks())
 	}
 	// 后台委派完成通知：投递到父会话并唤醒它（Sprint 3）。只有投递成功（true）

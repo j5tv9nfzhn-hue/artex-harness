@@ -117,7 +117,7 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 }
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
+// Precedence: env ARTEX_PG_DSN > config file (artex-harness.json). There is no
 // built-in default — it errors if neither source is configured.
 func DSN() (dsn, source string, err error) {
 	return config.PostgresDSN()

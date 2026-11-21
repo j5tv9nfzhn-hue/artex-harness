@@ -48,8 +48,8 @@ install_docker(){
   info "拉取镜像并启动…"
   docker compose pull || true
   docker compose up -d
-  ok "启动完成 → http://localhost:8787"
-  info "查看日志：docker compose logs -f artex"
+  ok "启动完成 → http://localhost:8797"
+  info "查看日志：docker compose logs -f artex-harness"
 }
 
 # ── ② 本地编译运行 ──────────────────────────────
@@ -61,21 +61,21 @@ install_local(){
     2)
       ensure_docker
       local pw; pw="$(ask 'Postgres 密码（回车随机）' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
-        -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
-        -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
-      DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
+      docker run -d --name artex-harness-pg -p 5433:5432 \
+        -e POSTGRES_USER=artex_harness -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex_harness \
+        -v artex-harness-pg:/var/lib/postgresql/data postgres:16-alpine
+      DB_HOST=127.0.0.1 DB_PORT=5433 DB_USER=artex_harness DB_PASS="$pw" DB_NAME=artex_harness DB_SSL=disable ;;
     *)
       DB_HOST="$(ask '数据库地址' 127.0.0.1)"
-      DB_PORT="$(ask '端口' 5432)"
-      DB_USER="$(ask '账号' artex)"
+      DB_PORT="$(ask '端口' 5433)"
+      DB_USER="$(ask '账号' artex_harness)"
       DB_PASS="$(ask '密码' '')"
-      DB_NAME="$(ask '数据库名' artex)"
+      DB_NAME="$(ask '数据库名' artex_harness)"
       DB_SSL="$(ask 'sslmode (disable/require)' disable)" ;;
   esac
 
-  # 生成 config.json
-  cat > config.json <<JSON
+  # 生成 artex-harness.json（与 ARTEX 的 config.json 分开，避免同目录解压时互相覆盖）
+  cat > artex-harness.json <<JSON
 {
   "database": {
     "host": "${DB_HOST}",
@@ -87,7 +87,7 @@ install_local(){
   }
 }
 JSON
-  ok "已生成 config.json"
+  ok "已生成 artex-harness.json"
 
   # go 环境检查
   command -v go >/dev/null 2>&1 || die "未检测到 Go，请先安装 Go（>=1.26）：https://go.dev/dl/"
@@ -100,20 +100,20 @@ JSON
     info "构建控制台（产物写入 server/console-app）…"
     ( cd web && npm ci --no-audit --no-fund && npm run build )
     info "编译单二进制（控制台已内嵌，无需 -tags）…"
-    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -trimpath -o artex-harness ./cmd/artex
   else
     warn "未检测到 npm：沿用仓库里已提交的控制台产物编译（纯 Go 环境也能出可执行文件）"
     [ -f server/console-app/index.html ] || die "server/console-app/index.html 不存在，且没有 npm 可重建"
-    CGO_ENABLED=0 go build -trimpath -o artex ./cmd/artex
+    CGO_ENABLED=0 go build -trimpath -o artex-harness ./cmd/artex
   fi
-  ok "编译完成 → ./artex"
+  ok "编译完成 → ./artex-harness"
 
   info "启动…（Ctrl-C 退出）"
-  ./artex
+  ./artex-harness
 }
 
 echo "=============================="
-echo "  ARTEX 安装"
+echo "  artex-harness 安装"
 echo "  1) 全部 Docker 安装"
 echo "  2) 本地运行（go 编译）"
 echo "=============================="

@@ -5,7 +5,7 @@
 # 部署/升级相关（多平台交叉编译、Docker、自更新）仍走原有脚本，见 README。
 
 SHELL := /bin/bash
-BIN   := artex
+BIN   := artex-harness
 PKG   := ./cmd/artex
 
 .DEFAULT_GOAL := help
@@ -37,8 +37,8 @@ test-db: ## 需要 PostgreSQL 的测试；必须显式指名测试库，见 db/t
 	  exit 1; }
 	go test ./db/... ./server/... -count=1
 
-run: ## 本地前台运行（数据落在 ./data）
-	go run $(PKG) -addr 127.0.0.1:8899 -data ./data
+run: ## 本地前台运行（数据落在 ./data-harness）
+	go run $(PKG) -addr 127.0.0.1:8899 -data ./data-harness
 
 clean: ## 清掉编译产物
 	rm -f $(BIN)

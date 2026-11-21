@@ -92,6 +92,11 @@ func TestSideUsageRecordedOnceOnConsumerCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pg.Close()
+	// 本包没有 TestMain 建表；Wrap 写计量行依赖 llm_usage 表存在。
+	// 之前靠其它包先建表才碰巧通过，单独跑或 schema 被重置后就 42P01。
+	if err := pg.EnsureLLMUsageTable(); err != nil {
+		t.Fatal(err)
+	}
 	for _, early := range []bool{false, true} {
 		profile := "btw-metering-" + uuid.NewString()
 		ctx, cancel := context.WithCancel(transcript.WithSessionID(t.Context(), "exp0-btw-test"))

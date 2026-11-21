@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -11,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestTaskArchiveAPIQueueListAndLimits(t *testing.T) {
+func TestTaskArchiveAPIQueue(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) - skipping", err)
@@ -71,18 +70,7 @@ func TestTaskArchiveAPIQueueListAndLimits(t *testing.T) {
 	if queued.ID <= 0 || queued.State != "archive_queued" {
 		t.Fatalf("unexpected queue response: %+v", queued)
 	}
-
-	recorder = request(http.MethodGet, "/api/task-archives?page=1&size=10&q="+task.ID, "")
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), fmt.Sprintf(`"task_id":%d`, taskID)) {
-		t.Fatalf("archive list status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	ids := make([]string, 101)
-	for index := range ids {
-		ids[index] = strconv.Itoa(index + 1)
-	}
-	body, _ := json.Marshal(map[string]any{"task_ids": ids})
-	recorder = request(http.MethodPost, "/api/tasks/archive/batch", string(body))
-	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "100") {
-		t.Fatalf("oversized batch status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
+	// 2026-11-21 S6-TRIM：GET /api/task-archives（列表）与 POST
+	// /api/tasks/archive/batch（批量归档上限）已删，相关断言随之移除；
+	// 保留下来的断言只覆盖还存在的单任务归档入队口。
 }

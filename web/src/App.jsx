@@ -145,7 +145,7 @@ function Console({ theme, onLogout }) {
   const [convId, setConvId] = useState(null);
   const [convTitle, setConvTitle] = useState("");
 
-  // 任何面板拿到 401（令牌过期、jwt.key 被换过）都回到登录门，
+  // 任何面板拿到 401（令牌过期、harness-jwt.key 被换过）都回到登录门，
   // 而不是让每个面板各显示一遍"事件流不可用"。
   useEffect(() => {
     const onUnauthorized = () => onLogout?.();

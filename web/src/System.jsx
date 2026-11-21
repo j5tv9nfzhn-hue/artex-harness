@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Box, Button, Code, Flex, IconButton, ScrollArea, Separator, Text, Tooltip } from "./ui.jsx";
-import { AlertTriangle, CheckCircle2, History, RefreshCw, ShieldCheck, Wrench, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Fingerprint, History, Network, RefreshCw, ShieldCheck, Wrench, X, XCircle } from "lucide-react";
 import { authedFetch, errorText } from "./lib/auth.js";
+import { AuditChainPanel, GateFailure, PentestReportPanel, TrafficPanel, patchFindingConfirm } from "./Stage2.jsx";
 
 /* 系统面：就绪自检 / 能力注册表 / 证据完整性。
  *
@@ -11,6 +12,13 @@ import { authedFetch, errorText } from "./lib/auth.js";
  *   GET /api/harness/ready                  pg / llm / skills / browser_mcp 四项，各带 hint
  *   GET /api/harness/capabilities           surface/name/enabled/exec/concurrency_safe/deferred
  *   GET /api/harness/evidence-integrity?task=  有取证绑定 / 无绑定 的发现清单（仅报告）
+ *
+ * 阶段二（S6-P1）又加了三个面，渲染在 web/src/Stage2.jsx：
+ *   审计链  GET /api/harness/audit-chain?task=   哈希链验证 + 条目
+ *   流量    GET /api/traffic + POST /api/traffic/replay  F12 表 + 重放
+ *   报告    GET /api/report/pentest?task=       专业报告 Markdown + 下载
+ * 取证面的每条发现还多了「标记为已确认」：走验证门，422 时在行内列出
+ * 失败原因并可人工越过（理由写入审计链）。
  */
 
 async function api(path) {
@@ -24,6 +32,9 @@ const TABS = [
   { key: "caps", label: "能力", icon: Wrench },
   { key: "replay", label: "回放", icon: History },
   { key: "evidence", label: "取证", icon: AlertTriangle },
+  { key: "audit", label: "审计链", icon: Fingerprint },
+  { key: "traffic", label: "流量", icon: Network },
+  { key: "report", label: "报告", icon: FileText },
 ];
 
 /* 就绪项的展示顺序固定：数据库 → 模型 → 技能 → 浏览器。
@@ -66,15 +77,40 @@ export default function System({ taskId, onClose }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const loadEv = useCallback(async () => {
+    if (!taskId) return;
+    setEvErr("");
+    try {
+      setEv(await api(`/api/harness/evidence-integrity?task=${encodeURIComponent(taskId)}`));
+    } catch (e) { setEvErr(e.message); }
+  }, [taskId]);
+
   useEffect(() => {
     if (tab !== "evidence" || !taskId) return;
-    let live = true;
-    setEvErr("");
-    api(`/api/harness/evidence-integrity?task=${encodeURIComponent(taskId)}`)
-      .then((d) => { if (live) setEv(d); })
-      .catch((e) => { if (live) setEvErr(e.message); });
-    return () => { live = false; };
-  }, [tab, taskId]);
+    loadEv();
+  }, [tab, loadEv]);
+
+  // Verification gate (stage 2): confirming a finding runs the gate on the
+  // server. A 422 lists the failing checks under the row and offers a human
+  // override — the override reason is written to the audit chain, never
+  // silently treated as a verified confirmation.
+  const [gateReasons, setGateReasons] = useState({});
+  const [confirmBusy, setConfirmBusy] = useState(null);
+  const confirmFinding = async (findingId, humanOverride) => {
+    setConfirmBusy(findingId);
+    try {
+      const res = await patchFindingConfirm(findingId, humanOverride);
+      if (res.ok) {
+        setGateReasons((g) => ({ ...g, [findingId]: [] }));
+        await loadEv();
+      } else if (res.reasons?.length) {
+        setGateReasons((g) => ({ ...g, [findingId]: res.reasons }));
+      } else {
+        setEvErr(res.message || "确认失败");
+      }
+    } catch (e) { setEvErr(e.message); }
+    finally { setConfirmBusy(null); }
+  };
 
   const loadReplay = useCallback(async () => {
     if (!taskId) return;
@@ -331,6 +367,20 @@ export default function System({ taskId, onClose }) {
                     <div className="cap-detail mono">
                       snapshots={r.snapshots} · report={r.has_report ? "有" : "无"}
                     </div>
+                    {r.status === "confirmed" ? (
+                      <div className="cap-detail">已确认（通过验证门，或人工越过并已写入审计链）。</div>
+                    ) : (
+                      <Flex gap="2" mt="1" align="center">
+                        <Button size="1" variant="soft" disabled={confirmBusy === r.finding_id}
+                                onClick={() => confirmFinding(r.finding_id, "")}>
+                          {confirmBusy === r.finding_id ? "确认中…" : "标记为已确认"}
+                        </Button>
+                        <Text size="1" color="gray">确认会过验证门：需证据绑定、复现步骤与复测复现。</Text>
+                      </Flex>
+                    )}
+                    <GateFailure reasons={gateReasons[r.finding_id]}
+                                 overrideBusy={confirmBusy === r.finding_id}
+                                 onOverride={(reason) => confirmFinding(r.finding_id, reason)} />
                   </div>
                 ))}
                 {!(ev.rows || []).length ? (
@@ -344,6 +394,10 @@ export default function System({ taskId, onClose }) {
           </Box>
         </ScrollArea>
       ) : null}
+
+      {tab === "audit" ? <AuditChainPanel taskId={taskId} /> : null}
+      {tab === "traffic" ? <TrafficPanel taskId={taskId} /> : null}
+      {tab === "report" ? <PentestReportPanel taskId={taskId} /> : null}
     </div>
   );
 }

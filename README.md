@@ -17,7 +17,7 @@
 ![UI](https://img.shields.io/badge/UI-React%2019%20·%20Vite%207-61DAFB?logo=react&logoColor=white)
 ![DB](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)
 ![Binary](https://img.shields.io/badge/deploy-single%20binary-success)
-![API](https://img.shields.io/badge/API-290%20routes-informational)
+![API](https://img.shields.io/badge/API-127%20routes-informational)
 ![Tests](https://img.shields.io/badge/tests-819%20funcs%20·%20191%20files-brightgreen)
 
 [快速开始](#快速开始) · [功能](#功能矩阵) · [配置](#配置参考) · [架构](#架构) · [API](#api-概览) · [运维](#运维手册) · [排障](#排障手动核对清单) · [文档](#文档索引)
@@ -147,9 +147,9 @@ canvas `#fcfcfb`、accent `#d97757` clay、hairline `#e8e6dc`，浅/深两套）
 |---|---|---|
 | **审批门** | 规则 + 任务级审批门；命中 `ask` 时阻塞执行并落一条待决记录，人点了才放行 | 事件流内卡片 / 侧栏徽标 |
 | **不可绕过** | `HarnessAgent.SetHooks` 挂的 `HookRunner` 是唯一否决点；**子代理继承同一套 hooks** | — |
-| **审计轨迹** | 每次工具调用与结果成对落 `activity`，可回放；人执行的命令以 `human.sh` 入流 | `/api/exploration/activity` |
+| **审计轨迹** | 每次工具调用与结果成对落 `activity`，可回放；人执行的命令以 `human.sh` 入流 | 轨迹页 / 系统 → 回放（`/api/harness/trajectory`、`/api/harness/replay`）；`GET /api/exploration/activity` 已在 S6-TRIM 删除 |
 | **暂停 / 恢复 / 停止** | 暂停会**收尾在跑的轮次**再停，不腰斩回复 | 顶栏按钮 / `POST /api/tasks/{id}/control` |
-| **纠偏原语** | steer / kill / 重排 frontier / replan / 编辑意图（S2 六原语） | `/api/tasks/{id}/intents/{iid}/…` |
+| **纠偏原语** | harness 任务在会话内纠偏：发消息引导（`POST /api/tasks/{id}/say`）、暂停 / 恢复 / 停止（`POST /api/tasks/{id}/control`）。S2 的 intent 级原语（steer / kill / 重排 frontier / replan / 编辑意图）已随 planner/worker 管线在 S6-TRIM 删除 | 会话输入框 / 顶栏按钮 |
 | **就地接管** | 在任务工作区执行命令，输出可勾选交给 agent | 工作台 → 终端 |
 | **范围登记** | 越界前必须 `add_task_scope` 并给 reason，落库可查 | agent 工具 / `/api/tasks/{id}/scope` |
 
@@ -175,9 +175,9 @@ canvas `#fcfcfb`、accent `#d97757` clay、hairline `#e8e6dc`，浅/深两套）
 | **浏览器会话** | 一任务一会话，Playwright 与 chrome-devtools 共用；崩溃重建、标签隔离、30 分钟空闲回收 | 右栏「浏览器」 |
 | **F12 面** | console 错误按级别解析展示 + 最近 `mcp__*` 动作；**network 表后端未建模，界面明说** | 浏览器 → F12 |
 | **截图管线** | 内容寻址存 `<data>/browser/<sha256>.png`，`/api/harness/shot/{hash}` 直出 | 浏览器 → 截图 |
-| **MCP / 技能** | MCP server（stdio/http/sse）与 skill（agentskills.io 规范）在界面里增删、测连通 | 设置 → MCP / 技能 |
+| **MCP / 技能** | MCP server 与 skill 在界面里只读展示（列表）；新增 / 删除 / 刷新、技能文件管理没有 HTTP 入口，改动请直接改库（MCP）或改 `skills/` 目录（技能）后重启 | 设置 → MCP / 技能 |
 | **多模型** | 供应商在 UI 里配；故障转移链、任务级覆盖、按模型目录补上下文与档位 | 设置 → 供应商与模型 |
-| **通知** | 邮件 / webhook 渠道 + 投递重试 + 摘要节流 | 设置 → 通知 |
+| **通知** | 已配好的邮件 / webhook 渠道照常投递（投递循环直接读库，含重试与摘要节流）；渠道的增删改测没有 HTTP 入口，控制台也没有通知设置页 | — |
 
 ### 交付
 
@@ -186,7 +186,7 @@ canvas `#fcfcfb`、accent `#d97757` clay、hairline `#e8e6dc`，浅/深两套）
 | **单二进制** | 控制台 `go:embed` 进二进制，目标机不需要 Node；数据落 PostgreSQL + 磁盘原文 |
 | **自更新** | 换装后以约定退出码让守护脚本重启；连续启动失败自动回滚 |
 | **跨平台** | Linux / macOS / Windows（Windows 下 shell 能力探测 Git Bash / busybox / pwsh） |
-| **归档** | 任务可打包归档与恢复（含数据目录），带校验 |
+| **归档** | 任务可打包归档（含数据目录），带校验；恢复入口已在 S6-TRIM 删除，恢复请直接用归档包手动恢复 |
 
 ## 快速开始
 
@@ -207,56 +207,56 @@ git clone https://github.com/j5tv9nfzhn-hue/artex-harness.git
 cd artex-harness
 
 cat > .env <<'EOF'
-POSTGRES_USER=artex
+POSTGRES_USER=artex_harness
 POSTGRES_PASSWORD=change-me-please
-POSTGRES_DB=artex
+POSTGRES_DB=artex_harness
 ARTEX_TAG=latest
 EOF
 
-docker compose up -d          # postgres + artex
-open http://localhost:8787/
+docker compose up -d          # postgres-harness + artex-harness
+open http://localhost:8797/
 ```
 
-> `docker-compose.yml` 里的 `artex` 服务默认指向**上游镜像** `autumn27/artex`。
-> 要跑本仓库的构建：`./build.sh && docker build -t artex-harness .`，再把 `image:` 换成该 tag。
+> `docker-compose.yml` 里的 `artex-harness` 服务默认用本地构建的镜像 `artex-harness:latest`（与上游 ARTEX 的 `autumn27/artex`、端口 8787/8788、库 `artex` 全部隔离）。
+> 先跑：`./build.sh --target linux/amd64 && docker build -t artex-harness .`，再 `docker compose up -d`。
 
 ### 方式二：源码构建（推荐用于二次开发）
 
 ```bash
 # 1) 数据库（已有 PostgreSQL 可跳过）
-docker run -d --name artex-pg -p 5432:5432 \
-  -e POSTGRES_USER=artex -e POSTGRES_PASSWORD=yourpass -e POSTGRES_DB=artex \
+docker run -d --name artex-harness-pg -p 5433:5432 \
+  -e POSTGRES_USER=artex_harness -e POSTGRES_PASSWORD=yourpass -e POSTGRES_DB=artex_harness \
   postgres:16-alpine
 
 # 2) 指向它（首次启动自动建表）
-export ARTEX_PG_DSN="postgres://artex:yourpass@127.0.0.1:5432/artex?sslmode=disable"
+export ARTEX_PG_DSN="postgres://artex_harness:yourpass@127.0.0.1:5433/artex_harness?sslmode=disable"
 
 # 3) 构建：控制台 + 后端 → 单个二进制
 make build-all
 
 # 4) 启动
 ./start.sh                      # 守护式启动（推荐；自更新靠它拉起）
-# 或前台：./artex -addr :8787 -data ./data
+# 或前台：./artex-harness -addr :8797 -data ./data-harness
 ```
 
 ### 方式三：只跑后端（前端产物已在仓库里）
 
 ```bash
 export ARTEX_PG_DSN="postgres://…"
-make build && ./artex -addr :8787 -data ./data
+make build && ./artex-harness -addr :8797 -data ./data-harness
 ```
 
 `server/console-app/` 是被提交进仓库的构建产物（`go:embed` 需要它在编译时存在），
 所以纯 Go 构建不需要 `node_modules`。**改前端后必须 `make web` 再提交**，否则产物与源码不一致。
 
-打开 `http://localhost:8787/` → 302 到 `/app/`。默认端口 `8787`；`-proxy :8788` 是流量记录代理
+打开 `http://localhost:8797/` → 302 到 `/app/`。默认端口 `8797`；`-proxy :8798` 是流量记录代理
 （`-proxy ""` 可关闭）。
 
 ## 首次运行走一遍
 
 1. **设置管理密码** —— 首次打开 `/app/` 是「首次设置」表单，密码 ≥8 位且二次确认。
    用户名固定 `ARTEX`，不可改。忘记密码在服务器上运行 `./reset-password.sh`。
-2. **配模型** —— 「设置 → 供应商与模型」填端点与密钥，点「测试」确认连通。
+2. **配模型** —— 「设置 → 供应商与模型」填端点与密钥保存；连通性看「系统 → 就绪」的模型项变绿（`POST /api/llm/test` 已在 S6-TRIM 删除，控制台没有单独的测试按钮）。
    **仓库不带任何预设供应商**；也可以只设 `ARTEX_LLM_PROVIDER/MODEL/BASE_URL` 环境变量。
 3. **看就绪** —— 右栏「系统 → 就绪」四项应全绿：PostgreSQL / 模型端点 / 技能目录 / 浏览器 MCP。
    红的项会写明原因与下一步（这是排障第一站）。
@@ -271,22 +271,22 @@ make build && ./artex -addr :8787 -data ./data
 
 ## 配置参考
 
-配置优先级：**命令行 flag > 环境变量 > `config.json` > 内置默认**。
+配置优先级：**命令行 flag > 环境变量 > `artex-harness.json` > 内置默认**。
 
 ### 命令行
 
 | Flag | 默认 | 说明 |
 |---|---|---|
-| `-addr` | `:8787` | HTTP 监听地址 |
-| `-data` | 可执行文件同级 `data/` | 数据目录（工作区、transcript、截图、证据） |
-| `-proxy` | `127.0.0.1:8788` | 流量记录代理；传 `""` 关闭 |
+| `-addr` | `:8797` | HTTP 监听地址 |
+| `-data` | 可执行文件同级 `data-harness/` | 数据目录（工作区、transcript、截图、证据） |
+| `-proxy` | `127.0.0.1:8798` | 流量记录代理；传 `""` 关闭 |
 
 ### 环境变量
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `ARTEX_PG_DSN` | 空 | PostgreSQL DSN；**优先级高于 `config.json` 的 database** |
-| `ARTEX_CONFIG` | 可执行文件同级 `config.json` | 配置文件路径 |
+| `ARTEX_PG_DSN` | 空 | PostgreSQL DSN；**优先级高于 `artex-harness.json` 的 database** |
+| `HARNESS_CONFIG` / `ARTEX_CONFIG` | 可执行文件同级 `artex-harness.json`（兼容旧 `config.json`） | 配置文件路径 |
 | `ARTEX_SKILL_DIR` | 可执行文件同级 `skills/` | skill 根目录（每个子目录一个 skill，含 `SKILL.md`） |
 | `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY` | 空 | 无 UI 时的模型端点引导；留空则引擎 idle |
 | `ARTEX_LLM_STREAM` | 跟随供应商 | 强制流式 / 非流式 |
@@ -299,7 +299,7 @@ make build && ./artex -addr :8787 -data ./data
 | `ARTEX_NOTIFY_ALLOW_LOCAL` | 空 | 允许通知投递到回环/内网地址（默认拦，因为这是 SSRF 面；本机 SMTP 中继常需显式打开） |
 | `ARTEX_UPDATE_GITHUB_TOKEN` | 空 | 自更新读取私有仓库 Release 用 |
 
-### `config.json`（可选）
+### `artex-harness.json`（可选）
 
 只放**不适合放进数据库**的东西：`database`（分字段或 `dsn` 二选一）与 `skill_dir`。
 其余（模型、MCP、技能、审批规则、通知渠道）都在数据库里，由界面维护。
@@ -330,12 +330,12 @@ make build && ./artex -addr :8787 -data ./data
 ```
                      ┌─────────────────────────────────────┐
   浏览器 ──HTTP─────▶ │ /app/      内嵌控制台（go:embed）      │
-                     │ /api/*     JSON API（290 条路由）      │
+                     │ /api/*     JSON API（127 条路由）      │
                      │ /api/agui/agent, /api/harness/stream │ SSE（?since= 续传）
                      └──────────────┬──────────────────────┘
                                     │
                      ┌──────────────▼──────────────────────┐
-   目标站点 ─mitm──▶  │ -proxy :8788  流量记录代理（可关）     │
+   目标站点 ─mitm──▶  │ -proxy :8798  流量记录代理（可关）     │
                      └──────────────┬──────────────────────┘
                                     │
         ┌───────────────────────────┼───────────────────────────┐
@@ -418,7 +418,7 @@ third_party/    vendored agent SDK（带本地补丁）
 
 ## API 概览
 
-**290 条 `/api` 路由，36 个分组。** 约定：
+**127 条 `/api` 路由，18 个分组。**（2026-11-21 S6-TRIM 之后：之前 311 条，删了 planner/worker 专属 34 条与管理面 150 条，只动 HTTP 层——路由与 handler，底层表、agent 工具、引擎未动。分组按路径首段计，`side-questions` 含 helper 里拼接注册的 11 条。）约定：
 
 - 鉴权：除 `/api/auth/*` 与 `/api/health` 外都要 `Authorization: Bearer <jwt>`（登录后前端自动带上）。
 - 错误：统一信封 `{"error":"一句话说明"}`，HTTP 状态码表意（400 参数、401 未授权、404 不存在、409 冲突、503 数据源不可用）。
@@ -426,16 +426,18 @@ third_party/    vendored agent SDK（带本地补丁）
 
 | 分组 | 条数 | 代表端点 |
 |---|---|---|
-| `tasks` | 51 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、`PUT /api/tasks/{id}/project` |
-| `harness` | 33 | `/api/harness/{ready,capabilities,files,diff,budget,workers,delegations,replay,checkpoints,browser}` |
-| `exploration` | 24 | `GET /api/exploration/{frontier,intents,graph,activity,findings}` |
-| `agents` | 19 | `/api/agents/{key}/{config,prompt,triggers,visibility}` |
-| `llm` | 18 | `/api/llm/{profiles,records,models,model-catalog}` |
-| `intercept` | 17 | `GET /api/intercept/pending`、`POST /api/intercept/pending/{id}/decide` |
-| `skills` | 12 | `/api/skills/{name}/files/{file...}` |
-| `conversations` | 10 | `POST /api/conversations/{id}/messages` |
-| `notify` `workspace` `traffic` `tools` | 8 / 7 / 7 / 7 | 通知渠道、工作区文件、流量取证、工具开关 |
-| 其余 24 组 | — | `assets` `companies` `settings` `task-archives` `task-templates` `update` `auth` `tokens` … |
+| `harness` | 33 | `/api/harness/{ready,capabilities,files,diff,budget,workers,replay,checkpoints,browser}` |
+| `tasks` | 26 | `POST /api/tasks`、`POST /api/tasks/{id}/control`、`PUT /api/tasks/{id}/project` |
+| `exploration` | 19 | `PATCH /api/exploration/findings/{id}`、复测、证据绑定流量口 |
+| `conversations` | 13 | `POST /api/conversations/{id}/messages` |
+| `llm` | 7 | `/api/llm/{profiles,records,models,model-catalog}` |
+| `intercept` | 7 | `GET /api/intercept/pending`、`POST /api/intercept/pending/{id}/decide` |
+| `traffic` | 5 | `GET /api/traffic`、`GET /api/traffic/exchange`、`POST /api/traffic/replay` |
+| `auth` | 3 | `POST /api/auth/{init,login}` |
+| `chat` | 3 | `POST /api/chat`（旧版对话入口，保留，未接线） |
+| `report` | 2 | `GET /api/report/pentest`、`GET /api/report`（旧版，保留） |
+| `side-questions` | 2 | `GET /api/side-questions/{id}/events` |
+| `health` `agui` `tokens` `audit` `mcp` `skills` `active` | 各 1 | `/api/health`、`/api/agui/agent`、`/api/tokens/daily`、`/api/audit`、`/api/mcp`、`/api/skills`、`POST /api/active` |
 
 ### 事件流契约（AG-UI）
 
@@ -465,8 +467,8 @@ GET /api/agui/agent?task=N&since=<seq>&follow=1
 | 能力与取证 | 「系统 → 能力」列出全部供给面；「取证」列出有绑定与无绑定的发现 |
 | 回放 | 「系统 → 回放」：结构指纹、工具分布、拒绝事件、Markdown 原文（与 harness-gate 同源） |
 | 事件 | `/api/agui/agent?task=N&since=<seq>&follow=1` |
-| 日志 | `GET /api/logs` 与 `GET /api/logs/stream`（内存环形 + 落库历史） |
-| 令牌 | `/api/tokens/{daily,usage}`、`/api/llm/records`（含原文录制） |
+| 日志 | 控制台没有日志流接口（`GET /api/logs`、`/api/logs/stream` 已在 S6-TRIM 删除）；看服务端标准输出或容器日志；单次 LLM 调用的原文记录见 `/api/llm/records` |
+| 令牌 | `/api/tokens/daily`（按 UTC 日聚合）、`/api/llm/records`（含原文录制）；按会话 / 全局汇总口（`/api/tokens/usage`）已删 |
 
 界面原则：**后端没有的能力，界面禁用并写明原因，不做假控件**。例如 F12 的 network 表后端尚未建模，
 面板就直接写明「不在此版本」，而不是画一个空表格。
@@ -481,7 +483,7 @@ GET /api/agui/agent?task=N&since=<seq>&follow=1
 | **审批门** | 规则匹配（正则/工具名/参数）+ 可选 LLM judge；命中 `ask` 必须人工放行才执行；子代理继承同一套 hooks |
 | **审计** | 每次工具调用与结果成对落库（含被拒绝的那次及原因）；可回放、可导出 |
 | **范围** | 任务目标 + 已登记的 scope 就是授权边界；越界需显式登记并给依据 |
-| **密钥** | LLM 密钥存库，接口**不回显**；JWT 密钥来自可执行文件同级 `jwt.key`（权限 0600） |
+| **密钥** | LLM 密钥存库，接口**不回显**；JWT 密钥来自可执行文件同级 `harness-jwt.key`（权限 0600） |
 | **上传** | 原子落盘（临时文件 + rename），不会留半截文件 |
 | **DSN 脱敏** | 日志与错误里不打印连接串密码 |
 | **网络** | 通知投递默认拒绝回环/内网地址（SSRF 面），需要本机 SMTP 中继时显式设 `ARTEX_NOTIFY_ALLOW_LOCAL=1` |
@@ -496,8 +498,8 @@ GET /api/agui/agent?task=N&since=<seq>&follow=1
 
 | 端口 | 用途 | 默认绑定 |
 |---|---|---|
-| `8787` | 控制台 + API | `:8787`（全接口） |
-| `8788` | 流量记录代理（mitm） | `127.0.0.1:8788` |
+| `8797` | 控制台 + API | `:8797`（全接口） |
+| `8798` | 流量记录代理（mitm） | `127.0.0.1:8798` |
 
 ### 备份
 
@@ -512,9 +514,10 @@ GET /api/agui/agent?task=N&since=<seq>&follow=1
 `start.sh` 是守护脚本，自更新靠"退出码 → 重新拉起"完成：
 
 ```bash
-./artex -h                  # 列出全部 flag（默认值即内置默认）
-curl -s localhost:8787/api/health   # {"ok":true,"version":"..."}
-# 界面「设置 → 更新」或 POST /api/update/apply
+./artex-harness -h                  # 列出全部 flag（默认值即内置默认）
+curl -s localhost:8797/api/health   # {"ok":true,"version":"..."}
+# 升级用 ./update.sh（Docker 拉镜像重建，或本地重新编译）；控制台已没有更新入口
+#（`POST /api/update/apply` 等更新口已在 S6-TRIM 删除）
 ```
 
 换装后进程以约定退出码退出，守护脚本拉起新版本；**连续启动失败会自动回滚到上一版**。
@@ -566,7 +569,7 @@ ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema�
 | 症状 | 先看 | 常见原因 / 处理 |
 |---|---|---|
 | 控制台能打开，但事件流一条不动 | 「系统 → 就绪」的 `llm` 项 | `profiles=0` → 引擎 idle。去「供应商与模型」加端点并激活 |
-| 页面满屏 401 | 浏览器 `localStorage` 里的 `artex_token` | 令牌过期或 `jwt.key` 换过 → 重新登录；服务端密钥变了要清 local storage |
+| 页面满屏 401 | 浏览器 `localStorage` 里的 `artex_token` | 令牌过期或 `harness-jwt.key` 换过 → 重新登录；服务端密钥变了要清 local storage |
 | 登录页说"无法读取登录状态" | 服务端日志 + PG 连通性 | 数据库不可用时服务端回 503 而**不是** `initialized:false`（避免误覆盖已设密码） |
 | 浏览器面板「未启动 / 未连通」 | 是否有 `npx`；`chrome-devtools` 是否要 `--remote-debugging-port=9222` | 装 Node 或镜像里预装；点「重建会话」看耗时与错误 |
 | 任务卡在审批 | 侧栏盾牌徽标 / `GET /api/intercept/pending` | 有 `ask` 命中，去点允许或拒绝；拒绝也要点（不点就一直等） |

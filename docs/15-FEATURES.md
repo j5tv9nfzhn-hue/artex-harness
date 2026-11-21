@@ -3,7 +3,7 @@
 > 每一项都写清楚**入口在哪、点了发生什么、落到哪个端点**。凡"后端有但界面没有"的，
 > 明确标出来，不写成好像已经能点。
 >
-> 约定：入口路径以控制台为准（`http://<host>:8787/app/`）。`⌘` 在 Windows/Linux 上按 `Ctrl`。
+> 约定：入口路径以控制台为准（`http://<host>:8797/app/`）。`⌘` 在 Windows/Linux 上按 `Ctrl`。
 > 所有 API 都需要 `Authorization: Bearer <token>`（登录后自动带上）。
 >
 > **配套**：模块划分 / 依赖 / 数据流 → [`16-ARCHITECTURE-DETAIL.md`](16-ARCHITECTURE-DETAIL.md)；
@@ -21,7 +21,7 @@
 | 登录 | `/app/` 登录门 | `POST /api/auth/login` → 拿 JWT 存 `localStorage`。错误密码显示服务端原话（"用户名或密码错误"），不是原始 JSON。 |
 | 数据库不可用时的表现 | 同上 | 服务端回 503 而不是 `initialized:false`——界面显示"无法读取登录状态 + 原因"，**不会**谎称"还没设密码"而让人去覆盖已有密码。 |
 | 令牌失效自动回登录 | 任意请求返回 401 | 全局事件 `artex:unauthorized` → 卸载控制台、回到登录门。不在每个面板各报一遍。 |
-| 改密码 | 设置 → 运行环境 | `POST /api/auth/change-password`。 |
+| 改密码 | 控制台没有改密码入口 | 在服务器上运行 `./reset-password.sh`（改 `settings` 表的 `auth.password_hash`；`POST /api/auth/change-password` 已在 S6-TRIM 删除）。 |
 
 ## 二、两条产品线（对话 vs 运行）
 
@@ -183,11 +183,11 @@
 | 子页 | 能做什么 |
 |---|---|
 | 供应商与模型 | 增删改 LLM 端点（格式/密钥/模型/上下文窗口）；发现模型清单；激活某个配置作为默认；测试连通性。**仓库不带任何预设供应商**。 |
-| 插件 · MCP | 增删 MCP 服务器（stdio/http/sse）；刷新工具列表；查看已缓存工具数；启用/停用。 |
-| 技能 | 列出 `skills/` 下的技能目录；上传 zip；查看文件树、读/写/删单个文件；未命中（想调但不存在）的技能名统计。 |
-| 权限与审批 | 审批规则（`allow`/`ask`/`deny`）增删改与开关；LLM judge 配置（失败动作、等待超时动作）。**审批门是唯一否决点**，前端只是它的入口。 |
-| 会话日志 | `GET /api/llm/records`：每次 LLM 调用的原文记录，可按任务/模型筛选与删除。 |
-| 运行环境 | 工作区根目录、python 探测、Git Bash 探测（Windows）、shell 选择、改密码。 |
+| 插件 · MCP | 只读列出 MCP 服务器（名称、传输方式、启用状态）；新增 / 删除 / 刷新工具列表、启用/停用没有 HTTP 入口。 |
+| 技能 | 只读列出 `skills/` 下的技能目录；上传 zip、文件树、单个文件读写、未命中统计没有 HTTP 入口。 |
+| 权限与审批 | 只读列出审批规则（`allow`/`ask`/`deny`）；规则增删改、开关与 LLM judge 配置没有 HTTP 入口。**审批门是唯一否决点**，前端只是它的入口。 |
+| 会话日志 | `GET /api/llm/records`：每次 LLM 调用的原文记录，可按任务/模型筛选（`?task=`/`?model=`）；删除记录的口（`DELETE /api/llm/records`）已删。 |
+| 运行环境 | 只读展示服务、版本、监听地址、事件协议与运行期预算；工作区根目录、python/Git Bash 探测、shell 选择、改密码没有入口，改密码用服务器上的 `./reset-password.sh`。 |
 | 外观 | 亮/暗/跟随系统（`artex.appearance`，首帧前应用，避免先亮后翻）。 |
 
 ## 十一、命令面板与快捷键
@@ -217,7 +217,7 @@
 | 委派结果 / 隔离目录 / journal | `<data>/delegations/<taskID>/<did>/`、`delegations.jsonl` |
 | 检查点 | `<data>/checkpoints/<taskID>` |
 | 流量证据 blob | `<data>/evidence/blobs/<hash前2位>/<hash>.bin` |
-| 流量记录（mitmproxy） | `<data>/traffic`（`-proxy` 端口，默认 `127.0.0.1:8788`，`-proxy ""` 关闭） |
+| 流量记录（mitmproxy） | `<data>/traffic`（`-proxy` 端口，默认 `127.0.0.1:8798`，`-proxy ""` 关闭） |
 
 **进程内状态**（重启即失，已知边界）：
 
@@ -253,12 +253,12 @@
 
 ```bash
 # 就绪自检
-curl -s -H "Authorization: Bearer $TOK" localhost:8787/api/harness/ready | jq .
+curl -s -H "Authorization: Bearer $TOK" localhost:8797/api/harness/ready | jq .
 # 能力清单
-curl -s -H "Authorization: Bearer $TOK" localhost:8787/api/harness/capabilities | jq '.summary'
+curl -s -H "Authorization: Bearer $TOK" localhost:8797/api/harness/capabilities | jq '.summary'
 # 回放指纹
-curl -s -H "Authorization: Bearer $TOK" "localhost:8787/api/harness/replay?task=1" | jq '{hash,fingerprint}'
+curl -s -H "Authorization: Bearer $TOK" "localhost:8797/api/harness/replay?task=1" | jq '{hash,fingerprint}'
 # 绑定项目目录
-curl -s -X PUT localhost:8787/api/tasks/1/project -H "Authorization: Bearer $TOK" \
+curl -s -X PUT localhost:8797/api/tasks/1/project -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' -d '{"project_dir":"/home/user/project"}'
 ```

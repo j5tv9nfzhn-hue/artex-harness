@@ -54,9 +54,9 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8787", "HTTP listen address")
-		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
-		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
+		addr    = flag.String("addr", ":8797", "HTTP listen address")
+		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data-harness"), "data directory (default: data-harness/ next to the executable)")
+		proxy   = flag.String("proxy", "127.0.0.1:8798", "traffic recording proxy address (empty to disable)")
 	)
 	flag.Parse()
 
@@ -81,7 +81,7 @@ func run() int {
 	}
 
 	// surface which config file the binary reads (absolute, so `go run`'s relative
-	// "config.json" — resolved against the CWD — is unambiguous).
+	// "artex-harness.json" — resolved against the CWD — is unambiguous).
 	cfgPath := config.Path()
 	if abs, e := filepath.Abs(cfgPath); e == nil {
 		cfgPath = abs

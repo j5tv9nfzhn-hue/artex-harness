@@ -1,17 +1,19 @@
 package server
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
 )
 
-func TestInheritedActivityDetailAndRelationDeletion(t *testing.T) {
+// TestInheritedTaskRelationDeletionOnSourceDelete 覆盖任务继承关系的删除：
+// 删掉 source 任务后，current 任务的 SourceTaskIDs 必须随之清空。
+//
+// 2026-11-21 S6-TRIM 改写：原测试还断言了 GET /api/exploration/activity/{id}
+// 返回的跨任务可见性（planner 记录不透传、worker 结果透传），该端点已删，
+// 可见性规则随 handler 一起没了，这部分断言无法保留。
+func TestInheritedTaskRelationDeletionOnSourceDelete(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) - skipping", err)
@@ -32,10 +34,9 @@ func TestInheritedActivityDetailAndRelationDeletion(t *testing.T) {
 		_, _ = m.DeleteTask(source.ID, DeleteTaskOptions{})
 	})
 
-	plannerStep, err := source.Store.AppendActivity(db.Activity{
+	if _, err := source.Store.AppendActivity(db.Activity{
 		Worker: "planner", Kind: "text", Summary: "private planner", Detail: "private planner detail",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	intentID, err := source.Store.AddIntent(map[string]any{"summary": "completed source work"}, 1, nil, "planner")
@@ -45,40 +46,10 @@ func TestInheritedActivityDetailAndRelationDeletion(t *testing.T) {
 	if err := source.Store.SetIntentState(intentID, "done"); err != nil {
 		t.Fatal(err)
 	}
-	workerStep, err := source.Store.AppendActivity(db.Activity{
+	if _, err := source.Store.AppendActivity(db.Activity{
 		NodeID: &intentID, Worker: "worker", Kind: "result", Summary: "shared result", Detail: "shared worker detail",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
-	}
-
-	s := New(context.Background(), m, t.TempDir(), t.TempDir(), t.TempDir())
-	token, err := signJWT(s.jwtKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fetchDetail := func(stepID int64) string {
-		req := httptest.NewRequest(http.MethodGet,
-			fmt.Sprintf("/api/exploration/activity/%d?task=%s", stepID, current.ID), nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("activity detail %d: status=%d body=%s", stepID, rec.Code, rec.Body.String())
-		}
-		var body struct {
-			Detail string `json:"detail"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		return body.Detail
-	}
-	if got := fetchDetail(plannerStep); got != "" {
-		t.Fatalf("source planner transcript leaked through API: %q", got)
-	}
-	if got := fetchDetail(workerStep); got != "shared worker detail" {
-		t.Fatalf("terminal inherited worker detail missing: %q", got)
 	}
 
 	if _, err := m.DeleteTask(source.ID, DeleteTaskOptions{}); err != nil {

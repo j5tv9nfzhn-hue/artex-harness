@@ -63,7 +63,7 @@ make build-all  # 控制台 + 后端
 2. **注释解释"为什么"**，不复述"做了什么"。反直觉的地方（阈值、顺序、并发假设）必须写理由。
 3. **不做假控件**：后端没有的能力，界面禁用并写明原因。
 4. **失败必须可见**：不允许 `catch {}` 静默；每个错误态要有原因 + 重试。
-5. **不要提交**：`web/node_modules/`、`data/`、`jwt.key`、`*.log`、编译出的 `artex` 二进制、
+5. **不要提交**：`web/node_modules/`、`data-harness/`、`harness-jwt.key`、`*.log`、编译出的 `artex-harness` 二进制、
    临时脚本与 dump。提交前 `git status` 自查。
 6. `server/console-app/` 是**刻意提交**的构建产物（`go:embed` 需要），改了前端就一起提交。
 

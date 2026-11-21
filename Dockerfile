@@ -27,16 +27,16 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# 预编译好的对应架构二进制（build.sh 的输出布局：dist/artex-linux-<arch>/artex）
-COPY dist/artex-linux-${TARGETARCH}/artex /app/artex
+# 预编译好的对应架构二进制（build.sh 的输出布局：dist/artex-harness-linux-<arch>/artex-harness）
+COPY dist/artex-harness-linux-${TARGETARCH}/artex-harness /app/artex-harness
 # 守护启动脚本：进程退出后按退出码决定是否重新拉起，页面一键更新靠它完成换装。
 # 它同时负责把 SIGTERM 转发给 artex —— docker stop 只把信号发给 PID 1，
 # 不转发的话 artex 收不到、做不了优雅关闭，10 秒后被 SIGKILL 硬杀。
 COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh
+RUN chmod +x /app/artex-harness /app/start.sh
 COPY skills/ /app/skills/
-# data/（SQLite + jwt.key）持久化点
-VOLUME ["/app/data"]
-EXPOSE 8787 8788
+# data-harness/ 持久化点
+VOLUME ["/app/data-harness"]
+EXPOSE 8797 8798
 ENTRYPOINT ["/app/start.sh"]
-CMD ["-addr", ":8787", "-proxy", ":8788"]
+CMD ["-addr", ":8797", "-proxy", ":8798"]

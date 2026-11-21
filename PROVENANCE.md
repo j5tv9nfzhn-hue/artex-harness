@@ -181,6 +181,76 @@ provider 会被调用 8 次而不是承诺的 5 次。新增独立布尔标志�
 | `docker-compose.bench.yml` | 删除（引用不存在的 `bench/.env` 与 `Dockerfile.bench`） |
 | `README.md` / `ARCHITECTURE.md` | 控制台行数更正为约 3.8k |
 
+### 3.10 阶段一 S6-P0（2026-11-21，本仓库新增，非上游）
+
+详见 `docs/stages/S6-P0.md`。三处结构性改动，均不改提示词正文与 planner/worker 行为：
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `guard/intent.go`（新增）、`guard/guard.go` | 意图级确定性分类 + 硬拒绝底座。Critical（`rm -rf /`、`mkfs`、`dd of=/dev/`、`shred`、`DROP/TRUNCATE`）在 DB 规则之前机械拦截，不可从 UI 删除。`hardDeny` 默认 true，`WithHardDeny(false)` 仅测试用。 | 行为变更（有意）：旧测试 `TestPreToolUsePassthrough` 曾断言无拦截器时 `rm -rf /` 放行，现改为硬拒绝并更新测试 |
+| `guard/scope.go`（新增）、`server/task_llm.go` | 恢复 RoE 范围强制。有范围行且目标不在范围内时拒绝，提示用 `add_task_scope` 登记；无范围行时 fail open。`DBScopeChecker` 每次读库，不缓存。 | 新增强制点，legacy 任务 fail open |
+| `harness/sandbox/sandbox.go`（新增） | 每任务隔离策略最小版：`ValidatePath` 防穿越、`ScrubEnv` 删敏感键、`CheckHost` 默认拒内网/回环 + 白名单。明确不是容器运行时，容器后端留给阶段二。 | 新增包，接口预留 |
+
+验证：Go 1.26.3，`go vet ./guard/... ./harness/sandbox/...` 与 `go vet ./server/...` 通过；`go test ./guard/... ./harness/sandbox/... -count=1` 通过（15 个测试）。未跑 `make test-db`（需 PG）。
+
+### 3.11 Hotfix：与上游 ARTEX 的端口 / 数据库 / 身份隔离（2026-11-21，本仓库新增，非上游）
+
+详见 `docs/stages/S6-HOTFIX-ISOLATION.md`。Julie 提醒解压后与 ARTEX 端口、数据库冲突合并后实施，只改身份与默认值，不改 guard / harness 行为：
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| HTTP / 代理端口 | `:8787` / `127.0.0.1:8788` | `:8797` / `127.0.0.1:8798` |
+| 数据库 / 用户 | `artex` / `artex` | `artex_harness` / `artex_harness`；本地 PG 宿主端口 `5433:5432` |
+| 数据目录 / JWT / 配置 | `./data` / `jwt.key` / `config.json` | `./data-harness` / `harness-jwt.key` / `artex-harness.json`（旧 `config.json` 仅回退，不从 ARTEX 的 `jwt.key` 迁移） |
+| 二进制 / Compose | `artex`，镜像 `autumn27/artex`、服务 `artex`、卷 `pgdata` | `artex-harness`，镜像 `artex-harness:latest`（本地构建）、服务 `artex-harness`、卷 `pgdata-harness` |
+
+验证：`go vet ./config/... ./server/... ./guard/... ./harness/sandbox/... ./db/...` 通过；`go test ./config/... ./guard/... ./harness/sandbox/... -count=1` 通过（含新增 `TestPathPrefersHarnessConfig`）；`go build ./cmd/artex` 后 `-h` 显示默认 `:8797` / `127.0.0.1:8798` / `data-harness`；`docker-compose.yml` YAML 解析通过，`bash -n` 检查相关脚本通过。未跑 `make test-db`（需 PG）。迁移注意：旧库 `artex` 不自动搬到 `artex_harness`，旧 `data/` / `jwt.key` 不自动改名，旧会话会失效，需重新登录。
+
+### 3.12 阶段二 S6-P1（2026-11-21，本仓库新增，非上游）
+
+详见 `docs/stages/S6-P1.md`。在上游已有的证据 blob、流量绑定、复测、`evidence_integrity`（报告非门）、基础报告之上，加三层上游没有的东西：
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `evidence/audit.go`（新增） | 每任务 `audit.jsonl` 哈希链：`hash = SHA256(prev_hash \|\| 规范化条目)`，`Verify()` 重算并检查 seq/prev 链接；篡改、删条、单条伪造均可定位。`AppendToFile` 续写旧链，损坏文件大声失败。 | 新增，防篡改证据（非防篡改证明，见文档局限） |
+| `harness/verify/verify.go`（新增） | 独立验证门（纯函数）：标已确认须同时满足流量证据绑定 ≥1、复现步骤非空、最新复测 `reproduced`；人工越过须显式理由并标记。风险评级为严重程度映射，非完整 CVSS。 | 新增强制点 |
+| `traffic/replay.go`（新增） | F12 结构化行 + 过滤；`ParseReplaySpec` 脱敏凭据头并生成 curl；`Replay` 30s 超时实发请求并按状态分桶/2xx 同码判定是否复现。 | 新增 |
+| `report/pentest.go`（新增） | 专业报告模板：授权范围、执行摘要、风险评级表、按严重程度排序的发现明细（验证状态、复现步骤、证据、修复建议，缺项明示）、附录审计链验证结果。旧 `report.Markdown` 不动。 | 新增 |
+| `server/harness_verify.go`（新增）、`server/server.go` | `PATCH findings/{id}` 标 confirmed 时跑门（不通过 422 + 原因；人工越过写审计链）；新接口 `GET /api/harness/audit-chain`、`POST /api/traffic/replay`、`GET /api/report/pentest`。 | 接线 |
+
+验证：`go vet ./server/... ./evidence/... ./harness/verify/... ./traffic/... ./report/...` 通过；`go test ./evidence/... ./harness/verify/... ./report/... ./config/... ./guard/... ./harness/sandbox/...` 通过，traffic 新增测试通过；`go build ./cmd/artex` 通过。未跑 `make test-db`（需 PG），服务端数据库路径未在真库验证。
+
+前端接入（2026-11-21 同日追加，详见 `docs/stages/S6-P1.md`「前端接入」）：控制台此前无发现页与流量页，故四个入口都接在右侧「系统」侧栏（`web/src/System.jsx`），不另开路由。新增 `web/src/Stage2.jsx`（审计链面板、F12 流量表 + 重放、专业报告面板、验证门失败展示 `GateFailure`），`System.jsx` 增加审计链/流量/报告三个签，取证签每条发现下加「标记为已确认」与 422 行内失败原因 + 人工越过（理由必填，写入审计链）；`web/src/styles.css` 仅加三处样式。`npm ci && npm run build` 通过，`server/console-app/` 构建产物已更新；`go vet ./server/...` 与 `go build ./cmd/artex` 通过。未在浏览器里完整点过一遍（需真库 + 真流量），部署后逐项验证。
+
+### 3.13 阶段 S6-TRIM：删除后端不需要的 HTTP 层（2026-11-21，本仓库新增，非上游）
+
+详见 `docs/stages/S6-TRIM-INVENTORY.md`（盘点）与文末“删除执行记录”。后端直接拉取自上游 ARTEX 原版控制台后端，Harness 不需要的部分从后端删除，前端再按删完的后端对齐。本轮只删 HTTP 层，不动底层。
+
+| 改动 | 内容 |
+|---|---|
+| 删路由 184 条 | DELETE 两组全删：多智能体 exploration 专属 34 条 + 管理面 150 条。`server/server.go` 的 `mux.HandleFunc` 由 293 条减为 109 条，全集 311 条 → 127 条；KEEP 三组（65 条）与 UNCERTAIN 62 条一律未动。脚本逐条核对：184 条注册已全部清除，对应 handler 在 `server/` 下无剩余定义；KEEP/UNCERTAIN 127 条注册全部仍在。 |
+| 整文件删除（7 个） | `server/goals_api.go`、`server/triggers.go`、`server/task_assets.go`、`server/task_templates.go`、`server/task_categories.go`、`server/notify_api.go`、`server/sync_scopesentry.go`（文件内所有 handler 都在 DELETE 清单且无别处复用的非 handler 符号）。 |
+| 逐函数删除、文件保留 | `server/server.go`（33 个 handler）、`server/server_mgmt.go`（43 个 handler + 若干死符号）、`server/constraints_api.go`、`server/intent_intervention.go`、`server/gitbash.go`、`server/auth.go`、`server/findings_groups.go`、`server/workspace.go`、`server/harness_intervene.go`、`server/asset_intercept.go`、`server/task_intercept.go`、`server/update.go`、`server/customtool.go`、`server/commands.go`、`server/assets.go`、`server/intercept.go`、`server/task_archives.go`。死 helper/死常量一并清理；被 KEEP/UNCERTAIN 代码复用的符号保留（如 `constraintInjectPlanner`、`saveUpload`、`intervenePauseAll` 全局急停、`assetStore()`、拦截引擎 `interceptListPending`/`interceptListRules`/`interceptDecide`、`queueTaskArchive` 工作链、`RestartRequested`/`SetBootUpdateState`）。 |
+| 没动的东西 | db 方法、db 表、agent 工具、引擎逻辑、前端一律未动。很多被删 handler 背后的 db 方法仍被 agent 工具或服务端内部使用。 |
+| 测试随端点一起删 | 整文件删 `server/update_test.go`、`server/assets_scope_test.go`、`server/harness_intervene_test.go`、`server/prompt_vars_test.go`；另在 7 个测试文件里删掉测被删端点的测试（共 30 个测试函数 + 若干孤儿夹具/helper），测保留功能的测试修好并保留（`server/notify_api_test.go` 保留 5 个推送引擎纯函数防漂移断言）。 |
+
+验证：`go vet ./...` 通过；`go test ./... -count=1` 除 server 包 8 个测试外全部通过——8 个失败（`finding_traffic_test.go` 5 个、`finding_workflow_test.go` 3 个）全部在 `NewManager` 夹具处报“未找到数据库配置”（本机无 `ARTEX_PG_DSN`、无 `server/artex-harness.json`），属 `make test-db` 类、需真库，且测的是 UNCERTAIN 保留功能，与删除无关；`go build -trimpath -o /tmp/artex-harness-trim ./cmd/artex` 通过，`-h` 确认默认 `:8797` / `127.0.0.1:8798`。真库验证见 3.14（2026-11-21 已跑，全绿）。
+
+删除后仍存在的问题：前端未受影响（`web/src/` 内无任何对已删路径的引用，实际调用的方法 + 路径组合全部仍在注册表内），但仍需按指示做“前端按删完的后端对齐”的全面复核；上游文档已于 2026-11-21 同步改写（见 3.14）；`server/update.go` 的 `bootUpdateState` 现已无调用方，为保 `cmd/artex/main.go` 不动而保留。
+
+### 3.14 真库验证 make test-db（2026-11-21，本仓库新增，非上游）
+
+详见 `docs/stages/S6-VERIFY-DB.md`。本机装 PostgreSQL 16.15（apt），起专用测试库 `artex_harness_test`（与开发库 `artex_harness` 隔离，`ARTEX_TEST_DB` 与 DSN 库名一致才放行破坏性测试）。`go test ./... -count=1 -timeout 25m` 30 个包全绿。
+
+| 改动 | 内容 |
+|---|---|
+| 删后端后遗留的过期测试（11 个） | 第一轮 8 个（`core_test.go` 的 `/api/stats`、`finding_workflow_test.go` 的 PUT `/api/settings` ×3、`gitbash_test.go` 的 settings 面板、`inheritance_api_test.go` 的 activity 详情、`intercept_detail/filter_test.go`、`mgmt_test.go` 的 `/api/agents`）与完整跑才现形的 3 个（`task_categories_test.go`、`task_control_routes_test.go` 的已删路由、`task_archives_test.go` 的已删列表/批量口）——删文件 5 个（`intercept_detail/filter_test.go`、`mgmt_test.go`、`task_categories_test.go`、`task_control_routes_test.go`），其余改写到还存在的层（settings 开关改走 `pg.SetBool`，Git Bash 改走库 + `applyGitBash`，继承关系只保留删 source 后的关系清理断言，归档只保留单任务入队断言）。生产代码未动。 |
+| 上游既有的测试隔离 bug（1 个） | `llmrec/TestSideUsageRecordedOnceOnConsumerCancellation` 假定 `llm_usage` 表已存在，本包又没有 TestMain 建表，单独跑或 schema 被重置后就 `42P01`；补 `pg.EnsureLLMUsageTable()`。 |
+| 阶段二 HTTP 表面补回归测试 | 新增 `server/stage2_http_test.go`（3 个）：确认 422（无证据）→ 人工越过 200 → 审计链 valid；审计链 + 专业报告渲染；流量重放 200 复现。 |
+| 未修（定性为抖动） | `agent/TestBlackboardToolsReadDirectSources` 全量并行跑时偶发 PG 死锁（40P01），单独 `-count=3` 通过；`server/TestBackgroundDelegationNotifierDeliversAndDrains` 全量跑时偶发失败，单独通过。 |
+
+注意：apt 装的 PostgreSQL 不随虚拟机重启保留（本次验证中途虚拟机重启后需重装，运行时的 os-intent replay 未自动恢复它）；测试库与开发库的隔离只靠库名区分，重装后需重建 `harness_test` 用户与 `artex_harness_test` 库。浏览器里点一遍阶段二四个面板仍未做（需部署 + 真流量）。
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：

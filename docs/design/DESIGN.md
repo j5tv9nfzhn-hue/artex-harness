@@ -105,8 +105,11 @@
 | **策略** | 检查器「策略」页：审批模式开关 + 硬拦截说明 + 可观测项 | 无 |
 | **回放 / 评测** | 主标签页，直接调 `/api/harness/replay`、`/consistency` | 有但样式陈旧 |
 
-> 所有控件都调**已存在的确定性 API**（`/api/harness/*`、`/api/tasks/{id}/intents/{iid}/steer`、
-> `/api/intercept/judge`），没有为了好看而虚构能力；改不动的就如实只读。
+> 所有控件都调**已存在的确定性 API**（`/api/harness/*`、`POST /api/tasks/{id}/say`、
+> `POST /api/intercept/pending/{id}/decide`），没有为了好看而虚构能力；改不动的就如实只读。
+> （2026-11-21 修订：原文引用的 `/api/tasks/{id}/intents/{iid}/steer` 与
+> `/api/intercept/judge` 已在 S6-TRIM 删除——前者随 planner/worker 管线删除，
+> 后者连同 judge 配置口一起删除；现以会话内纠偏与待决裁决口为准。）
 
 ## 六、静态演示（已移除）
 

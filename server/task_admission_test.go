@@ -488,50 +488,6 @@ func TestUnavailableTaskWaitsForActiveLLMCallBeforeParking(t *testing.T) {
 	}
 }
 
-func TestRerunAdmissionFailureRestoresIntentState(t *testing.T) {
-	m, err := NewManager(t.TempDir(), "")
-	if err != nil {
-		t.Skipf("postgres unavailable (%v) - skipping", err)
-	}
-	defer m.Close()
-	task, err := m.CreateTask("failed rerun admission", "restore intent", nil, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	taskID, _ := strconv.ParseInt(task.ID, 10, 64)
-	defer func() {
-		_, _ = m.pg.Exec(`UPDATE tasks SET deleted_at=NULL WHERE id=$1`, taskID)
-		_, _ = m.DeleteTask(task.ID, DeleteTaskOptions{})
-	}()
-	intentID, err := task.Store.AddIntent(map[string]any{"summary": "retry"}, 1, nil, "planner")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := task.Store.SetIntentBlockedReason(intentID, "network_unavailable"); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.SetTaskStatus(task.ID, "done"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.pg.Exec(`UPDATE tasks SET deleted_at=now() WHERE id=$1`, taskID); err != nil {
-		t.Fatal(err)
-	}
-
-	s := newAdmissionTestServer(m, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks/1/intents/1/rerun", nil)
-	req.SetPathValue("id", task.ID)
-	req.SetPathValue("iid", fmt.Sprintf("%d", intentID))
-	rec := httptest.NewRecorder()
-	s.rerunIntent(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	node, err := task.Store.GetNode(intentID)
-	if err != nil || node == nil || node.State != "blocked" || node.BlockedReason != "network_unavailable" {
-		t.Fatalf("rerun rollback: node=%+v err=%v", node, err)
-	}
-}
-
 func TestTaskLLMResolutionRejectsInvalidExplicitProfile(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
@@ -661,27 +617,6 @@ func TestTaskLLMResolutionReportsDatabaseFailure(t *testing.T) {
 	s.taskLLMResolutionHandler(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestTokenStatsWithoutTaskReturnsStableShape(t *testing.T) {
-	s := &Server{m: &Manager{tasks: map[string]*Task{}}}
-	req := httptest.NewRequest(http.MethodGet, "/api/exploration/tokens?task=missing", nil)
-	rec := httptest.NewRecorder()
-	s.tokenStats(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Workers  []db.TokenUsage        `json:"workers"`
-		Sessions []db.SessionTokenUsage `json:"sessions"`
-		Total    TokenTotalDTO          `json:"total"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Workers == nil || payload.Sessions == nil {
-		t.Fatalf("empty collections must serialize as arrays: %s", rec.Body.String())
 	}
 }
 

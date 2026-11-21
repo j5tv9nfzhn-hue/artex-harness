@@ -106,7 +106,7 @@
 
 - `server/console-app/` 是**被提交进仓库的构建产物**，因为 `go:embed` 需要它在编译时存在，
   这样纯 Go 构建不需要 node_modules。改前端后必须 `make web` 再提交。
-- `web/node_modules/`、`data/`、`jwt.key`、`*.log`、编译出的 `artex` 一律不进版本库。
+- `web/node_modules/`、`data-harness/`、`harness-jwt.key`、`*.log`、编译出的 `artex-harness` 一律不进版本库。
 
 ## 相关文档
 

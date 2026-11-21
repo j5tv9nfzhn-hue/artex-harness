@@ -94,17 +94,6 @@ func TestCoreTaskLifecyclePG(t *testing.T) {
 		t.Fatalf("list tasks: %d", code)
 	}
 
-	// The task detail header consumes the top-level engine mode while some clients
-	// read the active-task snapshot. Keep both representations in sync.
-	code, out = doRetry("GET", "/api/stats?task="+id, nil)
-	if code != 200 {
-		t.Fatalf("task stats: %d (%v)", code, out)
-	}
-	activeTask, ok := out["active_task"].(map[string]any)
-	if !ok || activeTask["engine_mode"] != out["engine_mode"] {
-		t.Fatalf("engine mode mismatch: top=%v active_task=%v", out["engine_mode"], activeTask)
-	}
-
 	// delete → cascade removes the exploration subgraph and selected related data
 	taskDir := filepath.Join(m.dir, "tasks", id)
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {

@@ -1135,3 +1135,19 @@ a { color: var(--c-link); }
   color: var(--c-ink-2);
   white-space: pre-wrap; word-break: break-word;
 }
+
+/* Stage 2 (S6-P1) panels in System.jsx / Stage2.jsx. */
+.traffic-select {
+  background: var(--c-inset);
+  color: var(--c-ink-2);
+  border: 0.5px solid var(--c-border-1);
+  border-radius: var(--r-2);
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.traffic-row { cursor: pointer; }
+.traffic-row.selected { background: var(--c-chip); }
+.report-md h1, .report-md h2, .report-md h3 { margin: 12px 0 6px; }
+.report-md table { border-collapse: collapse; margin: 8px 0; }
+.report-md th, .report-md td { border: 0.5px solid var(--c-border-1); padding: 4px 8px; font-size: 12px; }
+.report-md p, .report-md li { font-size: 12px; line-height: 1.7; }

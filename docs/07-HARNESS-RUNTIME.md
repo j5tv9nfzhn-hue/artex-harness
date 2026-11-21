@@ -152,19 +152,19 @@ harnessLoop (server/harness_loop.go)
 ARTEX_PG_DSN=... go run ./eval/cmd/harness-smoke
 
 # 2) 就绪
-curl -s -H "Authorization: Bearer $TOK" localhost:8787/api/harness/ready | jq .
+curl -s -H "Authorization: Bearer $TOK" localhost:8797/api/harness/ready | jq .
 
 # 3) 真实一轮（需端点）
-curl -s -X POST localhost:8787/api/tasks -H "Authorization: Bearer $TOK" \
+curl -s -X POST localhost:8797/api/tasks -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' \
   -d '{"goal":"…","description":"…","harness_mode":true}'
 
 # 4) 对话续跑
-curl -s -X POST localhost:8787/api/tasks/<id>/say -H "Authorization: Bearer $TOK" \
+curl -s -X POST localhost:8797/api/tasks/<id>/say -H "Authorization: Bearer $TOK" \
   -d '{"message":"把结论收敛成 3 条"}' -H 'Content-Type: application/json'
 
 # 5) 三栏数据
-curl -s localhost:8787/api/harness/diff/<id>?path=notes.txt
-curl -s localhost:8787/api/harness/budget/<id>
-curl -s localhost:8787/api/harness/workers/<id>
+curl -s localhost:8797/api/harness/diff/<id>?path=notes.txt
+curl -s localhost:8797/api/harness/budget/<id>
+curl -s localhost:8797/api/harness/workers/<id>
 ```

@@ -8,15 +8,15 @@
 #
 # 两种部署：
 #   local （默认）—— 宿主机直接用 psql 连数据库。连接信息按以下优先级获取：
-#                    命令行参数 > --dsn/$ARTEX_PG_DSN > config.json 的 database.*
+#                    命令行参数 > --dsn/$ARTEX_PG_DSN > artex-harness.json 的 database.*
 #   docker        —— 通过 `docker compose exec`（或 `docker exec`）在 postgres
 #                    容器内执行 psql（compose 默认不对宿主暴露 5432，故走容器内）。
 #
 # 用法示例：
-#   ./reset-password.sh                          # 本地，自动读 config.json/环境，交互输入新密码
+#   ./reset-password.sh                          # 本地，自动读 artex-harness.json/环境，交互输入新密码
 #   ./reset-password.sh -p 'NewPass!'            # 本地，直接给定新密码
-#   ./reset-password.sh --dsn postgres://u:p@h:5432/artex
-#   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -W pass -d artex
+#   ./reset-password.sh --dsn postgres://u:p@h:5433/artex_harness
+#   ./reset-password.sh -H 127.0.0.1 -P 5433 -U artex_harness -W pass -d artex_harness
 #   ./reset-password.sh -m docker                # docker 部署（读 .env 的 POSTGRES_*）
 #   ./reset-password.sh -m docker -c pg容器名 --exec docker
 #
@@ -32,7 +32,7 @@ MODE=""            # local | docker（空=自动判定）
 DSN=""
 HOST="" PORT="" USER="" DBPASS="" DBNAME="" SSLMODE=""
 CONFIG=""
-CONTAINER=""       # docker 模式的 postgres 服务/容器名（默认 postgres）
+CONTAINER=""       # docker 模式的 postgres 服务/容器名（默认 postgres-harness）
 EXEC_KIND=""       # compose | docker（docker 模式下用哪种 exec；空=自动）
 NEWPASS=""
 ASSUME_YES=0
@@ -63,8 +63,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ---- 从 config.json 读取 database.*（仅 local 模式、且未显式给出连接时）-----
-# 优先用 python3 解析（健壮）；缺 python3 时退回 grep（config.json 为规整分字段）。
+# ---- 从 artex-harness.json 读取 database.*（仅 local 模式、且未显式给出连接时）-----
+# 优先用 python3 解析（健壮）；缺 python3 时退回 grep（artex-harness.json 为规整分字段）。
 read_config_json() {
   local path="$1"
   [[ -f "$path" ]] || return 1
@@ -112,7 +112,7 @@ apply_config_fields() {
 
 # ---- 自动判定模式 ---------------------------------------------------------
 if [[ -z "$MODE" ]]; then
-  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
+  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-artex-harness.json}" || -f "${CONFIG:-config.json}" ]]; then
     MODE="local"
   elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
     MODE="docker"
@@ -148,12 +148,13 @@ SQL
 
 # ---- 执行 -----------------------------------------------------------------
 if [[ "$MODE" == "local" ]]; then
-  # 连接信息优先级：命令行 > --dsn/$ARTEX_PG_DSN > config.json
+  # 连接信息优先级：命令行 > --dsn/$ARTEX_PG_DSN > artex-harness.json
   if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
     [[ -n "${ARTEX_PG_DSN:-}" ]] && DSN="$ARTEX_PG_DSN"
   fi
   if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
-    cfg="${CONFIG:-config.json}"
+    cfg="${CONFIG:-artex-harness.json}"
+    [[ -f "$cfg" ]] || cfg="${CONFIG:-config.json}"
     if [[ -f "$cfg" ]]; then
       info "从 $cfg 读取数据库配置"
       apply_config_fields < <(read_config_json "$cfg")
@@ -167,9 +168,9 @@ if [[ "$MODE" == "local" ]]; then
     PSQL_ARGS=("$DSN")
     target="$DSN"
   else
-    [[ -n "$USER"   ]] || die "缺少数据库用户（-U）或有效的 config.json/DSN"
-    [[ -n "$DBNAME" ]] || die "缺少数据库名（-d）或有效的 config.json/DSN"
-    HOST="${HOST:-127.0.0.1}"; PORT="${PORT:-5432}"; SSLMODE="${SSLMODE:-disable}"
+    [[ -n "$USER"   ]] || die "缺少数据库用户（-U）或有效的 artex-harness.json/DSN"
+    [[ -n "$DBNAME" ]] || die "缺少数据库名（-d）或有效的 artex-harness.json/DSN"
+    HOST="${HOST:-127.0.0.1}"; PORT="${PORT:-5433}"; SSLMODE="${SSLMODE:-disable}"
     PSQL_ARGS=(-h "$HOST" -p "$PORT" -U "$USER" -d "$DBNAME")
     [[ -n "$SSLMODE" ]] && export PGSSLMODE="$SSLMODE"
     [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
@@ -189,7 +190,7 @@ if [[ "$MODE" == "local" ]]; then
 else
   # ---- docker ----
   command -v docker >/dev/null 2>&1 || die "未找到 docker"
-  CONTAINER="${CONTAINER:-postgres}"
+  CONTAINER="${CONTAINER:-postgres-harness}"
 
   # 选择 exec 方式：优先 docker compose exec（服务名），否则 docker exec（容器名）
   if [[ -z "$EXEC_KIND" ]]; then
@@ -205,8 +206,8 @@ else
     # shellcheck disable=SC1091
     set -a; . ./.env; set +a
   fi
-  DUSER="${USER:-${POSTGRES_USER:-artex}}"
-  DNAME="${DBNAME:-${POSTGRES_DB:-artex}}"
+  DUSER="${USER:-${POSTGRES_USER:-artex_harness}}"
+  DNAME="${DBNAME:-${POSTGRES_DB:-artex_harness}}"
   [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
   [[ -z "${PGPASSWORD:-}" && -n "${POSTGRES_PASSWORD:-}" ]] && export PGPASSWORD="$POSTGRES_PASSWORD"
 
