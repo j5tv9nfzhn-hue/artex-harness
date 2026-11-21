@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	// 早先它们与开发服务器共用同一个库，一次 go test 就把在用的 LLM profile 删了。
 	// 这一步必须排在 ResetTestSchema 之前——schema 重建本身就是破坏性动作，
 	// 放在后面等于"拦住了也已经清空"（2026-11-15 就是这样清掉了开发库）。
-	if ok, why := db.TestDatabaseAllowed(dsn, "ARTEX_TEST_DB"); !ok {
+	if ok, why := db.TestDatabaseAllowed(dsn, "HARNESS_TEST_DB"); !ok {
 		os.Stderr.WriteString("[test] skipped destructive DB suite: " + why + "\n")
 		os.Exit(0)
 	}

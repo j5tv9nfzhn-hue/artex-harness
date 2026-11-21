@@ -39,7 +39,7 @@
 ```bash
 # 1) 起一个独立库与数据目录（不要指向开发库）
 createdb artex_shots
-ARTEX_PG_DSN="postgres:///artex_shots?sslmode=disable" ./artex -addr 127.0.0.1:8796 -data /tmp/shotdata &
+HARNESS_PG_DSN="postgres:///artex_shots?sslmode=disable" ./artex -addr 127.0.0.1:8796 -data /tmp/shotdata &
 TOK=$(curl -s -X POST localhost:8796/api/auth/init -H 'Content-Type: application/json' \
       -d '{"password":"…"}' | jq -r .token)
 

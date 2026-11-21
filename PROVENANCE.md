@@ -403,6 +403,95 @@ Julie 2026-11-21 18:08 CST 指示：不再重跑整轮真实任务，只确保�
 - 验证：本地重新打包产出 `artex-0.3.3-linux-amd64.zip`，CI 三项校验逐项模拟通过（文件存在、`unzip -tq`、包内含 `artex-harness`/`start.sh`/`skills/`/`config.example.json`、冒烟 `-h` 含 `-addr`）；`gofmt`、`go vet ./selfupdate/...`、`go test ./selfupdate/...`、`go build ./...` 通过。
 - 注意：存档名刻意保持 `artex-…zip` 是为了与 CI、更新器一致；若日后想把存档名也改成 `artex-harness-…zip`，须同步改 plan.sh（NAME_RE 与矩阵包名）、AssetName、github_test.go fixture、assemble.sh、ci.yml 冒烟路径，缺一不可。本次推送触发的新 CI 运行是否变绿，见推送后核查；仓库至今未发布过 Release，一键更新仍需先发 Release 才能真正可用。
 
+### 3.24 数据库隔离强制修复：不再读取 ARTEX_PG_DSN / ARTEX_CONFIG（混库）
+
+**问题**：2026-11-21 Julie 报告：同一台机器上同时部署 ARTEX 与 artex-harness，目录/数据目录/二进制全部分开，但两边都连到了同一个 PG 库，数据混在一起；PG 里只有 `artex` 库，没有 `artex_harness`。
+
+**根因**：隔离 hotfix（3.11）只改了配置文件的默认值（库名 artex_harness、端口 5433 等），没动环境变量的优先级。`config.PostgresDSN()` 的优先级是 `ARTEX_PG_DSN` > 配置文件，而 `ARTEX_PG_DSN` 是与上游 ARTEX 共用的全局变量名——机器上只要存在它（ARTEX 的 systemd 单元、共享 shell profile 等），harness 就会优先服从它，自己的 `artex-harness.json`（database `artex_harness`）被直接忽略。另有一条同型路径：`config.Path()` 会读 `ARTEX_CONFIG`（指向上游 config.json，库同样是 `artex`），且它优先于本地的 `artex-harness.json` 文件。连文档都写错了：`docs/03-ARCHITECTURE.md` 的 systemd 示例单元（artex-harness.service）里 `Environment=ARTEX_PG_DSN=…/artex`，照着部署必然混库。
+
+**复现（修复前）**：本地 PG 建 `artex` 与 `artex_harness` 两个空库；配置文件 database 指向 artex_harness，全局 `ARTEX_PG_DSN` 指向 artex；启动未修复版二进制，日志 `[pg] 数据库配置来源: 环境变量 ARTEX_PG_DSN`，结果 `artex` 建出 53 张表，`artex_harness` 0 张——与 Julie 描述的现象完全一致。
+
+**修复**（强制隔离，harness 只认自己的名字）：
+- `config.PostgresDSN()`：优先级改为 `HARNESS_PG_DSN` > 配置文件；`ARTEX_PG_DSN` 永不读取。无配置时报错，若检测到 `ARTEX_PG_DSN` 已设置，错误里追加提示改用 `HARNESS_PG_DSN`。
+- `config.Path()`：不再读取 `ARTEX_CONFIG`（`HARNESS_CONFIG` 保留；改名前安装的本地 `config.json` 回退仍在，覆盖无碍）。
+- `server.NewManager`：启动时若 `ARTEX_PG_DSN` 已设置，记一条警告（已忽略该变量 + 当前实际来源），让误配置不再悄悄发生；来源行 `[pg] 数据库配置来源` 本就存在。
+- `cmd/artex/main.go`：配置文件缺失时的提示改为 `HARNESS_PG_DSN`。
+- 测试链同步改名（测试本身也走 `config.PostgresDSN()`，不改会断）：`ARTEX_PG_DSN` → `HARNESS_PG_DSN`，`ARTEX_TEST_DB` → `HARNESS_TEST_DB`（`db.TestDatabaseAllowed` 的报错文案改为用传入的变量名）；涉及 `db/agent/server` 三个 TestMain、`Makefile` test-db、`config_test.go`（新契约测试：`ARTEX_PG_DSN` 已设置时配置文件获胜、单独存在时报错；`ARTEX_CONFIG` 已设置时被忽略）。
+- 同型入口一并改名：`eval/cmd/harness-smoke`、`eval/cmd/harness-gate` 的 `-dsn` 默认值，`reset-password.sh`（否则改密码会改到 ARTEX 库上），`docker-compose.yml` 的 service 环境变量。
+- 文档同步：README（快速开始、环境变量表、测试节）、CONTRIBUTING、`config.example.json`、`docs/03`（systemd 示例改 `HARNESS_PG_DSN=…/artex_harness`）、`docs/16`、`docs/07`、`docs/screenshots/README.md`、`docs/stages/S6-HOTFIX-ISOLATION.md`（配置行 + 迁移说明订正）。上游原文（`README-ARTEX.md`、`docs/upstream/`）未动；其余阶段文档的历史记述未动。
+
+**验证**：
+- 复现对照（修复后，同一场景）：日志 `[pg] 数据库配置来源: 配置文件 …/artex-harness.json (database 字段)` + 警告 `已忽略环境变量 ARTEX_PG_DSN`；`artex` 0 张表，`artex_harness` 53 张。
+- `go test ./config/...`（新契约测试）通过；`HARNESS_PG_DSN` + `HARNESS_TEST_DB=artex_harness_test` 下 `go test ./db/` 通过、server TestMain 探针通过；只设旧变量时配置测试仍通过（负对照）。`make test-db` 全量（db+server 两包）未跑，只验证了上述定向部分。
+- `gofmt`（本次改动文件；其余脏文件为改前遗留，未动）、`go vet`（config/db/server/cmd/eval 五包）、`go build ./...` 通过。
+- 复现用的两个库与临时目录已清（`artex`/`artex_harness` 删库，`~/workspace/.tmp/dsn-repro` 已删），PG 恢复到复现前状态（仅剩 `artex_harness_test`）。
+
+**遗留（同型，未动，等 Julie 定）**：`ARTEX_SKILL_DIR`（SkillDir 优先级）、`ARTEX_LLM_PROVIDER/MODEL/BASE_URL/PROXY/STREAM`（无 UI 时的模型端点引导）、`ARTEX_BTW_MAX_OUTPUT_TOKENS` 仍是通用名——同一台机器上若全局设置，harness 会沿用 ARTEX 的 skill 目录与模型端点。不混数据，但属于同一类隔离缺口；要改就是同一套改名，建议下一批一起做。另：已混进 `artex` 库的 harness 数据不会自动迁走，需人工处理（`pg_dump` 到新库、或清掉 harness 的表——动手前须先分清哪些表是 ARTEX 自己的）。
+
+### 3.25 前端修：品牌标、三个空壳选择器、设置弹窗透明
+
+**问题**（2026-11-21 Julie 在控制台上看到）：① 侧边栏展开后，侧边栏顶部与右侧顶栏都还有 ARTEX 的“8 字”图标（无穷符号）；② 工作目录、权限选择器、模型选择器都是空壳；③ 打开设置后右侧面板是透明的。
+
+**根因与修复**：
+- 品牌标：`BrandMark`（`web/src/ui.jsx`）用的还是上游 ARTEX 的无穷符号 `web/public/artex-mark.png`（CSS mask），侧栏字标还写着 `artex`。已换成我们自己的几何 “H” 标（`web/public/harness-mark.png`，白底透明 mask），旧文件已删；侧栏字标改为 `artex-harness`，字号 26→22px 以免在 280px 侧栏里挤不下。顶栏用的同一个 BrandMark，一并改掉。`logo.png`/`logo.svg` 未被任何界面引用，未动。
+- 设置透明：`DialogContent`（`web/src/ui.jsx`）里 `{...rest}` 展开在 `className="ui-dialog"` 之后，SettingsView 传的 `className="settings-dialog"` 把 `.ui-dialog` 整个盖掉了——背景、边框、圆角、阴影全丢，弹窗只剩左栏自带的背景，右栏直接透出后面的聊天内容。已改为 className 合并；另补 `.settings-main` 规则（flex 纵向 + 明确背景），ScrollArea 的 flex:1 至此才真正生效。
+- 三个空壳（都在 `web/src/Composer.jsx` 输入框）：
+  - 工作目录芯片本来是纯展示的 `<span>`。现为按钮，点开右侧工作台（项目目录绑定/切换在那里）；无任务时禁用。
+  - 权限芯片本来是纯展示的 “平台管控”。现为按钮，点开设置 → 权限与审批（拦截规则）；后端没有任务级权限开关，不造假控件。
+  - 模型选择器触发面只渲染 placeholder，永远写着 “选择模型”，当前模型名从不显示。现触发面显示当前模型名（无模型时仍诚实显示 “未配置模型”）；思考档位触发面同理，显示当前档位或 “跟随模型（中）”。
+- 接线（`web/src/App.jsx` / `SettingsView.jsx`）：新增 `settingsSection` 状态与 `openSettings(section)`，SettingsView 接 `initialSection`，每次打开定位到调用方指定的分区；Composer 接 `onOpenWorkbench` / `onOpenPermissions`。
+
+**验证**：`npm run build` 通过（新产物 `index-BWVO7YPF.js`）；产物内含 `harness-mark.png` 且无 `artex-mark.png` 引用，`.settings-main` 已进构建后 CSS。浏览器点按验证未能完成：云端浏览器无法直连本机 127.0.0.1；改走 localhost.run 隧道时虚拟机重启，PG 被清空，测试服务端与隧道同灭；重装 PG 时系统 apt replay（`apt-get update`，自 19:11 起）一直占着锁未释放，重装被迫放弃。故只有构建与产物核查，未做浏览器点按——部署后需在真控制台上目视确认一遍。
+
+### 3.26 字体：圆润化（Nunito + JetBrains Mono 本地打包）
+
+**问题**（2026-11-21 Julie）：界面、终端、浏览器控制台的字体都是默认系统字体，看起来锋利、不够圆润。
+
+**根因**：`web/src/tokens.css` 的字体栈只写了名字——"Inter" / "JetBrains Mono" 等字体从未真正加载过（仓库里没有字体文件，也不走 CDN），所以所有机器上都回退到系统默认 sans/mono。设计想要的字体从未渲染过。
+
+**修复**：
+- 界面 sans 换成 Nunito（圆角终端的友好无衬线，可变字重 200–1000，latin 子集），终端/浏览器控制台/代码的 mono 换成 JetBrains Mono（tokens 里本来就写着它，现在才真正有这个文件）。
+- 两个字体都是可变 woff2 latin 子集，各约 40KB，从 @fontsource-variable/* 拷进 `web/public/fonts/`，随单二进制一起发布——不走 CDN，离线可用；`tokens.css` 顶部加 @font-face（`font-display: swap`）。package.json 新增 `@fontsource-variable/nunito`、`@fontsource-variable/jetbrains-mono` 两个依赖（字体来源）。
+- 中文回退：第一顺位改为圆体 "Yuanti SC"（苹果设备自带，圆润），其后 PingFang SC / 微软雅黑 / Noto Sans SC；刻意删掉了 -apple-system / Segoe UI——它们就是之前回退到的锋利系统默认字体。完整圆体中文字体要好几 MB，没打包：Windows/Android 上的中文仍走系统字体（雅黑 / Noto Sans SC），拉丁字母、数字、标点全部变圆。
+- serif（品牌/标题/正文）未动。
+
+**验证**：`npm run build` 通过（新产物 `index-DUIhjJc8.js` / `index-Cr4hj8iP.css`）；产物 `server/console-app/fonts/` 内含两个 woff2，CSS 引用无误；woff2 经 fontTools 校验有效（Nunito 292 字形），本地渲染样张确认字母圆润。真控制台上的整界面效果未做浏览器点按（沿用 3.25 的环境原因：PG 未恢复、隧道未拿到域名），部署后目视确认。
+
+### 3.27 设置页标准化：统一骨架 + 接通 MCP/规则/技能的写口
+
+**问题**（2026-11-21 Julie）：设置里所有功能组件像是随意拼上去的——放个名字、一个按钮就完事，缺乏严格的标准化和统一性，特别是 MCP 页。
+
+**根因**（核查属实，两层）：
+- 视觉层：10 个分区用了 4 种列表形态——Card+Table（models）、裸 Flex 行（mcp、perm）、Badge 云（skills）、surface Table（logs）；空态 4 种写法；按钮 size 1/2、variant soft/solid/ghost 混用无规则；分区没有统一的说明行；间距 gap 2/3 混用。
+- 功能层（更根本）：MCP、拦截规则、技能三个分区只接了 GET 口，后端早已有的写口全没接——MCP 有 POST 保存 / DELETE / GET tools / POST refresh，拦截规则有 POST/PUT/DELETE/toggle，技能有 POST 新建 / DELETE / PUT meta / 上传。只读展示当然只能“放个名字”。
+- 另：perm 分区当时读的是不存在的字段（`r.tool`、`r.reason`，真实字段是 `name` / `match_target` / `match_type` / `pattern` / `action`），所以只显示了 pattern；三个既有对话框的 Select 触发面不传当前值，永远只写“选择”（与 Composer 同款 bug）。
+
+**标准**（写进 `web/src/SettingsView.jsx` 文件头注释，后续改动须遵守）：
+- 每个分区同一骨架：① `SectionIntro` 一句灰色小字说明分区管什么；② 列表用 Card 分组（models 的供应商卡片是样板）或 ghost Table，行内操作统一 `IconButton size="1" variant="ghost"`（编辑 Pencil / 删除 Trash2 红色 / 刷新 RefreshCw / 设为默认 Check），启用态统一 Switch；③ 底部主操作统一 `Button size="2" variant="soft"` + Plus；④ 空列表统一 `EmptyState`。只读分区（env/logs）只有 ①。
+- 对话框统一：Title size 4 + Description + Field 行 + 底部右对齐 [取消][保存]。Select 触发面必须传 children 显示当前值。
+
+**修复**：
+- MCP：每服务一张 Card——名称 + transport + URL/命令 + 参数个数，右侧 Switch 启用、刷新（POST refresh 重发现工具）、编辑、删除；卡片内展开工具列表（GET tools，Badge + 悬停描述，加载/失败/空态齐全）；新增/编辑对话框（名称、传输方式 stdio/http/sse、命令、参数每行一个、URL、环境变量 KEY=VALUE 每行、启用、跳过 TLS 校验），按 transport 校验必填；底部“添加 MCP 服务”。
+- 拦截规则：改成与 models 同款 ghost Table（规则名 / 动作 Badge / 匹配对象·方式 / 内容 Code / 启用 Switch / 编辑删除）；新增/编辑对话框（规则名、动作 放行/转人工审批/拦截、匹配对象 工具名/工具参数、匹配方式 精确/正则、匹配内容、提示消息、优先级默认 100、启用）；超时字段界面不暴露，编辑时原样保留。
+- 技能：每技能一张 Card——名称 + 关联 MCP Badge + 调用次数/任务数 + 描述 + 文件数 + 最近使用；删除；新建对话框（名称按后端 validSkillName 校验、描述必填、许可/兼容性可选）。上传既有技能仍走服务端 skills/ 目录，本次未接上传口。
+- 其余分区只补 SectionIntro（models/logs/env/run/update/account/look），run 与 update、account 底部重复的说明文字移到 intro 里删掉重复；三处既有 Select 触发面补当前值显示（供应商协议、模型思考开关/强度）。
+
+**验证**：`npm run build` 通过（新产物 `index-DWqm9_tx.js` / `index-Cr4hj8iP.css`）。浏览器点按验证未做（沿用 3.25 的环境原因：PG 未恢复、隧道未拿到域名），部署后目视确认，重点看 MCP 卡片的工具列表与三个对话框。
+
+### 3.28 侧栏：会话按工作目录分两区 + 真正的右键菜单
+
+**问题**（2026-11-21 Julie）：侧栏要区分清楚“工作目录选择后下的会话记录”和“默认目录的会话记录”，且两者必须实现鼠标右键选项菜单。
+
+**根因**（核查属实，两层）：
+- 分区缺失：侧栏此前只按日期分组（置顶/今天/昨天/本组/更早），`project_dir` 字段根本没进分组逻辑——选过工作目录的会话和没选过的混在同一列表里。数据上两者是分明的：`project_dir` 非空 = 绑定了工作目录（绝对路径，一任务一目录，projectGuard 保证），空 = 任务自有目录 `<数据目录>/tasks/<id>`（即默认目录）。
+- 右键菜单是假的：`ui.jsx` 的 ContextMenu 与 DropdownMenu 共用同一个左键触发（包一层 span 指望点击冒泡）。右键什么都不发生；左键点行反而弹菜单。顺带，行内 "…" 下拉按钮的 IconButton 自带 stopPropagation，冒泡到触发层之前就被拦掉，下拉菜单也打不开。
+
+**修复**：
+- 侧栏分组（`web/src/Sidebar.jsx`）：会话分两大区。工作目录区——选过工作目录的会话，按目录再分组，目录头就是完整路径（mono、超长截断、悬停看全路径），组内按置顶、最近活动排序；默认目录区——没选过工作目录的会话，区内沿用原来的日期分组。两区头都是加重的分区头（`.group-head--section`），带数量；对话、旧管线任务两区不变。虚拟列表的 head/row 高度判定随新 kind（sechead/dirhead）同步改。
+- 右键菜单（`web/src/ui.jsx`）：DropdownMenu 与 ContextMenu 分家。ContextMenu 的 Trigger 只接 onContextMenu——preventDefault 后在光标处打开，左键点行照常打开会话；DropdownMenu 的 Trigger 把切换并进触发子元素的 onClick（克隆合并），子元素原有的 stopPropagation 只拦冒泡、不拦合并后的切换，行内 "…" 菜单随之恢复。菜单面加视口内收敛（光标贴边时不溢出）。右键菜单的操作与 "…" 下拉菜单同款：打开、复制 ID、置顶/取消置顶、重命名、归档、删除。
+
+**验证**：`npm run build` 通过（新产物 `index-DJUFt12W.js` / `index-CTkw2qWW.css`）。浏览器点按验证未做（沿用 3.25 的环境原因：PG 未恢复、隧道未拿到域名），部署后目视确认，重点看两区分组与右键菜单（尤其行内 "…" 是否恢复、右键是否在光标处打开、左键点行是否不再弹菜单）。
+
 ## 4. Go module 路径为什么保持不变
 
 本仓库继续使用 `module github.com/Autumn-27/artex`，不改为新路径。原因：

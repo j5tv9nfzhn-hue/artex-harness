@@ -13,15 +13,16 @@ import { ArrowUp, FolderClosed, Plus, ShieldCheck, SlidersHorizontal, Square, Za
  *      模型名 + 上下文占用 + 发送按钮。
  *
  * 只有后端真的提供的选项才出现：
- *   模型      GET /api/llm/profiles + PUT /api/tasks/{id}/llm
+ *   模型      GET /api/llm/profiles + PUT /api/tasks/{id}/llm；触发面显示当前模型名
  *   思考等级  来自当前 profile 的 reasoning_effort（任务级覆盖）
  *   速度      运行时按输出字符/耗时实时估算
- *   权限      后端未暴露任务级开关 —— 明确禁用并说明，不做假控件
+ *   工作目录  芯片不是展示：点开工作台，在那里绑定/切换项目目录
+ *   权限      后端未暴露任务级开关 —— 芯片点开设置 → 权限与审批（拦截规则），不做假控件
  */
 
 const EFFORT_LABEL = { low: "低", medium: "中", high: "高", minimal: "极低", xhigh: "极高" };
 
-export default function Composer({ taskId, convId, live, budget, task, onSent, onTuned }) {
+export default function Composer({ taskId, convId, live, budget, task, onSent, onTuned, onOpenWorkbench, onOpenPermissions }) {
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState("");
   const [text, setText] = useState("");
@@ -127,12 +128,14 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
   return (
     <div className="composer-seat">
       <div className="composer">
-        {/* ① 芯片行：项目 + 模式。两项都是真实状态，不是装饰。 */}
+        {/* ① 芯片行：项目 + 模式。工作目录芯片点开工作台（绑定/切换项目目录），不是摆设。 */}
         <div className="composer-chips">
-          <span className="chip" title={task?.project_dir || task?.goal || "当前工作区"}>
-            <FolderClosed size={12} />
-            {task?.project_dir ? task.project_dir.split(/[\\/]/).filter(Boolean).pop() : "工作区"}
-          </span>
+          <Tooltip content="工作目录：点开工作台，在那里绑定或切换项目目录">
+            <button className="chip" disabled={!taskId} onClick={() => onOpenWorkbench?.()} title={task?.project_dir || task?.goal || "当前工作区"}>
+              <FolderClosed size={12} />
+              {task?.project_dir ? task.project_dir.split(/[\\/]/).filter(Boolean).pop() : "工作区"}
+            </button>
+          </Tooltip>
           <span className="chip" title="平台管控：内置破坏性命令拦截始终生效；转人工审批由拦截规则决定">
             <ShieldCheck size={12} />
             标准模式
@@ -175,7 +178,10 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
               <span className="tool-chip">
                 <Zap size={12} />
                 <Select.Root value={profileId} onValueChange={changeModel} disabled={!profiles.length || !!convId}>
-                  <Select.Trigger placeholder={profiles.length ? "选择模型" : "未配置模型"} />
+                  {/* 触发面显示当前模型名：只给 placeholder 时它永远写着“选择模型”，看着像没选 */}
+                  <Select.Trigger placeholder={profiles.length ? "选择模型" : "未配置模型"}>
+                    {current?.name || current?.model || null}
+                  </Select.Trigger>
                   <Select.Content>
                     {profiles.map((p) => (
                       <Select.Item key={p.id} value={String(p.id)}>{p.name || p.model}</Select.Item>
@@ -189,7 +195,10 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
               <span className="tool-chip">
                 <SlidersHorizontal size={12} />
                 <Select.Root value={effort || "inherit"} onValueChange={changeEffort} disabled={!taskId}>
-                  <Select.Trigger />
+                  <Select.Trigger>
+                    {effort ? (EFFORT_LABEL[effort] || effort)
+                            : ("跟随模型" + (current?.reasoning_effort ? `（${EFFORT_LABEL[current.reasoning_effort] || current.reasoning_effort}）` : ""))}
+                  </Select.Trigger>
                   <Select.Content>
                     <Select.Item value="inherit">
                       跟随模型{current?.reasoning_effort ? `（${EFFORT_LABEL[current.reasoning_effort] || current.reasoning_effort}）` : ""}
@@ -200,11 +209,11 @@ export default function Composer({ taskId, convId, live, budget, task, onSent, o
               </span>
             </Tooltip>
 
-            <Tooltip content="后端未提供任务级权限开关；当前由平台管控规则与审批门决定">
-              <span className="tool-chip tool-chip--static">
+            <Tooltip content="权限与审批：点开设置，查看拦截规则与审批配置（后端没有任务级权限开关，这里不造假控件）">
+              <button className="tool-chip" onClick={() => onOpenPermissions?.()}>
                 <ShieldCheck size={12} />
                 平台管控
-              </span>
+              </button>
             </Tooltip>
 
             <Tooltip content="插入工作区文件引用（@）">

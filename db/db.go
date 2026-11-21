@@ -117,7 +117,8 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 }
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (artex-harness.json). There is no
+// Precedence: env HARNESS_PG_DSN > config file (artex-harness.json). The
+// upstream ARTEX_PG_DSN is never read (see config.PostgresDSN). There is no
 // built-in default — it errors if neither source is configured.
 func DSN() (dsn, source string, err error) {
 	return config.PostgresDSN()
@@ -654,18 +655,18 @@ WHERE NOT EXISTS (SELECT 1 FROM intercept_rules WHERE name = $1)`,
 // was serving. One `go test ./db/` therefore wiped the live LLM profile and the
 // task list mid-session (the config "reset to claude-x" that kept coming back).
 // A test database must be opted into explicitly, and must not be the one the
-// server is using: ARTEX_TEST_DB must equal the DSN's database name.
+// server is using: HARNESS_TEST_DB must equal the DSN's database name.
 func TestDatabaseAllowed(dsn string, allowEnv string) (bool, string) {
 	want := strings.TrimSpace(os.Getenv(allowEnv))
 	if want == "" {
-		return false, "ARTEX_TEST_DB 未设置：拒绝在未显式指名的数据库上运行破坏性测试（这些用例会 TRUNCATE 真实表）"
+		return false, allowEnv + " 未设置：拒绝在未显式指名的数据库上运行破坏性测试（这些用例会 TRUNCATE 真实表）"
 	}
 	name := DatabaseName(dsn)
 	if name == "" {
 		return false, "无法从 DSN 解析数据库名"
 	}
 	if name != want {
-		return false, fmt.Sprintf("ARTEX_TEST_DB=%q 与 DSN 数据库 %q 不一致", want, name)
+		return false, fmt.Sprintf("%s=%q 与 DSN 数据库 %q 不一致", allowEnv, want, name)
 	}
 	return true, ""
 }

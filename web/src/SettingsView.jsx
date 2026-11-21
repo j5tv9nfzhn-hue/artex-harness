@@ -1,5 +1,5 @@
 import { authedFetch, errorText } from "./lib/auth.js";
-import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Switch, Table, Text, TextField, Tooltip } from "./ui.jsx";
+import { useEffect, useState } from "react";import { Badge, Box, Button, Card, Checkbox, Code, Flex, Heading, IconButton, ScrollArea, Separator, Dialog, Select, Switch, Table, Text, TextArea, TextField, Tooltip } from "./ui.jsx";
 import { ArrowLeft, ArrowUpCircle, Check, Cpu, FileText, KeyRound, Palette, Pencil, Plug, Plus, RefreshCw, Shield, SlidersHorizontal, Sparkles, Terminal, Trash2, Wand2 } from "lucide-react";
 
 /* 设置：与 DSH 相同的形态——打开后【左侧栏变成设置导航】，主区显示该分区的表单。
@@ -7,6 +7,20 @@ import { ArrowLeft, ArrowUpCircle, Check, Cpu, FileText, KeyRound, Palette, Penc
  *   左侧 = 分区枚举（供应商 / 插件·MCP / 技能 / 权限 / 会话日志 / 运行环境 /
  *   运行开关 / 更新 / 账户安全 / 外观）
  *   右侧 = 选中分区的表单
+ *
+ * ── 设置页的统一标准（3.27；Julie 指出此前各分区是随意拼上去的）──
+ * 每个分区都按同一骨架排布，禁止各写各的：
+ *   ① SectionIntro：一句灰色小字，说明这个分区管什么；
+ *   ② 列表：Card 分组（models 的供应商卡片是样板）或 ghost Table，
+ *      行内操作统一用 IconButton size="1" variant="ghost"
+ *     （编辑 Pencil / 删除 Trash2 红色 / 刷新 RefreshCw / 设为默认 Check），
+ *      启用态统一用 Switch；
+ *   ③ 底部主操作：Button size="2" variant="soft" + Plus；
+ *   ④ 空列表统一用 EmptyState。
+ * 对话框统一：Title size 4 + Description + Field 行 + 底部右对齐 [取消][保存]。
+ * 只读展示（env/logs）只有 ①，没有 ③④。
+ * Select 的触发面必须传 children 显示当前值（只给 placeholder 时它永远写着
+ * “选择”，看着像没选——见 Composer 同款修复）。
  */
 
 // 统一走 lib/auth.js：token 键与请求重试都由那一处决定（此前这里只读单个键，
@@ -28,8 +42,11 @@ const SECTIONS = [
   { id: "look", label: "外观", icon: Palette },
 ];
 
-export default function SettingsView({ open, onOpenChange, appearance, onAppearance, version, health, toast }) {
+export default function SettingsView({ open, onOpenChange, initialSection, appearance, onAppearance, version, health, toast }) {
   const [section, setSection] = useState("models");
+  // 每次打开都定位到调用方指定的分区（默认 models；输入框的权限芯片会指定 perm）。
+  // 只在 open 翻转时重置，打开后用户自己切分区不受影响。
+  useEffect(() => { if (open) setSection(initialSection || "models"); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [profiles, setProfiles] = useState([]);
   const [mcps, setMcps] = useState([]);
   const [skills, setSkills] = useState([]);
@@ -65,6 +82,83 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
     try { await jfetch(`/api/llm/profiles/${p.id}`, { method: "DELETE" }); toast.success("已删除");
       const d = await jfetch("/api/llm/profiles"); setProfiles(Array.isArray(d) ? d : d.profiles || []);
     } catch (e) { toast.error(e.message); }
+  }
+
+  /* ── MCP / 拦截规则 / 技能：后端早就有完整的增删改查（见 server.go 的
+   *    /api/mcp、/api/intercept/rules、/api/skills），此前设置页只接了 GET，
+   *    三个分区都是只读展示——这就是“一个名字一个按钮就完事”的根源。
+   *    这里把写口全部接上，与 models 分区同款：卡片/表格 + 行内操作 +
+   *    底部主操作 + 对话框。 */
+  const [mcpBusy, setMcpBusy] = useState({});
+  const [mcpDialog, setMcpDialog] = useState(null);   // null | "new" | MCPServer
+  const [mcpTick, setMcpTick] = useState(0);          // 刷新后让各卡片重读工具列表
+  const [ruleDialog, setRuleDialog] = useState(null); // null | "new" | InterceptRule
+  const [skillDialog, setSkillDialog] = useState(false);
+  async function reloadMCP() {
+    try { const d = await jfetch("/api/mcp"); setMcps(Array.isArray(d) ? d : d.servers || []); } catch (e) { setErr(e.message); }
+  }
+  async function reloadRules() {
+    try { const d = await jfetch("/api/intercept/rules"); setRules(Array.isArray(d) ? d : d.rules || []); } catch (e) { setErr(e.message); }
+  }
+  async function reloadSkills() {
+    try { const d = await jfetch("/api/skills"); setSkills(Array.isArray(d) ? d : d.skills || []); } catch (e) { setErr(e.message); }
+  }
+  async function saveMCP(body) {
+    try {
+      await jfetch("/api/mcp", { method: "POST", body: JSON.stringify(body) });
+      toast.success(body.id ? "MCP 服务已更新" : "MCP 服务已添加");
+      setMcpDialog(null); reloadMCP();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function toggleMCP(m) {
+    if (mcpBusy[m.id]) return;
+    setMcpBusy((b) => ({ ...b, [m.id]: true }));
+    try {
+      await jfetch("/api/mcp", { method: "POST", body: JSON.stringify({ ...m, enabled: !m.enabled }) });
+      setMcps((ps) => ps.map((x) => (x.id === m.id ? { ...x, enabled: !m.enabled } : x)));
+    } catch (e) { toast.error(e.message); }
+    finally { setMcpBusy((b) => ({ ...b, [m.id]: false })); }
+  }
+  async function deleteMCP(m) {
+    try { await jfetch(`/api/mcp/${m.id}`, { method: "DELETE" }); toast.success("已删除"); reloadMCP(); }
+    catch (e) { toast.error(e.message); }
+  }
+  async function refreshMCP(m) {
+    if (mcpBusy[m.id]) return;
+    setMcpBusy((b) => ({ ...b, [m.id]: true }));
+    try {
+      await jfetch(`/api/mcp/${m.id}/refresh`, { method: "POST", body: JSON.stringify({}) });
+      toast.success("工具列表已刷新"); setMcpTick((t) => t + 1);
+    } catch (e) { toast.error(e.message); }
+    finally { setMcpBusy((b) => ({ ...b, [m.id]: false })); }
+  }
+  async function saveRule(body) {
+    try {
+      if (body.id) await jfetch(`/api/intercept/rules/${body.id}`, { method: "PUT", body: JSON.stringify(body) });
+      else await jfetch("/api/intercept/rules", { method: "POST", body: JSON.stringify(body) });
+      toast.success(body.id ? "规则已更新" : "规则已添加");
+      setRuleDialog(null); reloadRules();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function toggleRule(r) {
+    try {
+      await jfetch(`/api/intercept/rules/${r.id}/toggle`, { method: "POST", body: JSON.stringify({ enabled: !r.enabled }) });
+      setRules((ps) => ps.map((x) => (x.id === r.id ? { ...x, enabled: !r.enabled } : x)));
+    } catch (e) { toast.error(e.message); }
+  }
+  async function deleteRule(r) {
+    try { await jfetch(`/api/intercept/rules/${r.id}`, { method: "DELETE" }); toast.success("已删除"); reloadRules(); }
+    catch (e) { toast.error(e.message); }
+  }
+  async function saveSkill(body) {
+    try {
+      await jfetch("/api/skills", { method: "POST", body: JSON.stringify(body) });
+      toast.success("技能已新建"); setSkillDialog(false); reloadSkills();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function deleteSkill(s) {
+    try { await jfetch(`/api/skills/${encodeURIComponent(s.name)}`, { method: "DELETE" }); toast.success("已删除"); reloadSkills(); }
+    catch (e) { toast.error(e.message); }
   }
 
   // toast 在 App 里是 {success, error, info} 对象（见 toast.jsx），不可当函数调用；
@@ -235,6 +329,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
             {section === "models" && (
               <Flex direction="column" gap="3">
+                <SectionIntro>供应商 = 端点（协议 + Base URL + 密钥 + 代理），模型挂在其下；标“默认”的模型是新任务的默认选择。</SectionIntro>
                 {providers.map((pv) => (
                   <Card key={pv.key} size="1">
                     <Flex direction="column" gap="2">
@@ -279,46 +374,107 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                   </Card>
                 ))}
                 <Button size="2" variant="soft" onClick={() => setAddProvider(true)}><Plus size={13} /> 添加供应商</Button>
-                {!providers.length ? <Text size="1" color="gray">还没有供应商。供应商 = 端点（协议 + Base URL + 密钥 + 代理），模型挂在其下。</Text> : null}
+                {!providers.length ? <EmptyState>还没有供应商。供应商 = 端点（协议 + Base URL + 密钥 + 代理），模型挂在其下。</EmptyState> : null}
               </Flex>
             )}
 
             {section === "mcp" && (
-              <Flex direction="column" gap="2">
+              <Flex direction="column" gap="3">
+                <SectionIntro>MCP 服务给 agent 提供外部工具。添加后自动发现工具列表；工具需按 agent 可见性授权后才能被调用。</SectionIntro>
                 {mcps.map((m) => (
-                  <Flex key={m.id || m.name} align="center" gap="3">
-                    <Text size="2" style={{ minWidth: 160 }}>{m.name}</Text>
-                    <Code size="1">{m.transport || "—"}</Code>
-                    <Badge size="1" variant="soft" color={m.enabled ? "green" : "gray"}>{m.enabled ? "启用" : "停用"}</Badge>
-                    <Text size="1" color="gray">{m.command || ""}</Text>
-                  </Flex>
+                  <Card key={m.id || m.name} size="1">
+                    <Flex direction="column" gap="2">
+                      <Flex align="center" gap="2" wrap="wrap">
+                        <Text size="2" weight="medium">{m.name}</Text>
+                        <Code size="1">{m.transport || "—"}</Code>
+                        {m.url ? <Code size="1">{m.url}</Code> : m.command ? <Code size="1">{m.command}</Code> : null}
+                        {m.command && parseArgs(m.args).length ? <Text size="1" color="gray">{parseArgs(m.args).length} 个参数</Text> : null}
+                        <Box style={{ marginLeft: "auto" }}>
+                          <Flex gap="1" align="center">
+                            <Switch checked={!!m.enabled} disabled={!!mcpBusy[m.id]} onCheckedChange={() => toggleMCP(m)} aria-label="启用" />
+                            <IconButton size="1" variant="ghost" aria-label="重新发现工具" disabled={!!mcpBusy[m.id]} onClick={() => refreshMCP(m)}><RefreshCw size={12} /></IconButton>
+                            <IconButton size="1" variant="ghost" aria-label="编辑" onClick={() => setMcpDialog(m)}><Pencil size={12} /></IconButton>
+                            <IconButton size="1" variant="ghost" color="red" aria-label="删除" onClick={() => deleteMCP(m)}><Trash2 size={12} /></IconButton>
+                          </Flex>
+                        </Box>
+                      </Flex>
+                      <Separator size="4" />
+                      <MCPTools serverId={m.id} tick={mcpTick} />
+                    </Flex>
+                  </Card>
                 ))}
-                {!mcps.length ? <Text size="1" color="gray">没有 MCP 服务</Text> : null}
+                {!mcps.length ? <EmptyState>还没有 MCP 服务。添加后 agent 可以调用它提供的工具。</EmptyState> : null}
+                <Button size="2" variant="soft" onClick={() => setMcpDialog("new")}><Plus size={13} /> 添加 MCP 服务</Button>
               </Flex>
             )}
 
             {section === "skills" && (
-              <Flex wrap="wrap" gap="2">
-                {skills.map((s) => <Badge key={s.name || s} size="1" variant="soft">{s.name || s}</Badge>)}
-                {!skills.length ? <Text size="1" color="gray">没有可用技能</Text> : null}
+              <Flex direction="column" gap="3">
+                <SectionIntro>技能是 agent 可调用的能力包，存在服务端的 skills/ 目录；调用次数来自实际使用记录。</SectionIntro>
+                {skills.map((s) => (
+                  <Card key={s.name || s} size="1">
+                    <Flex direction="column" gap="2">
+                      <Flex align="center" gap="2" wrap="wrap">
+                        <Text size="2" weight="medium">{s.name || s}</Text>
+                        {(s.mcps || []).map((n) => <Badge key={n} size="1" variant="soft">{n}</Badge>)}
+                        <Box style={{ marginLeft: "auto" }}>
+                          <Flex gap="1" align="center">
+                            <Text size="1" color="gray">调用 {s.calls ?? 0} 次 · {s.tasks ?? 0} 个任务</Text>
+                            <IconButton size="1" variant="ghost" color="red" aria-label="删除" onClick={() => deleteSkill(s)}><Trash2 size={12} /></IconButton>
+                          </Flex>
+                        </Box>
+                      </Flex>
+                      {s.description ? <Text size="1" color="gray" style={{ lineHeight: 1.6 }}>{s.description}</Text> : null}
+                      <Text size="1" color="gray">
+                        {(s.files || []).length} 个文件
+                        {s.last_used ? ` · 最近使用 ${String(s.last_used).replace("T", " ").slice(0, 19)}` : " · 从未调用"}
+                      </Text>
+                    </Flex>
+                  </Card>
+                ))}
+                {!skills.length ? <EmptyState>还没有技能。新建一个，或把技能目录放进服务端的 skills/ 文件夹。</EmptyState> : null}
+                <Button size="2" variant="soft" onClick={() => setSkillDialog(true)}><Plus size={13} /> 新建技能</Button>
               </Flex>
             )}
 
             {section === "perm" && (
-              <Flex direction="column" gap="2">
-                {rules.map((r) => (
-                  <Flex key={r.id} align="center" gap="3">
-                    <Badge size="1" variant="soft" color={r.action === "deny" ? "red" : r.action === "ask" ? "amber" : "green"}>{r.action || "—"}</Badge>
-                    <Text size="1">{r.tool || r.pattern || "—"}</Text>
-                    <Text size="1" color="gray">{r.reason || ""}</Text>
-                  </Flex>
-                ))}
-                {!rules.length ? <Text size="1" color="gray">没有自定义拦截规则；平台内置的破坏性命令拦截始终生效，任务级审批门见侧栏铃铛。</Text> : null}
+              <Flex direction="column" gap="3">
+                <SectionIntro>拦截规则决定工具调用是放行、拦截还是转人工审批；平台内置的破坏性命令拦截始终生效。</SectionIntro>
+                {rules.length ? (
+                  <Table.Root size="1" variant="ghost">
+                    <Table.Header><Table.Row>
+                      <Table.ColumnHeaderCell>规则</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>动作</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>匹配</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>内容</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>启用</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell />
+                    </Table.Row></Table.Header>
+                    <Table.Body>
+                      {rules.map((r) => (
+                        <Table.Row key={r.id} align="center">
+                          <Table.Cell><Text size="1">{r.name}</Text></Table.Cell>
+                          <Table.Cell><Badge size="1" variant="soft" color={r.action === "deny" ? "red" : r.action === "ask" ? "amber" : "green"}>{ACTION_LABEL[r.action] || r.action || "—"}</Badge></Table.Cell>
+                          <Table.Cell><Text size="1" color="gray">{TARGET_LABEL[r.match_target] || r.match_target} · {TYPE_LABEL[r.match_type] || r.match_type}</Text></Table.Cell>
+                          <Table.Cell><Code size="1">{r.pattern}</Code></Table.Cell>
+                          <Table.Cell><Switch checked={!!r.enabled} onCheckedChange={() => toggleRule(r)} aria-label="启用" /></Table.Cell>
+                          <Table.Cell><Flex gap="1" justify="end">
+                            <IconButton size="1" variant="ghost" aria-label="编辑" onClick={() => setRuleDialog(r)}><Pencil size={12} /></IconButton>
+                            <IconButton size="1" variant="ghost" color="red" aria-label="删除" onClick={() => deleteRule(r)}><Trash2 size={12} /></IconButton>
+                          </Flex></Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table.Root>
+                ) : <EmptyState>还没有自定义拦截规则。</EmptyState>}
+                <Button size="2" variant="soft" onClick={() => setRuleDialog("new")}><Plus size={13} /> 添加规则</Button>
               </Flex>
             )}
 
             {section === "logs" && (
-              <Table.Root size="1" variant="surface">
+              <Flex direction="column" gap="3">
+                <SectionIntro>最近 60 条 LLM 调用记录：输入输出 token 与状态。</SectionIntro>
+                <Table.Root size="1" variant="surface">
                 <Table.Header><Table.Row>
                   <Table.ColumnHeaderCell>时间</Table.ColumnHeaderCell>
                   <Table.ColumnHeaderCell>模型</Table.ColumnHeaderCell>
@@ -339,10 +495,12 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                   {!logs.length ? <Table.Row><Table.Cell colSpan={5}><Text size="1" color="gray">暂无记录</Text></Table.Cell></Table.Row> : null}
                 </Table.Body>
               </Table.Root>
+              </Flex>
             )}
 
             {section === "env" && (
-              <Flex direction="column" gap="2">
+              <Flex direction="column" gap="3">
+                <SectionIntro>运行环境是只读事实：服务、版本与运行参数来自服务端与启动配置。</SectionIntro>
                 <Row k="服务" v={health?.service || "artex-harness"} />
                 <Row k="版本" v={health?.version || version || "—"} />
                 <Row k="监听" v={window.location.host} />
@@ -354,7 +512,8 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
             )}
 
             {section === "run" && (
-              <Flex direction="column" gap="2">
+              <Flex direction="column" gap="3">
+                <SectionIntro>开关即时保存；流量捕获与 LLM 轮询切换后，后台会重建 agent 以使新状态生效。</SectionIntro>
                 {runErr ? (
                   <Card size="1"><Text size="1" color="red">{runErr} <Button size="1" variant="soft" onClick={loadRunSettings}>重试</Button></Text></Card>
                 ) : !runSettings ? (
@@ -389,7 +548,6 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                         disabled={!runSettings.task_concurrency_enabled || !!runBusy.task_concurrency_limit}
                         onClick={saveConcLimit}>保存</Button>
                     </Flex>
-                    <Text size="1" color="gray">开关即时保存；流量捕获与 LLM 轮询切换后，后台会重建 agent 以使新状态生效。</Text>
                   </>
                 )}
               </Flex>
@@ -397,6 +555,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
             {section === "update" && (
               <Flex direction="column" gap="3">
+                <SectionIntro>检查并应用服务端更新；应用或回滚后服务将重启，请稍后刷新页面。</SectionIntro>
                 {updErr ? (
                   <Card size="1"><Text size="1" color="red">{updErr} <Button size="1" variant="soft" onClick={() => checkUpdate(true)}>重试</Button></Text></Card>
                 ) : null}
@@ -439,7 +598,6 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                   <Button size="2" variant="soft" color="gray" disabled={!upd?.has_backup || updBusy}
                           onClick={rollbackUpdate}>回滚到上一版本</Button>
                 </Flex>
-                <Text size="1" color="gray">应用更新或回滚后服务将重启，请稍后刷新页面。</Text>
                 {updProg && updProg.phase !== "idle" ? (
                   <Flex align="center" gap="2">
                     <Text size="2" weight="medium">{UPD_PHASE[updProg.phase] || updProg.phase}</Text>
@@ -456,6 +614,7 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
 
             {section === "account" && (
               <Flex direction="column" gap="3" style={{ maxWidth: 420 }}>
+                <SectionIntro>修改管理员密码；新密码至少 8 位、不超过 72 字节，修改成功后当前会话不受影响，下次登录请用新密码。</SectionIntro>
                 <Field label="当前密码">
                   <TextField.Root type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" />
                 </Field>
@@ -470,18 +629,20 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
                     {pwBusy ? "修改中…" : "修改密码"}
                   </Button>
                 </Flex>
-                <Text size="1" color="gray">新密码至少 8 位、不超过 72 字节；修改成功后当前会话不受影响，下次登录请用新密码。</Text>
               </Flex>
             )}
 
             {section === "look" && (
-              <Flex align="center" gap="3">
-                <Text size="2">主题</Text>
-                {["inherit", "light", "dark"].map((v) => (
-                  <Button key={v} size="1" variant={appearance === v ? "solid" : "soft"} onClick={() => onAppearance(v)}>
-                    {v === "inherit" ? "跟随系统" : v === "light" ? "浅色" : "深色"}
-                  </Button>
-                ))}
+              <Flex direction="column" gap="3">
+                <SectionIntro>外观跟随系统，或固定浅色 / 深色。</SectionIntro>
+                <Flex align="center" gap="3">
+                  <Text size="2">主题</Text>
+                  {["inherit", "light", "dark"].map((v) => (
+                    <Button key={v} size="1" variant={appearance === v ? "solid" : "soft"} onClick={() => onAppearance(v)}>
+                      {v === "inherit" ? "跟随系统" : v === "light" ? "浅色" : "深色"}
+                    </Button>
+                  ))}
+                </Flex>
               </Flex>
             )}
           </Box>
@@ -511,6 +672,9 @@ export default function SettingsView({ open, onOpenChange, appearance, onAppeara
         } catch (e) { toast.error(e.message); } }} />
       <EditModelDialog model={editModel} onClose={() => setEditModel(null)}
         onSave={async (b) => { try { await jfetch("/api/llm/profiles", { method: "POST", body: JSON.stringify(b) }); toast.success("模型已更新"); setEditModel(null); reloadProfiles(); } catch (e) { toast.error(e.message); } }} />
+      <MCPDialog server={mcpDialog} onClose={() => setMcpDialog(null)} onSave={saveMCP} />
+      <RuleDialog rule={ruleDialog} onClose={() => setRuleDialog(null)} onSave={saveRule} />
+      <SkillDialog open={skillDialog} onClose={() => setSkillDialog(false)} onSave={saveSkill} />
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -623,7 +787,7 @@ function ProviderDialog({ open, seed, onClose, onSave }) {
           {isNew ? (<>
             <Field label="协议">
               <Select.Root value={format} onValueChange={setFormat}>
-                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Trigger style={{ width: "100%" }}>{fmtLabel(format)}</Select.Trigger>
                 <Select.Content>
                   <Select.Item value="openai">OpenAI 兼容</Select.Item>
                   <Select.Item value="anthropic">Anthropic</Select.Item>
@@ -760,7 +924,7 @@ function EditModelDialog({ model, onClose, onSave }) {
           <Flex gap="3">
             <Field label="思考开关">
               <Select.Root value={thinking || "none"} onValueChange={(v) => setThinking(v === "none" ? "" : v)}>
-                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Trigger style={{ width: "100%" }}>{thinking === "enabled" ? "开启" : thinking === "disabled" ? "关闭" : "不发送"}</Select.Trigger>
                 <Select.Content>
                   <Select.Item value="none">不发送</Select.Item>
                   <Select.Item value="enabled">开启</Select.Item>
@@ -770,7 +934,7 @@ function EditModelDialog({ model, onClose, onSave }) {
             </Field>
             <Field label="思考强度">
               <Select.Root value={effort || "none"} onValueChange={(v) => setEffort(v === "none" ? "" : v)}>
-                <Select.Trigger style={{ width: "100%" }} />
+                <Select.Trigger style={{ width: "100%" }}>{effort || "不发送"}</Select.Trigger>
                 <Select.Content>
                   <Select.Item value="none">不发送</Select.Item>
                   {["low", "medium", "high", "xhigh", "max"].map((v) => <Select.Item key={v} value={v}>{v}</Select.Item>)}
@@ -794,3 +958,287 @@ const Field = ({ label, children }) => (
     {children}
   </Box>
 );
+
+/* ── 统一标准共用件（3.27）── */
+const SectionIntro = ({ children }) => (
+  <Text size="1" color="gray" style={{ lineHeight: 1.6 }}>{children}</Text>
+);
+const EmptyState = ({ children }) => (
+  <Text size="1" color="gray" style={{ lineHeight: 1.6 }}>{children}</Text>
+);
+
+const ACTION_LABEL = { allow: "放行", ask: "转人工审批", deny: "拦截" };
+const TARGET_LABEL = { tool_name: "工具名", tool_input: "工具参数" };
+const TYPE_LABEL = { string: "精确匹配", regex: "正则匹配" };
+
+/* MCP 的 args 是 JSON 数组、env 是 JSON 对象；对话框里按“每行一个”编辑。 */
+const parseArgs = (raw) => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter((x) => typeof x === "string");
+  if (typeof raw === "string") { try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; } }
+  return [];
+};
+const envToLines = (raw) => {
+  if (!raw) return "";
+  let obj = raw;
+  if (typeof raw === "string") { try { obj = JSON.parse(raw); } catch { return ""; } }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+  return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join("\n");
+};
+const linesToEnv = (text) => {
+  const env = {};
+  for (const line of text.split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    const i = s.indexOf("=");
+    if (i <= 0) throw new Error(`环境变量格式不对：${s}（应为 KEY=VALUE）`);
+    env[s.slice(0, i).trim()] = s.slice(i + 1).trim();
+  }
+  return env;
+};
+
+/* MCP 卡片里的工具列表：GET /api/mcp/{id}/tools（缓存的发现结果）。
+ * 顶层组件，用 authedFetch 直接读（jfetch 只活在 SettingsView 作用域内）。 */
+function MCPTools({ serverId, tick }) {
+  const [tools, setTools] = useState(null); // null = 读取中
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let dead = false;
+    setTools(null); setErr("");
+    authedFetch(`/api/mcp/${serverId}/tools`, { credentials: "include" })
+      .then(async (r) => { if (!r.ok) throw new Error(await errorText(r)); return r.json(); })
+      .then((d) => { if (!dead) setTools(d.tools || []); })
+      .catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [serverId, tick]);
+  if (err) return <Text size="1" color="red">工具列表读取失败：{err}</Text>;
+  if (tools === null) return <Text size="1" color="gray">正在读取工具…</Text>;
+  if (!tools.length) return <Text size="1" color="gray">暂无工具：可能尚未发现成功，点右上角刷新重新发现。</Text>;
+  return (
+    <Flex wrap="wrap" gap="2">
+      {tools.map((t) => (
+        <Tooltip key={t.name} content={t.description || t.name}>
+          <Badge size="1" variant="soft">{t.name}</Badge>
+        </Tooltip>
+      ))}
+    </Flex>
+  );
+}
+
+/* MCP 服务表单：新增 / 编辑。transport 决定必填项（stdio 要命令，http/sse 要 URL）。 */
+function MCPDialog({ server, onClose, onSave }) {
+  const isNew = server === "new";
+  const [name, setName] = useState("");
+  const [transport, setTransport] = useState("stdio");
+  const [command, setCommand] = useState("");
+  const [argsText, setArgsText] = useState("");
+  const [url, setUrl] = useState("");
+  const [envText, setEnvText] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [insecure, setInsecure] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!server) return;
+    if (server === "new") {
+      setName(""); setTransport("stdio"); setCommand(""); setArgsText("");
+      setUrl(""); setEnvText(""); setEnabled(true); setInsecure(false);
+    } else {
+      setName(server.name || ""); setTransport(server.transport || "stdio");
+      setCommand(server.command || ""); setArgsText(parseArgs(server.args).join("\n"));
+      setUrl(server.url || ""); setEnvText(envToLines(server.env));
+      setEnabled(!!server.enabled); setInsecure(!!server.insecure);
+    }
+    setErr("");
+  }, [server]);
+  const submit = () => {
+    if (!name.trim()) { setErr("名称不能为空"); return; }
+    if (transport === "stdio" && !command.trim()) { setErr("stdio 需要启动命令"); return; }
+    if ((transport === "http" || transport === "sse") && !url.trim()) { setErr("http / sse 需要 URL"); return; }
+    let env = {};
+    try { env = linesToEnv(envText); } catch (e) { setErr(e.message); return; }
+    onSave({
+      id: isNew ? 0 : server.id,
+      name: name.trim(), transport,
+      command: transport === "stdio" ? command.trim() : "",
+      args: argsText.split("\n").map((s) => s.trim()).filter(Boolean),
+      env,
+      url: transport === "stdio" ? "" : url.trim(),
+      enabled, insecure: transport === "stdio" ? false : insecure,
+    });
+  };
+  return (
+    <Dialog.Root open={!!server} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">{isNew ? "添加 MCP 服务" : `编辑 MCP 服务 ${server?.name || ""}`}</Dialog.Title>
+        <Dialog.Description size="1" color="gray">MCP 服务给 agent 提供外部工具；保存后自动发现工具列表。</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="名称"><TextField.Root value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 github-mcp" /></Field>
+          <Field label="传输方式">
+            <Select.Root value={transport} onValueChange={setTransport}>
+              <Select.Trigger style={{ width: "100%" }}>{transport === "stdio" ? "stdio（本地命令）" : transport === "http" ? "http（远程 URL）" : "sse（远程 URL）"}</Select.Trigger>
+              <Select.Content>
+                <Select.Item value="stdio">stdio（本地命令）</Select.Item>
+                <Select.Item value="http">http（远程 URL）</Select.Item>
+                <Select.Item value="sse">sse（远程 URL）</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          </Field>
+          {transport === "stdio" ? (<>
+            <Field label="启动命令"><TextField.Root value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx" /></Field>
+            <Field label="参数（每行一个）"><TextArea value={argsText} onChange={(e) => setArgsText(e.target.value)} placeholder={"-y\n@mcp/server-github"} rows={3} /></Field>
+          </>) : (
+            <Field label="URL"><TextField.Root value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/mcp" /></Field>
+          )}
+          <Field label="环境变量（每行 KEY=VALUE，可选）"><TextArea value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder="GITHUB_TOKEN=…" rows={2} /></Field>
+          <Flex gap="3">
+            <Field label="启用"><Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用" /></Field>
+            {transport !== "stdio" ? (
+              <Field label="跳过 TLS 校验（自签证书）"><Switch checked={insecure} onCheckedChange={setInsecure} aria-label="跳过 TLS 校验" /></Field>
+            ) : null}
+          </Flex>
+          {err ? <Text size="1" color="red">{err}</Text> : null}
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={submit}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+/* 拦截规则表单：新增 / 编辑。枚举与后端 validateInterceptRuleReq 一致
+ *（match_target: tool_name | tool_input；match_type: string | regex；
+ * action: allow | deny | ask）。超时字段界面不暴露，编辑时原样保留。 */
+function RuleDialog({ rule, onClose, onSave }) {
+  const isNew = rule === "new";
+  const [name, setName] = useState("");
+  const [action, setAction] = useState("ask");
+  const [matchTarget, setMatchTarget] = useState("tool_name");
+  const [matchType, setMatchType] = useState("string");
+  const [pattern, setPattern] = useState("");
+  const [message, setMessage] = useState("");
+  const [priority, setPriority] = useState("100");
+  const [enabled, setEnabled] = useState(true);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!rule) return;
+    if (rule === "new") {
+      setName(""); setAction("ask"); setMatchTarget("tool_name"); setMatchType("string");
+      setPattern(""); setMessage(""); setPriority("100"); setEnabled(true);
+    } else {
+      setName(rule.name || ""); setAction(rule.action || "ask");
+      setMatchTarget(rule.match_target || "tool_name"); setMatchType(rule.match_type || "string");
+      setPattern(rule.pattern || ""); setMessage(rule.message || "");
+      setPriority(String(rule.priority ?? 100)); setEnabled(!!rule.enabled);
+    }
+    setErr("");
+  }, [rule]);
+  const submit = () => {
+    if (!name.trim()) { setErr("规则名不能为空"); return; }
+    if (!pattern.trim()) { setErr("匹配内容不能为空"); return; }
+    const p = Number(priority);
+    if (!Number.isInteger(p)) { setErr("优先级需为整数"); return; }
+    const base = isNew ? { timeout_enabled: false, timeout_seconds: 0, timeout_action: "" } : rule;
+    onSave({
+      ...base, id: isNew ? 0 : rule.id,
+      name: name.trim(), action, match_target: matchTarget, match_type: matchType,
+      pattern: pattern.trim(), message: message.trim(), priority: p, enabled,
+    });
+  };
+  return (
+    <Dialog.Root open={!!rule} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">{isNew ? "添加规则" : `编辑规则 ${rule?.name || ""}`}</Dialog.Title>
+        <Dialog.Description size="1" color="gray">拦截规则决定工具调用是放行、拦截还是转人工审批。</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="规则名"><TextField.Root value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 禁止删除系统文件" /></Field>
+          <Flex gap="3">
+            <Field label="动作">
+              <Select.Root value={action} onValueChange={setAction}>
+                <Select.Trigger style={{ width: "100%" }}>{ACTION_LABEL[action] || action}</Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="allow">放行</Select.Item>
+                  <Select.Item value="ask">转人工审批</Select.Item>
+                  <Select.Item value="deny">拦截</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+            <Field label="优先级">
+              <TextField.Root value={priority} onChange={(e) => setPriority(e.target.value)} placeholder="100" />
+            </Field>
+          </Flex>
+          <Flex gap="3">
+            <Field label="匹配对象">
+              <Select.Root value={matchTarget} onValueChange={setMatchTarget}>
+                <Select.Trigger style={{ width: "100%" }}>{TARGET_LABEL[matchTarget] || matchTarget}</Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="tool_name">工具名</Select.Item>
+                  <Select.Item value="tool_input">工具参数</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+            <Field label="匹配方式">
+              <Select.Root value={matchType} onValueChange={setMatchType}>
+                <Select.Trigger style={{ width: "100%" }}>{TYPE_LABEL[matchType] || matchType}</Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="string">精确匹配</Select.Item>
+                  <Select.Item value="regex">正则匹配</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Field>
+          </Flex>
+          <Field label="匹配内容"><TextField.Root value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder={matchType === "regex" ? "例如 ^rm\\s+-rf\\s+/" : "例如 Bash"} /></Field>
+          <Field label="提示消息（命中时展示，可选）"><TextField.Root value={message} onChange={(e) => setMessage(e.target.value)} placeholder="例如 该操作已被规则拦截" /></Field>
+          <Field label="启用"><Switch checked={enabled} onCheckedChange={setEnabled} aria-label="启用" /></Field>
+          {err ? <Text size="1" color="red">{err}</Text> : null}
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={submit}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+/* 技能表单：新建。名称须符合后端 validSkillName（小写字母/数字/连字符，
+ * 首尾与连续连字符除外）；描述必填。上传既有技能走服务端 skills/ 目录。 */
+function SkillDialog({ open, onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [license, setLicense] = useState("");
+  const [compatibility, setCompatibility] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setName(""); setDescription(""); setLicense(""); setCompatibility(""); setErr("");
+  }, [open]);
+  const submit = () => {
+    const n = name.trim();
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(n) || n.length > 64) { setErr("名称只允许小写字母、数字与连字符，首尾不能是连字符，最长 64 字符"); return; }
+    if (!description.trim()) { setErr("描述不能为空"); return; }
+    onSave({ name: n, description: description.trim(), license: license.trim(), compatibility: compatibility.trim() });
+  };
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Content maxWidth="520px">
+        <Dialog.Title size="4">新建技能</Dialog.Title>
+        <Dialog.Description size="1" color="gray">技能是 agent 可调用的能力包；保存后在服务端的 skills/ 目录生成骨架。</Dialog.Description>
+        <Flex direction="column" gap="3" mt="3">
+          <Field label="名称"><TextField.Root value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 web-recon" /></Field>
+          <Field label="描述"><TextArea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="一句话说明这个技能是干什么的" rows={3} /></Field>
+          <Flex gap="3">
+            <Field label="许可（可选）"><TextField.Root value={license} onChange={(e) => setLicense(e.target.value)} placeholder="例如 MIT" /></Field>
+            <Field label="兼容性（可选）"><TextField.Root value={compatibility} onChange={(e) => setCompatibility(e.target.value)} placeholder="例如 artex-harness" /></Field>
+          </Flex>
+          {err ? <Text size="1" color="red">{err}</Text> : null}
+        </Flex>
+        <Flex gap="3" mt="4" justify="end">
+          <Dialog.Close><Button variant="soft" color="gray">取消</Button></Dialog.Close>
+          <Button onClick={submit}>保存</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}

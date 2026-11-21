@@ -9,8 +9,8 @@
 //
 // Usage:
 //
-//	ARTEX_PG_DSN=... go run ./eval/cmd/harness-smoke
-//	go run ./eval/cmd/harness-smoke -dsn "$ARTEX_PG_DSN" -keep
+//	HARNESS_PG_DSN=... go run ./eval/cmd/harness-smoke
+//	go run ./eval/cmd/harness-smoke -dsn "$HARNESS_PG_DSN" -keep
 package main
 
 import (
@@ -30,13 +30,13 @@ import (
 )
 
 func main() {
-	dsn := flag.String("dsn", os.Getenv("ARTEX_PG_DSN"), "PostgreSQL DSN")
+	dsn := flag.String("dsn", os.Getenv("HARNESS_PG_DSN"), "PostgreSQL DSN")
 	keep := flag.Bool("keep", false, "keep the smoke task in the database")
 	verbose := flag.Bool("v", false, "print every activity")
 	flag.Parse()
 
 	if strings.TrimSpace(*dsn) == "" {
-		fmt.Fprintln(os.Stderr, "需要 -dsn 或 ARTEX_PG_DSN")
+		fmt.Fprintln(os.Stderr, "需要 -dsn 或 HARNESS_PG_DSN")
 		os.Exit(2)
 	}
 	if err := run(*dsn, *keep, *verbose); err != nil {

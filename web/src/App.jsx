@@ -101,6 +101,8 @@ function Console({ theme, onLogout }) {
   const [budget, setBudget] = useState(null);
   const [palette, setPalette] = useState(false);
   const [view, setView] = useState("chat"); // chat | trajectory | checkpoints | settings | findings | usage
+  const [settingsSection, setSettingsSection] = useState("models"); // 设置打开时定位到的分区
+  const openSettings = useCallback((section) => { setSettingsSection(section || "models"); setView("settings"); }, []);
   const [tabs, setTabs] = useState([]);   // 打开过的会话/任务标签
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -437,6 +439,7 @@ function Console({ theme, onLogout }) {
     <Theme appearance={theme} accentColor="tomato" grayColor="sand" radius="large">
       <Toaster position="bottom-center" richColors closeButton />
       <SettingsView open={view === "settings"} onOpenChange={(o) => setView(o ? "settings" : "chat")}
+                    initialSection={settingsSection}
                     appearance={appearance} onAppearance={changeAppearance}
                     version={version} health={health} toast={toast} />
       <NewTaskDialog open={newOpen} onOpenChange={setNewOpen}
@@ -448,7 +451,7 @@ function Console({ theme, onLogout }) {
                  onPalette={() => setPalette(true)} profiles={profiles} version={version}
                  toast={toast} onFilter={() => setPalette(true)} onReload={loadTasks}
                  appearance={appearance} onAppearance={changeAppearance}
-                 onOpenSettings={() => setView("settings")} onLogout={onLogout} />
+                 onOpenSettings={() => openSettings()} onLogout={onLogout} />
 
         <div className="main">
           <WorkspaceTabs open={tabs} active={convId ? { type: "conv", id: convId } : taskId ? { type: "task", id: taskId } : null}
@@ -579,7 +582,8 @@ function Console({ theme, onLogout }) {
             </motion.button>
           ) : null}
           <Composer taskId={taskId} convId={convId} live={live} budget={budget} task={cur}
-                    onSent={() => setRetryNonce((n) => n + 1)} onTuned={loadTasks} />
+                    onSent={() => setRetryNonce((n) => n + 1)} onTuned={loadTasks}
+                    onOpenWorkbench={() => setAside("workbench")} onOpenPermissions={() => openSettings("perm")} />
           </>
           )}
         </div>

@@ -375,6 +375,12 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		return nil, err
 	}
 	log.Printf("[pg] 数据库配置来源: %s", source)
+	// ARTEX_PG_DSN 是与上游 ARTEX 共用的全局变量名，本程序自 3.24 起不再读取
+	// 它（见 config.PostgresDSN）。若它还残留在系统环境里，在这里大声说出来，
+	// 否则运维会误以为 harness 仍在用它——2026-11-21 的混库正是这样悄悄发生的。
+	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
+		log.Printf("[pg] 警告：已忽略环境变量 ARTEX_PG_DSN（harness 不再读取它），当前实际使用：%s", source)
+	}
 	pg, err := pgdb.Open(dsn)
 	if err != nil {
 		return nil, err

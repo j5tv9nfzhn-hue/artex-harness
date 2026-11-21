@@ -44,6 +44,13 @@ function relTime(t) {
     .replace(" years", " 年").replace(" year", " 年");
 }
 
+/** 最近活动时间戳（毫秒），用于目录分组内的排序。 */
+function activityTs(t) {
+  if (t.last_activity_unix) return t.last_activity_unix * 1000;
+  const ts = t.created_at ? new Date(t.created_at) : null;
+  return ts && !Number.isNaN(+ts) ? +ts : 0;
+}
+
 const statusColor = (s) =>
   s === "running" ? "var(--c-status-awaiting)"
     : s === "done" || s === "achieved" ? "var(--c-status-ok)"
@@ -98,32 +105,65 @@ export default function Sidebar({
     onReload?.();
   }
 
-  /* Flat list: group header, then its rows. Pinned tasks lead. */
+  /* Flat list: group header, then its rows. Pinned tasks lead.
+   *
+   * 会话按工作目录分两大区（3.28，Julie 要求区分清楚）：
+   *   工作目录 —— 选过工作目录的会话（project_dir 非空），按目录再分组，
+   *     目录头就是完整路径；一个目录同一时间只会有一个活任务
+   *     （projectGuard），所以每组通常只有一行。
+   *   默认目录 —— 没选过工作目录的会话（project_dir 为空），各自用任务
+   *     自有目录 <数据目录>/tasks/<id>；区内沿用原来的日期分组。
+   * 两区的行都有右键菜单（行内的 ContextMenu，与 "…" 下拉菜单同款操作）。 */
   const flat = useMemo(() => {
     const out = [];
     // 对话（无 goal 的那条产品线）也要在侧栏有一行。
     // 之前 `convs` 只用来算高亮、从不进列表：新建对话后标签是内存态，
     // 一旦刷新，已存在的对话在界面上就再也打不开了（接口一直有返回）。
     if (convs.length) {
-      out.push({ kind: "head", key: "h-conv", label: "对话", count: convs.length });
+      out.push({ kind: "sechead", key: "h-conv", label: "对话", count: convs.length });
       for (const c of convs) out.push({ kind: "conv", key: "c-" + c.id, conv: c });
     }
-    const sorted = [...tasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-    const groups = new Map();
-    for (const t of sorted) {
-      const g = t.pinned ? "置顶" : groupOf(t);
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(t);
+    const dirTasks = tasks.filter((t) => (t.project_dir || "").trim() !== "");
+    const defaultTasks = tasks.filter((t) => (t.project_dir || "").trim() === "");
+    if (dirTasks.length) {
+      out.push({ kind: "sechead", key: "h-dir", label: "工作目录", count: dirTasks.length, title: "选过工作目录的会话，按目录分组" });
+      const byDir = new Map();
+      for (const t of dirTasks) {
+        const d = t.project_dir;
+        if (!byDir.has(d)) byDir.set(d, []);
+        byDir.get(d).push(t);
+      }
+      const dirGroups = [...byDir.entries()].sort(([, a], [, b]) => {
+        const pa = a.some((t) => t.pinned) ? 1 : 0;
+        const pb = b.some((t) => t.pinned) ? 1 : 0;
+        if (pb !== pa) return pb - pa;
+        return Math.max(...b.map(activityTs)) - Math.max(...a.map(activityTs));
+      });
+      for (const [dir, list] of dirGroups) {
+        out.push({ kind: "dirhead", key: "h-dir-" + dir, label: dir, count: list.length, title: dir });
+        const sorted = [...list].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || activityTs(b) - activityTs(a));
+        for (const t of sorted) out.push({ kind: "task", key: "t-" + t.id, task: t });
+      }
     }
-    const order = ["置顶", "今天", "昨天", "本周", "更早"];
-    for (const g of order) {
-      const list = groups.get(g);
-      if (!list?.length) continue;
-      out.push({ kind: "head", key: "h-" + g, label: g, count: list.length });
-      for (const t of list) out.push({ kind: "task", key: "t-" + t.id, task: t });
+    if (defaultTasks.length) {
+      out.push({ kind: "sechead", key: "h-default", label: "默认目录", count: defaultTasks.length, title: "没选过工作目录的会话，各自用任务自有目录" });
+      const sorted = [...defaultTasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      const groups = new Map();
+      for (const t of sorted) {
+        const g = t.pinned ? "置顶" : groupOf(t);
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(t);
+      }
+      const order = ["置顶", "今天", "昨天", "本周", "更早"];
+      for (const g of order) {
+        const list = groups.get(g);
+        if (!list?.length) continue;
+        out.push({ kind: "head", key: "h-" + g, label: g, count: list.length });
+        for (const t of list) out.push({ kind: "task", key: "t-" + t.id, task: t });
+      }
     }
     if (legacy.length) {
-      out.push({ kind: "head", key: "h-legacy", label: "旧管线任务", count: legacy.length });
+      out.push({ kind: "sechead", key: "h-legacy", label: "旧管线任务", count: legacy.length });
       for (const t of legacy) out.push({ kind: "task", key: "t-" + t.id, task: t, legacy: true });
     }
     return out;
@@ -132,7 +172,7 @@ export default function Sidebar({
   const virt = useVirtualizer({
     count: flat.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => (flat[i].kind === "head" ? HEAD_H : ROW_H),
+    estimateSize: (i) => (flat[i].kind === "task" || flat[i].kind === "conv" ? ROW_H : HEAD_H),
     overscan: 12,
   });
 
@@ -150,7 +190,7 @@ export default function Sidebar({
           </Tooltip>
         ) : (
           <>
-            <span className="rail-brand"><BrandMark size={20} />artex</span>
+            <span className="rail-brand"><BrandMark size={20} />artex-harness</span>
             <Box style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
               <Tooltip content="命令面板 ⌘K">
                 <IconButton size="1" aria-label="命令面板" onClick={onPalette}><Search size={14} /></IconButton>
@@ -200,10 +240,12 @@ export default function Sidebar({
               position: "absolute", top: 0, left: 0, right: 0,
               transform: `translateY(${vi.start}px)`, height: vi.size,
             };
-            if (item.kind === "head") {
+            if (item.kind === "head" || item.kind === "sechead" || item.kind === "dirhead") {
               return (
-                <div key={item.key} style={style} className="group-head">
-                  {item.label}
+                <div key={item.key} style={style}
+                     className={"group-head" + (item.kind === "sechead" ? " group-head--section" : item.kind === "dirhead" ? " group-head--dir" : "")}
+                     title={item.title || undefined}>
+                  <span className="group-head__label">{item.label}</span>
                   <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--c-ink-4)" }}>{item.count}</span>
                 </div>
               );
@@ -302,7 +344,11 @@ export default function Sidebar({
                   <ContextMenu.Item onSelect={() => patchTask(t.id, { pinned: !t.pinned }).catch((e) => toast.error(e.message))}>
                     {t.pinned ? "取消置顶" : "置顶"}
                   </ContextMenu.Item>
+                  <ContextMenu.Item onSelect={() => { setRenaming(t); setNewName(t.name || ""); }}>重命名</ContextMenu.Item>
                   <ContextMenu.Separator />
+                  <ContextMenu.Item onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/archive`, { method: "POST", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast.error(e.message))}>
+                    归档
+                  </ContextMenu.Item>
                   <ContextMenu.Item color="red"
                                    onSelect={() => authedFetch(`/api/tasks/${encodeURIComponent(t.id)}`, { method: "DELETE", credentials: "include", headers: authHeaders() }).then(() => onReload?.()).catch((e) => toast.error(e.message))}>
                     删除

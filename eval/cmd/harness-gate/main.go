@@ -12,7 +12,7 @@
 // Usage:
 //
 //	harness-gate -base base.json -cand cand.json
-//	harness-gate -base-task 25 -cand-task 31 -dsn "$ARTEX_PG_DSN"
+//	harness-gate -base-task 25 -cand-task 31 -dsn "$HARNESS_PG_DSN"
 //
 // Replay JSON is what `GET /api/harness/replay?task=N` returns, so a CI job can
 // capture runs from both builds with curl and gate them without a custom harness.
@@ -39,7 +39,7 @@ func main() {
 		candFile = flag.String("cand", "", "candidate replay JSON")
 		baseTask = flag.Int64("base-task", 0, "baseline task id (read live from PostgreSQL)")
 		candTask = flag.Int64("cand-task", 0, "candidate task id")
-		dsn      = flag.String("dsn", os.Getenv("ARTEX_PG_DSN"), "PostgreSQL DSN for -base-task/-cand-task")
+		dsn      = flag.String("dsn", os.Getenv("HARNESS_PG_DSN"), "PostgreSQL DSN for -base-task/-cand-task")
 		from     = flag.Int64("from", 0, "first revision (0 = from the beginning)")
 		to       = flag.Int64("to", 0, "last revision (0 = to the end)")
 		tol      = flag.Float64("tol", 0.15, "tolerance for the soft distribution checks")
@@ -105,7 +105,7 @@ func load(ctx context.Context, file string, taskID int64, dsn string, from, to i
 		return nil, "", nil
 	}
 	if strings.TrimSpace(dsn) == "" {
-		return nil, "", fmt.Errorf("需要 DSN（-dsn 或 ARTEX_PG_DSN）才能按 task 读取回放")
+		return nil, "", fmt.Errorf("需要 DSN（-dsn 或 HARNESS_PG_DSN）才能按 task 读取回放")
 	}
 	d, err := db.Open(dsn)
 	if err != nil {

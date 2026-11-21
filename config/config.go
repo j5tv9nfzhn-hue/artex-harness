@@ -4,6 +4,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -78,20 +79,24 @@ func isGoRunDir(dir string) bool {
 const ConfigFileName = "artex-harness.json"
 
 // Path returns the config file path. Resolution order:
-//  1. env HARNESS_CONFIG, then ARTEX_CONFIG (explicit override, legacy compat)
+//  1. env HARNESS_CONFIG (explicit override)
 //  2. ./artex-harness.json in the current working directory
 //  3. artex-harness.json next to the executable
 //  4. ./config.json / BaseDir()/config.json (legacy fallback: an install
 //     created before the rename keeps working, but a fresh install
 //     must use artex-harness.json)
 //
+// The upstream ARTEX_CONFIG variable is deliberately NOT read here: it points
+// at ARTEX's own config.json (database `artex`), and honoring it would let a
+// machine-global ARTEX_CONFIG silently redirect this binary at ARTEX's
+// database — the same cross-talk the HARNESS_PG_DSN fix (3.24) closes for the
+// DSN. The file fallbacks above already cover pre-rename installs, whose
+// config.json lives in their own directory.
+//
 // The first existing file wins. If none exist, the CWD artex-harness.json
 // path is returned so the "not found" message points at the file to create.
 func Path() string {
 	if v := strings.TrimSpace(os.Getenv("HARNESS_CONFIG")); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("ARTEX_CONFIG")); v != "" {
 		return v
 	}
 	var candidates []string
@@ -143,15 +148,24 @@ func SkillDir() string {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//	env HARNESS_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//
+// The upstream ARTEX_PG_DSN variable is deliberately NEVER read here. It is a
+// machine-global name shared with ARTEX itself: when both products run on one
+// machine with ARTEX_PG_DSN set (e.g. from ARTEX's systemd unit or a shared
+// shell profile), honoring it made this binary connect to ARTEX's `artex`
+// database despite its own artex-harness.json saying `artex_harness` —
+// silently merging the two products' data (2026-11-21, PROVENANCE 3.24).
+// Operators who still have ARTEX_PG_DSN set get a startup warning from the
+// server (server.NewManager); the variable is ignored, never consulted.
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
 // instead of silently connecting to a wrong default. source describes where the
 // DSN came from (for startup logging).
 func PostgresDSN() (dsn, source string, err error) {
-	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
-		return v, "环境变量 ARTEX_PG_DSN", nil
+	if v := strings.TrimSpace(os.Getenv("HARNESS_PG_DSN")); v != "" {
+		return v, "环境变量 HARNESS_PG_DSN", nil
 	}
 	db := Load().Database
 	if d := strings.TrimSpace(db.DSN); d != "" {
@@ -160,7 +174,11 @@ func PostgresDSN() (dsn, source string, err error) {
 	if db.Host != "" || db.DBName != "" || db.User != "" {
 		return db.buildDSN(), "配置文件 " + Path() + " (database 字段)", nil
 	}
-	return "", "", fmt.Errorf("未找到数据库配置：环境变量 ARTEX_PG_DSN 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
+	msg := fmt.Sprintf("未找到数据库配置：环境变量 HARNESS_PG_DSN 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
+	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
+		msg += "（注：检测到已废弃的 ARTEX_PG_DSN，本程序不再读取它——如需用环境变量指定数据库，请改用 HARNESS_PG_DSN）"
+	}
+	return "", "", errors.New(msg)
 }
 
 func (d Database) buildDSN() string {

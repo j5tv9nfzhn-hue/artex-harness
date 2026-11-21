@@ -1,5 +1,5 @@
 import {
-  createContext, forwardRef, useCallback, useContext, useEffect, useId, useLayoutEffect,
+  cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useLayoutEffect,
   useMemo, useRef, useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -292,18 +292,37 @@ function useDismiss(open, onClose, ref) {
   }, [open, onClose, ref]);
 }
 
-/* ── DropdownMenu / ContextMenu ──────────────────────────────────────────── */
-function MenuSurface({ open, onClose, anchor, align = "start", side = "bottom", children }) {
+/* ── DropdownMenu / ContextMenu ────────────────────────────────────────────
+ * 两者共用一套菜单面与关闭逻辑（点外部关闭、Esc 关闭），触发方式不同：
+ *   DropdownMenu：左键点击触发面。切换并进触发子元素的 onClick，而不是
+ *     包一层 span 指望冒泡——子元素里常见的 stopPropagation（行内 "…"
+ *     按钮防导航）会把冒泡拦掉，菜单就永远打不开。
+ *   ContextMenu：右键触发（onContextMenu，preventDefault 后在光标处打开）；
+ *     左键行为完全不受影响。
+ * 此前两者共用同一个左键触发：右键什么都不发生，左键点行反而弹菜单——
+ * 那不是右键菜单。3.28 修掉。菜单面按需做视口内收敛（光标贴边时不溢出）。 */
+function MenuSurface({ open, onClose, anchor, pos, align = "start", side = "bottom", children }) {
   const ref = useRef(null);
+  const [shift, setShift] = useState({ x: 0, y: 0 });
   useDismiss(open, onClose, ref);
+  useLayoutEffect(() => {
+    if (!open || !ref.current) { setShift({ x: 0, y: 0 }); return; }
+    const r = ref.current.getBoundingClientRect();
+    const x = Math.min(0, window.innerWidth - 4 - r.right) + Math.max(0, 4 - r.left);
+    const y = Math.min(0, window.innerHeight - 4 - r.bottom) + Math.max(0, 4 - r.top);
+    if (x || y) setShift({ x, y });
+  }, [open, pos]);
   if (!open) return null;
-  const style = anchor
-    ? side === "right"
-      ? { left: anchor.right + 6, top: anchor.top }
-      : align === "end"
-        ? { left: anchor.right, top: anchor.bottom + 4, transform: "translateX(-100%)" }
-        : { left: anchor.left, top: anchor.bottom + 4 }
-    : { left: 0, top: 0 };
+  const base = pos
+    ? { left: Math.min(pos.x, window.innerWidth - 200), top: Math.min(pos.y, window.innerHeight - 240) }
+    : anchor
+      ? side === "right"
+        ? { left: anchor.right + 6, top: anchor.top }
+        : align === "end"
+          ? { left: anchor.right, top: anchor.bottom + 4, transform: "translateX(-100%)" }
+          : { left: anchor.left, top: anchor.bottom + 4 }
+      : { left: 0, top: 0 };
+  const style = { ...base, marginLeft: shift.x, marginTop: shift.y };
   return createPortal(
     <div ref={ref} className="ui-menu" role="menu" style={style}>{children}</div>,
     document.body,
@@ -314,29 +333,49 @@ const MenuCtx = createContext(null);
 
 function MenuRoot({ children, open: openProp, onOpenChange }) {
   const [openState, setOpenState] = useState(false);
+  const [pos, setPosState] = useState(null);
   const open = openProp ?? openState;
-  const setOpen = (v) => { setOpenState(v); onOpenChange?.(v); };
   const anchorRef = useRef(null);
-  return <MenuCtx.Provider value={{ open, setOpen, anchorRef }}>{children}</MenuCtx.Provider>;
+  const setOpen = (v, p) => {
+    setOpenState(v);
+    if (p !== undefined) setPosState(p);
+    else if (!v) setPosState(null);
+    onOpenChange?.(v);
+  };
+  return <MenuCtx.Provider value={{ open, setOpen, anchorRef, pos }}>{children}</MenuCtx.Provider>;
 }
 
-function MenuTrigger({ children, asChild }) {
+function MenuTrigger({ children }) {
   const ctx = useContext(MenuCtx);
   const child = Array.isArray(children) ? children[0] : children;
   if (!child || typeof child !== "object") return child;
-  return (
-    <span ref={ctx.anchorRef} className="ui-menu__anchor" style={{ display: "contents" }}
-          onClick={(e) => { e.stopPropagation(); ctx.setOpen(!ctx.open); }}>
-      {child}
-    </span>
-  );
+  const onClick = (e) => {
+    child.props.onClick?.(e);
+    if (e.defaultPrevented) return;
+    ctx.anchorRef.current = e.currentTarget;
+    ctx.setOpen(!ctx.open);
+  };
+  return cloneElement(child, { onClick });
+}
+
+/* 右键触发：只接 onContextMenu；左键点行照常打开会话。 */
+function ContextTrigger({ children }) {
+  const ctx = useContext(MenuCtx);
+  const child = Array.isArray(children) ? children[0] : children;
+  if (!child || typeof child !== "object") return child;
+  const onContextMenu = (e) => {
+    child.props.onContextMenu?.(e);
+    e.preventDefault();
+    ctx.setOpen(true, { x: e.clientX, y: e.clientY });
+  };
+  return cloneElement(child, { onContextMenu });
 }
 
 function MenuContent({ children, align, side, onClose, ...rest }) {
   const ctx = useContext(MenuCtx);
-  const anchor = ctx.anchorRef.current?.getBoundingClientRect() ?? null;
+  const anchor = ctx.anchorRef.current?.getBoundingClientRect?.() ?? null;
   return (
-    <MenuSurface open={ctx.open} onClose={() => { ctx.setOpen(false); onClose?.(); }} anchor={anchor} align={align} side={side}>
+    <MenuSurface open={ctx.open} onClose={() => { ctx.setOpen(false); onClose?.(); }} anchor={anchor} pos={ctx.pos} align={align} side={side}>
       {children}
     </MenuSurface>
   );
@@ -359,7 +398,7 @@ export const DropdownMenu = {
 };
 export const ContextMenu = {
   Root: MenuRoot,
-  Trigger: MenuTrigger,
+  Trigger: ContextTrigger,
   Content: MenuContent,
   Item: MenuItem,
   Separator: MenuSeparator,
@@ -435,12 +474,17 @@ function DialogTrigger({ children }) {
   return <span style={{ display: "contents" }} onClick={() => ctx.setOpen(true)}>{child}</span>;
 }
 
-function DialogContent({ children, maxWidth, ...rest }) {
+function DialogContent({ children, maxWidth, className, ...rest }) {
   const ctx = useContext(DialogCtx);
   if (!ctx.open) return null;
   return createPortal(
     <div className="ui-dialog__backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) ctx.setOpen(false); }}>
-      <div className="ui-dialog" role="dialog" aria-modal="true" style={maxWidth ? { maxWidth } : undefined} {...rest}>
+      {/* className merges with .ui-dialog instead of replacing it: spreading
+          {...rest} after className="ui-dialog" used to let a caller's
+          className (e.g. SettingsView's "settings-dialog") silently drop
+          every .ui-dialog rule — background included — so the dialog rendered
+          transparent over the backdrop. */}
+      <div className={"ui-dialog" + (className ? " " + className : "")} role="dialog" aria-modal="true" style={maxWidth ? { maxWidth } : undefined} {...rest}>
         {children}
       </div>
     </div>,
@@ -478,14 +522,16 @@ export const useAnchorRect = () => {
 export { useMemo, useId };
 
 /* ── BrandMark ───────────────────────────────────────────────────────────────
- * artex-harness's own mark — the interlocking rings from `web/public/logo.png`, cut to
- * the glyph and shipped as `web/public/artex-mark.png`.
+ * artex-harness's own mark — a bold geometric "H" (for harness), drawn for
+ * this product and shipped as `web/public/harness-mark.png`.
  *
- * Why not the reference project's starburst: that mark is Anthropic's brand
- * identity, and drawing it in our own product would be a trademark use we have
- * no licence for. The reference project says the same of Clawd in its LICENSE —
- * "all rights in it remain with Anthropic". The visual language we took from it
- * (palette, geometry, type) is design, not identity; the mark is identity.
+ * It replaces the upstream ARTEX infinity glyph (`artex-mark.png`, deleted):
+ * that mark is ARTEX's identity, and it kept showing up in the sidebar and
+ * the top band next to our own wordmark. The reference project's starburst
+ * was never used for the same reason — that mark is Anthropic's brand
+ * identity, and drawing it in our own product would be a trademark use we
+ * have no licence for. The visual language we took from it (palette,
+ * geometry, type) is design, not identity; the mark is identity.
  *
  * The PNG is used as a CSS mask so the mark takes whatever ink the surrounding
  * text does, in either appearance. */
@@ -499,8 +545,8 @@ export function BrandMark({ size = 18 }) {
         height: size,
         flex: "none",
         background: "currentColor",
-        WebkitMaskImage: "url(/app/artex-mark.png)",
-        maskImage: "url(/app/artex-mark.png)",
+        WebkitMaskImage: "url(/app/harness-mark.png)",
+        maskImage: "url(/app/harness-mark.png)",
         WebkitMaskSize: "contain",
         maskSize: "contain",
         WebkitMaskRepeat: "no-repeat",

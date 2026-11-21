@@ -31,9 +31,9 @@ test: ## 单元测试（不依赖数据库）
 	go test ./agent/... ./harness/... ./config/... ./guard/... -count=1
 
 test-db: ## 需要 PostgreSQL 的测试；必须显式指名测试库，见 db/testmain_test.go
-	@test -n "$(ARTEX_TEST_DB)" || { \
-	  echo "拒绝执行：这些用例会重建 schema。请显式指定 ARTEX_TEST_DB=<测试库名>，"; \
-	  echo "且它必须与 ARTEX_PG_DSN 里的库名一致（不匹配时测试会自动跳过）。"; \
+	@test -n "$(HARNESS_TEST_DB)" || { \
+	  echo "拒绝执行：这些用例会重建 schema。请显式指定 HARNESS_TEST_DB=<测试库名>，"; \
+	  echo "且它必须与 HARNESS_PG_DSN 里的库名一致（不匹配时测试会自动跳过）。"; \
 	  exit 1; }
 	go test ./db/... ./server/... -count=1
 

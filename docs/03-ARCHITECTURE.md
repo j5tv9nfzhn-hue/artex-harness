@@ -252,7 +252,7 @@ Wants=postgresql.service
 Type=simple
 User=artex
 WorkingDirectory=/opt/artex-harness
-Environment=ARTEX_PG_DSN=postgres://artex:***@127.0.0.1:5432/artex?sslmode=disable
+Environment=HARNESS_PG_DSN=postgres://artex_harness:***@127.0.0.1:5432/artex_harness?sslmode=disable
 ExecStart=/opt/artex-harness/artex-harness -addr :8797 -proxy 127.0.0.1:8798
 Restart=on-failure
 RestartSec=3

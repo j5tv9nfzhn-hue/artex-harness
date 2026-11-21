@@ -8,12 +8,12 @@
 |---|---|
 | Go | 见 `go.mod`（`go 1.2x`），`go build ./...` 必须干净 |
 | Node.js | 22+（只在构建控制台时需要，`web/` 用 npm） |
-| PostgreSQL | 14+；`ARTEX_PG_DSN` 指向它。启动时自动应用 `db/schema.sql` |
+| PostgreSQL | 14+；`HARNESS_PG_DSN` 指向它。启动时自动应用 `db/schema.sql` |
 
 启动：
 
 ```bash
-export ARTEX_PG_DSN="postgres://user:pass@127.0.0.1:5432/artex"
+export HARNESS_PG_DSN="postgres://user:pass@127.0.0.1:5432/artex"
 make run                      # 前端用仓库里已构建的产物
 ```
 
@@ -37,7 +37,7 @@ make build-all  # 控制台 + 后端
 
 这些用例会**重建 schema**，等于清空目标库。所以：
 
-- 必须 `ARTEX_TEST_DB=<库名>`，且**必须与 DSN 里的库名一致**，否则测试会主动跳过。
+- 必须 `HARNESS_TEST_DB=<库名>`，且**必须与 DSN 里的库名一致**，否则测试会主动跳过。
 - 守卫在 `db/testmain_test.go` / `agent/testmain_test.go` / `server/testmain_test.go`：
   **先校验、再重建**（顺序反了会连开发库一起清空，这是踩过的坑）。
 

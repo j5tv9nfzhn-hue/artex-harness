@@ -24,7 +24,7 @@
 | 本地 PG 宿主端口 | `5433:5432`（`install.sh` Docker 分支与示例 DSN） | `5432:5432` |
 | 数据目录 | `./data-harness` | `./data` |
 | JWT 密钥 | `harness-jwt.key` | `jwt.key` |
-| 配置文件 | `artex-harness.json`（`HARNESS_CONFIG` 优先，`ARTEX_CONFIG` 仍可用；旧 `config.json` 仅作回退） | `config.json` |
+| 配置文件 | `artex-harness.json`（`HARNESS_CONFIG` 可指定其它路径；旧 `config.json` 仅作回退） | `config.json` |
 | 二进制 | `artex-harness`（`artex-harness.exe`） | `artex` |
 | Compose 服务 / 卷 | `postgres-harness` / `artex-harness`，卷 `pgdata-harness`，镜像 `artex-harness:latest`（本地构建） | `postgres` / `artex`，卷 `pgdata`，镜像 `autumn27/artex` |
 | 发布包 | `artex-<version>-<os>-<arch>.zip`（包内目录 `artex-<version>-<os>-<arch>/`，二进制仍为 `artex-harness`；构建输出目录仍为 `dist/artex-harness-<os>-<arch>/`） | `artex-…` |
@@ -42,7 +42,7 @@
 
 ## 迁移（已在用旧版的用户）
 
-- 旧库 `artex` 里的数据不会自动搬到 `artex_harness`。要保留历史任务，需手动 `pg_dump artex | psql artex_harness`，或继续用旧 DSN 启动（显式 `-addr :8787` + `ARTEX_PG_DSN=…/artex` 仍可用，默认值变了而已）。
+- 旧库 `artex` 里的数据不会自动搬到 `artex_harness`。要保留历史任务，需手动 `pg_dump artex | psql artex_harness`，或继续用旧 DSN 启动（显式 `-addr :8787`，并把 `HARNESS_PG_DSN` 指向 `…/artex` 或把配置文件 database 指向它；订正 2026-11-21：自 3.24 起 `ARTEX_PG_DSN` 不再被读取，旧写法已失效）。
 - 旧 `config.json` 仍会被读取（回退），但新安装请复制 `config.example.json` 为 `artex-harness.json`；旧 `data/` 不会自动改名，`data-harness/` 是全新空目录，旧工作区文件需手动拷过去。
 - 旧 `jwt.key` 不会被当作新密钥：已登录会话会失效，需重新登录。
 

@@ -19,6 +19,43 @@
  * rung below the lightest border.
  * ───────────────────────────────────────────────────────────────────────── */
 
+/* ── bundled type ────────────────────────────────────────────────────────
+ * The console ships its own type instead of naming fonts and hoping the
+ * reader's machine has them: until now "Inter" / "JetBrains Mono" were only
+ * names in the stack, so on most machines everything fell back to the OS
+ * default sans/mono — which is why the interface read as sharp system type.
+ *
+ *   Nunito — the UI sans: round terminals, friendly but still a work face
+ *     (variable weight 200–1000, latin subset only; Chinese falls through
+ *     to the system faces in --font-sans, where Yuanti SC leads on Apple
+ *     hardware — it is a round face, PingFang SC is not).
+ *   JetBrains Mono — terminal / browser-console / code: the mono the tokens
+ *     already named, now actually present instead of falling back to
+ *     Consolas / Menlo.
+ *
+ * Both are variable woff2, latin subset only (~40KB each), copied from
+ * @fontsource-variable/* into web/public/fonts/ and served from the same
+ * binary as the rest of the console — no CDN, no network dependency at
+ * runtime. A full round Chinese face would cost megabytes and is not
+ * bundled: on Windows/Android Chinese still renders in the system face
+ * (YaHei / Noto Sans SC). */
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 1000;
+  src: url(/app/fonts/nunito-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url(/app/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
 :root {
   color-scheme: light;
 
@@ -88,10 +125,16 @@
    * Three faces, each an open-licensed look-alike chosen for the same
    * proportions (serif display / sans UI / mono data). No vendor face is named
    * here: the families this interface is modelled on are not redistributable,
-   * and naming them would be a brand reference the product does not need. */
+   * and naming them would be a brand reference the product does not need.
+   *
+   * The sans and mono are bundled (see the @font-face rules at the top of
+   * this file), so they render the same on every machine. The first Chinese
+   * fallback is Yuanti SC — the round face — where the OS has it; the sharp
+   * system defaults (-apple-system / Segoe UI) are deliberately NOT in the
+   * stack anymore: they were what the interface fell back to before, and
+   * they are exactly the sharp look this file is trying to avoid. */
   --font-serif: "Noto Serif", "Source Han Serif SC", Georgia, "Songti SC", serif;
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-sans: "Nunito", "Yuanti SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas,
     "Liberation Mono", Menlo, monospace;
   --font-prose: var(--font-serif);   /* conversation prose leads serif */

@@ -34,7 +34,7 @@
 
 - 启动：`artex -addr :8797 -data ./data -proxy 127.0.0.1:8798`
 - 单二进制：控制台产物 `server/console-app/` 被 `go:embed` 打进二进制，目标机不需要 Node。
-- 数据库：`ARTEX_PG_DSN` 环境变量；首次启动自动建表（`db/schema.sql`，51 张表）。
+- 数据库：`HARNESS_PG_DSN` 环境变量；首次启动自动建表（`db/schema.sql`，51 张表）。
 
 ## 二、模块划分
 
@@ -341,7 +341,7 @@ make build      # go build -o artex ./cmd/artex（用仓库里已有的产物）
 make build-all  # 两者
 make vet        # go vet ./...
 make test       # 单元测试（不碰数据库）：agent/harness/config/guard
-ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试；会重建 schema，必须显式指名
+HARNESS_TEST_DB=<库名> make test-db   # 需要 PG 的测试；会重建 schema，必须显式指名
 ```
 
 - `server/console-app/` 是**被提交进仓库的构建产物**：`go:embed` 需要它在编译时存在，

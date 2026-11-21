@@ -229,7 +229,7 @@ docker run -d --name artex-harness-pg -p 5433:5432 \
   postgres:16-alpine
 
 # 2) 指向它（首次启动自动建表）
-export ARTEX_PG_DSN="postgres://artex_harness:yourpass@127.0.0.1:5433/artex_harness?sslmode=disable"
+export HARNESS_PG_DSN="postgres://artex_harness:yourpass@127.0.0.1:5433/artex_harness?sslmode=disable"
 
 # 3) 构建：控制台 + 后端 → 单个二进制
 make build-all
@@ -242,7 +242,7 @@ make build-all
 ### 方式三：只跑后端（前端产物已在仓库里）
 
 ```bash
-export ARTEX_PG_DSN="postgres://…"
+export HARNESS_PG_DSN="postgres://…"
 make build && ./artex-harness -addr :8797 -data ./data-harness
 ```
 
@@ -286,8 +286,8 @@ make build && ./artex-harness -addr :8797 -data ./data-harness
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `ARTEX_PG_DSN` | 空 | PostgreSQL DSN；**优先级高于 `artex-harness.json` 的 database** |
-| `HARNESS_CONFIG` / `ARTEX_CONFIG` | 可执行文件同级 `artex-harness.json`（兼容旧 `config.json`） | 配置文件路径 |
+| `HARNESS_PG_DSN` | 空 | PostgreSQL DSN；**优先级高于 `artex-harness.json` 的 database**。上游的 `ARTEX_PG_DSN` 不再被读取（3.24），即使已设置也会被忽略并记一条启动警告 |
+| `HARNESS_CONFIG` | 可执行文件同级 `artex-harness.json`（兼容旧 `config.json`） | 配置文件路径 |
 | `ARTEX_SKILL_DIR` | 可执行文件同级 `skills/` | skill 根目录（每个子目录一个 skill，含 `SKILL.md`） |
 | `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY` | 空 | 无 UI 时的模型端点引导；留空则引擎 idle |
 | `ARTEX_LLM_STREAM` | 跟随供应商 | 强制流式 / 非流式 |
@@ -566,20 +566,20 @@ make            # 列出全部目标
 make build-all  # 控制台 + 后端
 make test       # 单元测试（不碰数据库）
 make vet        # 静态检查
-ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema，必须显式指名测试库
+HARNESS_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema，必须显式指名测试库
 ```
 
 | 项 | 现状 |
 |---|---|
 | 测试函数 | **819** 个，分布在 **191** 个 `_test.go` |
 | 无数据库的包 | `agent` `harness` `config` `guard` 等 **14 个包**全绿（`make test`） |
-| 需要数据库 | `db` / `server` 共 400+ 用例，**必须**显式 `ARTEX_TEST_DB`，且与 DSN 库名一致才执行 |
+| 需要数据库 | `db` / `server` 共 400+ 用例，**必须**显式 `HARNESS_TEST_DB`，且与 DSN 库名一致才执行 |
 | 离线自证 | `go run ./eval/cmd/harness-smoke`（假 provider，无网络无 key） |
 | 行为门禁 | `go run ./eval/cmd/harness-gate`：双跑对照，硬/软判据；改一句拒绝话术就会红 |
 | 前端 | `vite build` 确定性（两次构建 hash 一致），产物与源码同步由 CI 校验 |
 | CI 作业 | `gate` → `plan` → `signals` → `frontend` → `build` → `finalize` →（有 tag 时）`release` |
 
-**测试库守卫**：`ARTEX_TEST_DB` 与 `ARTEX_PG_DSN` 里的库名不一致时**先跳过、不重建 schema**——
+**测试库守卫**：`HARNESS_TEST_DB` 与 `HARNESS_PG_DSN` 里的库名不一致时**先跳过、不重建 schema**——
 这条是因为踩过"跑测试把开发库清了"的坑才加的。
 
 ## 排障：手动核对清单
@@ -594,7 +594,7 @@ ARTEX_TEST_DB=<库名> make test-db   # 需要 PG 的测试：会重建 schema�
 | 子代理一直「运行中」 | `GET /api/harness/workers/{id}` 返回的 `pending` | 通知未投递时留在队列（人工消息优先），恢复任务后会补投 |
 | 工作台 DIFF 显示「无基线」 | 任务是否 HARNESS 模式、是否新建 | 基线在首轮前建立；历史任务下一轮会自动补 |
 | 窄窗口右栏变成竖条 | 见 [docs/12 §四之二](docs/12-SPRINT4-WORKBENCH.md) | 已在 `b07fcc3` 前修复；升级后仍然出现请报 issue |
-| `make test-db` 拒绝执行 | `ARTEX_TEST_DB` 是否设置且与 DSN 一致 | 这是保护，不是 bug：它不让你误清开发库 |
+| `make test-db` 拒绝执行 | `HARNESS_TEST_DB` 是否设置且与 DSN 一致 | 这是保护，不是 bug：它不让你误清开发库 |
 | 构建时 OOM | 机器内存 | `make build-all` 会同时跑 npm + vite + go；低内存请分步：`cd web && npx vite build` 再 `go build` |
 
 ## 兼容性与已知上限
@@ -678,7 +678,7 @@ S4 会话栈收敛与能力注册表 → S5 控制台成为唯一界面 → Spri
 2. **相对上游的每一处代码改动都要记进 `PROVENANCE.md`**（这是许可证与可审计性要求）。
 3. **不新增"假控件"**：后端没有的能力，界面禁用并写明原因。
 
-提交信息用 `<type>(<scope>): <subject>`；测试库相关改动请确认在 `ARTEX_TEST_DB` 下通过。
+提交信息用 `<type>(<scope>): <subject>`；测试库相关改动请确认在 `HARNESS_TEST_DB` 下通过。
 
 ## 来源与许可
 

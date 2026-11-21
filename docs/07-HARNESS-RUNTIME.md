@@ -149,7 +149,7 @@ harnessLoop (server/harness_loop.go)
 
 ```bash
 # 1) 离线自证（无网络无 key）
-ARTEX_PG_DSN=... go run ./eval/cmd/harness-smoke
+HARNESS_PG_DSN=... go run ./eval/cmd/harness-smoke
 
 # 2) 就绪
 curl -s -H "Authorization: Bearer $TOK" localhost:8797/api/harness/ready | jq .

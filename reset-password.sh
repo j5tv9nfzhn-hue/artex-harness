@@ -8,7 +8,7 @@
 #
 # 两种部署：
 #   local （默认）—— 宿主机直接用 psql 连数据库。连接信息按以下优先级获取：
-#                    命令行参数 > --dsn/$ARTEX_PG_DSN > artex-harness.json 的 database.*
+#                    命令行参数 > --dsn/$HARNESS_PG_DSN > artex-harness.json 的 database.*
 #   docker        —— 通过 `docker compose exec`（或 `docker exec`）在 postgres
 #                    容器内执行 psql（compose 默认不对宿主暴露 5432，故走容器内）。
 #
@@ -112,7 +112,7 @@ apply_config_fields() {
 
 # ---- 自动判定模式 ---------------------------------------------------------
 if [[ -z "$MODE" ]]; then
-  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-artex-harness.json}" || -f "${CONFIG:-config.json}" ]]; then
+  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${HARNESS_PG_DSN:-}" || -f "${CONFIG:-artex-harness.json}" || -f "${CONFIG:-config.json}" ]]; then
     MODE="local"
   elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
     MODE="docker"
@@ -148,9 +148,9 @@ SQL
 
 # ---- 执行 -----------------------------------------------------------------
 if [[ "$MODE" == "local" ]]; then
-  # 连接信息优先级：命令行 > --dsn/$ARTEX_PG_DSN > artex-harness.json
+  # 连接信息优先级：命令行 > --dsn/$HARNESS_PG_DSN > artex-harness.json
   if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
-    [[ -n "${ARTEX_PG_DSN:-}" ]] && DSN="$ARTEX_PG_DSN"
+    [[ -n "${HARNESS_PG_DSN:-}" ]] && DSN="$HARNESS_PG_DSN"
   fi
   if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
     cfg="${CONFIG:-artex-harness.json}"
